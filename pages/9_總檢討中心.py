@@ -21,9 +21,17 @@ def _human_api_error(e: Exception) -> str:
 
 def self_check():
     card_open("🧪 資料庫連線狀態（Supabase）")
-    st.write("SUPABASE_URL：", (st.secrets.get("SUPABASE_URL", "")[:40] + "...") if st.secrets.get("SUPABASE_URL") else "（未設定）")
+    st.write(
+        "SUPABASE_URL：",
+        (st.secrets.get("SUPABASE_URL", "")[:40] + "...") if st.secrets.get("SUPABASE_URL") else "（未設定）",
+    )
     st.write("SUPABASE_BUCKET：", st.secrets.get("SUPABASE_BUCKET", "work-efficiency-exports"))
-    st.write("KEY 前綴：", (st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")[:12] + "...") if st.secrets.get("SUPABASE_SERVICE_ROLE_KEY") else "（未設定）")
+    st.write(
+        "KEY 前綴：",
+        (st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")[:12] + "...")
+        if st.secrets.get("SUPABASE_SERVICE_ROLE_KEY")
+        else "（未設定）",
+    )
     try:
         _ = sb().schema("public").table("audit_runs").select("id,created_at").limit(1).execute()
         st.success("✅ audit_runs 可讀取（連線/權限/表名 OK）")
@@ -34,15 +42,13 @@ def self_check():
     card_close()
 
 
-def _rate_light(x: float | None):
-    # 你可調整門檻：>=85% 綠、70-85 黃、<70 紅
+def _rate_light(x):
     if x is None:
         return ("—", "⚪")
     try:
         x = float(x)
     except Exception:
         return ("—", "⚪")
-
     if x >= 0.85:
         return (f"{x:.0%}", "🟢")
     if x >= 0.70:
@@ -56,13 +62,26 @@ def download_from_storage(object_path: str) -> bytes:
     return client.storage.from_(bucket).download(object_path)
 
 
+def remove_from_storage(object_path: str):
+    client = sb()
+    bucket = st.secrets.get("SUPABASE_BUCKET", "work-efficiency-exports")
+    # supabase-py 多數版本是 remove(list_of_paths)
+    client.storage.from_(bucket).remove([object_path])
+
+
+def delete_audit_run(run_id: str):
+    client = sb()
+    client.schema("public").table("audit_runs").delete().eq("id", run_id).execute()
+
+
 def main():
     inject_logistics_theme()
     set_page("營運稽核與復盤中心", icon="📊")
-    st.caption("歷次分析留存｜AM/PM 班 KPI｜達標燈號｜下載留存報表")
+    st.caption("歷次分析留存｜AM/PM 班 KPI｜達標燈號｜下載/刪除留存報表")
 
     self_check()
 
+    # 讀取
     rows = (
         sb()
         .schema("public")
@@ -76,7 +95,7 @@ def main():
     )
 
     if not rows:
-        st.info("目前 audit_runs 沒有任何留存紀錄。請先跑一次模組並確認「稽核留存狀態」成功。")
+        st.info("目前 audit_runs 沒有任何留存紀錄。")
         return
 
     df = pd.DataFrame(rows)
@@ -106,7 +125,7 @@ def main():
         st.warning("篩選後沒有資料。")
         return
 
-    # KPI trend (avg_eff)
+    # KPI trend
     card_open("📈 KPI 趨勢（AM 班 vs PM 班）")
     trend = []
     for _, r in df_f.iterrows():
@@ -117,7 +136,6 @@ def main():
                     "分析時間": r["created_at"],
                     "班別": label,
                     "平均效率": obj.get("avg_eff"),
-                    "達標率": obj.get("pass_rate"),
                 }
             )
     tdf = pd.DataFrame(trend).dropna(subset=["分析時間"])
@@ -157,31 +175,72 @@ def main():
     )
     card_close()
 
-    # Download selected
-    card_open("⬇️ 下載當次 KPI 報表（留存）")
+    # 操作區：下載 + 刪除
+    card_open("🧰 歷史紀錄操作（下載 / 刪除）")
+
     idxs = df_f.index.tolist()
     selected = st.selectbox(
-        "選擇紀錄",
+        "選擇一筆紀錄",
         options=idxs,
         format_func=lambda i: f"{df_f.loc[i,'created_at']}｜{df_f.loc[i,'app_name']}｜{df_f.loc[i,'source_filename']}",
     )
 
+    run_id = str(df_f.loc[selected].get("id"))
     obj_path = df_f.loc[selected].get("export_object_path")
-    if obj_path:
-        if st.button("準備下載"):
+    st.markdown(f"- **紀錄ID**：`{run_id}`")
+    st.markdown(f"- **留存報表**：`{obj_path}`" if obj_path else "- **留存報表**：無")
+
+    c1, c2 = st.columns(2)
+
+    # 下載
+    with c1:
+        if obj_path:
+            if st.button("⬇️ 準備下載 Excel", use_container_width=True):
+                try:
+                    content = download_from_storage(obj_path)
+                    st.download_button(
+                        "點此下載 Excel（留存）",
+                        data=content,
+                        file_name=str(obj_path).split("/")[-1],
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.error("下載失敗")
+                    st.code(repr(e))
+        else:
+            st.info("此筆沒有留存 Excel")
+
+    # 刪除
+    with c2:
+        st.warning("刪除為不可逆操作：會刪除 DB 紀錄，並嘗試刪除 Storage 報表。")
+        del_storage = st.checkbox("同步刪除留存報表（Storage）", value=True, disabled=not bool(obj_path))
+        confirmed = st.checkbox("我已確認要刪除這筆紀錄", value=False)
+        token = st.text_input("輸入 DELETE 以解鎖刪除", value="")
+
+        if st.button("🗑️ 刪除選定紀錄", type="primary", use_container_width=True, disabled=not (confirmed and token.strip().upper() == "DELETE")):
             try:
-                content = download_from_storage(obj_path)
-                st.download_button(
-                    "點此下載 Excel",
-                    data=content,
-                    file_name=obj_path.split("/")[-1],
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+                # 先刪 Storage（可選）
+                if del_storage and obj_path:
+                    try:
+                        remove_from_storage(obj_path)
+                    except Exception as e:
+                        # Storage 刪除失敗不阻止 DB 刪除，但會提示
+                        st.warning("Storage 報表刪除失敗，但會繼續刪除 DB 紀錄。")
+                        st.code(repr(e))
+
+                # 再刪 DB
+                delete_audit_run(run_id)
+
+                st.success("✅ 已刪除完成（DB 紀錄已移除；若勾選 Storage 也已嘗試刪除）")
+                st.info("請按瀏覽器重新整理或等待頁面自動重跑以更新列表。")
+            except APIError as e:
+                st.error("❌ 刪除 DB 紀錄失敗（APIError）")
+                st.code(_human_api_error(e))
             except Exception as e:
-                st.error("下載失敗")
+                st.error("❌ 刪除失敗")
                 st.code(repr(e))
-    else:
-        st.warning("此筆紀錄未留存 Excel（export_object_path 為空）。")
+
     card_close()
 
 
