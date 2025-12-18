@@ -24,11 +24,18 @@ def inject_logistics_theme():
   --blue: rgba(2, 132, 199, 1.00);
   --blueSoft: rgba(2, 132, 199, 0.12);
   --blueSoft2: rgba(2, 132, 199, 0.18);
+  --badBg: #FDE2E2;
+  --badText: #7F1D1D;
 }
 
 .stApp {
   color: var(--ink);
-  background: radial-gradient(1200px 700px at 20% 0%, rgba(2,132,199,0.10) 0%, #f5f8fc 55%, #ecf2fa 100%);
+  background: radial-gradient(
+    1200px 700px at 20% 0%,
+    rgba(2,132,199,0.10) 0%,
+    #f5f8fc 55%,
+    #ecf2fa 100%
+  );
 }
 
 header[data-testid="stHeader"] { background: transparent !important; }
@@ -127,6 +134,53 @@ def render_kpis(kpis: Sequence[KPI], cols: Optional[int] = None):
 
 
 # =========================================================
+# KPI Table Styling（低於效率 → 紅色）
+# =========================================================
+def style_kpi_below_target(
+    df: pd.DataFrame,
+    eff_col: str,
+    target: float,
+):
+    """
+    KPI 表顯示用：
+    - 效率 < target → 整列紅色
+    """
+    def _row_style(row):
+        try:
+            val = float(row.get(eff_col))
+        except Exception:
+            return [""] * len(row)
+
+        if val < target:
+            return [
+                "background-color: #FDE2E2; color: #7F1D1D; font-weight: 600"
+            ] * len(row)
+        return [""] * len(row)
+
+    return df.style.apply(_row_style, axis=1)
+
+
+def show_kpi_table(
+    df: pd.DataFrame,
+    *,
+    eff_col: str,
+    target: float,
+):
+    """
+    統一顯示 KPI 表（自動套用未達標紅色）
+    """
+    if df is None or df.empty:
+        st.info("目前沒有可顯示的資料")
+        return
+
+    st.dataframe(
+        style_kpi_below_target(df, eff_col=eff_col, target=target),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+# =========================================================
 # Charts
 # =========================================================
 def bar_topN(
@@ -168,7 +222,7 @@ def bar_topN(
 
 
 # =========================================================
-# Sidebar Controls（❗手動輸入時間）
+# Sidebar Controls（手動輸入時間）
 # =========================================================
 @dataclass
 class ExcludeWindow:
@@ -194,7 +248,6 @@ def sidebar_controls(
     st.sidebar.markdown("### ⚙️ 計算條件設定")
     st.sidebar.markdown('<div class="_gt_hint">本區設定僅影響本次分析</div>', unsafe_allow_html=True)
 
-    # Top N
     top_n = st.sidebar.number_input(
         "效率排行顯示人數（Top N）",
         min_value=5,
@@ -204,7 +257,6 @@ def sidebar_controls(
     )
     result["top_n"] = int(top_n)
 
-    # 排除區間（手動輸入）
     if enable_exclude_windows:
         st.sidebar.markdown("---")
         st.sidebar.markdown("### ⛔ 排除區間（非作業時段）")
@@ -233,17 +285,12 @@ def sidebar_controls(
                         st.error("❌ 開始時間需早於結束時間")
                     else:
                         st.session_state[state_key].append(
-                            ExcludeWindow(
-                                start=start_str,
-                                end=end_str,
-                                data_entry=data_entry.strip(),
-                            )
+                            ExcludeWindow(start=start_str, end=end_str, data_entry=data_entry.strip())
                         )
                         st.success(f"已新增：{start_str} - {end_str}")
                 except Exception:
                     st.error("❌ 時間格式錯誤，請使用 HH:MM")
 
-        # 顯示與刪除
         if st.session_state[state_key]:
             st.sidebar.markdown("#### 已設定排除區間")
             for i, w in enumerate(list(st.session_state[state_key])):
