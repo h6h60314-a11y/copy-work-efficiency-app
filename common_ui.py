@@ -188,6 +188,9 @@ def badge(text: str):
 
 
 def card_open(title: str, right_badge: Optional[str] = None):
+    """
+    有標題卡片（會產生 <h3>）
+    """
     if right_badge:
         st.markdown(
             f'<div class="_gt_card">'
@@ -199,6 +202,13 @@ def card_open(title: str, right_badge: Optional[str] = None):
         )
     else:
         st.markdown(f'<div class="_gt_card"><h3>{title}</h3>', unsafe_allow_html=True)
+
+
+def card_open_plain():
+    """
+    無標題卡片（不會產生 <h3>，用於「按鈕=文字」避免分段）
+    """
+    st.markdown('<div class="_gt_card">', unsafe_allow_html=True)
 
 
 def card_close():
@@ -455,9 +465,8 @@ def download_excel_button(
     label: str = "⬇️ 匯出 KPI 報表",
 ):
     """
-    你要的效果：畫面上「只看到一行文字」，而且那一行本身就是下載按鈕。
-    用法（頁面上直接呼叫，不要再 card_open）：
-        download_excel_button(xlsx_bytes, xlsx_name, "⬇️ 匯出 KPI 報表")
+    你要的效果：畫面只看到「一行」，而且那一行就是按鈕。
+    用法：頁面上直接呼叫（不要再 card_open）
     """
     st.download_button(
         label=label,
@@ -474,9 +483,9 @@ def download_excel_card(
     label: str = "⬇️ 匯出 KPI 報表",
 ):
     """
-    保留舊函式：卡片外框 + 內部按鈕（卡片無標題，避免「標題+按鈕」變兩段）
+    卡片外框 + 內部按鈕（✅ 無標題，不會分成兩段）
     """
-    card_open("")
+    card_open_plain()
     download_excel_button(xlsx_bytes=xlsx_bytes, filename=filename, label=label)
     card_close()
 
