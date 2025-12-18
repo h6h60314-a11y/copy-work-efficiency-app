@@ -1,13 +1,14 @@
 import streamlit as st
+from common_ui import inject_purple_theme
 
-# ===== 頁面基本設定（影響左側選單名稱）=====
 st.set_page_config(
     page_title="工作效率平台",
     page_icon="🏭",
-    layout="wide"
+    layout="wide",
 )
 
-# ===== 首頁標題 =====
+inject_purple_theme()
+
 st.title("🏭 工作效率平台")
 
 st.markdown(
