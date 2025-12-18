@@ -369,7 +369,7 @@ def main():
 
     with st.sidebar:
         st.header("⚙️ 計算條件設定")
-        operator = st.text_input("分析執行人（Operator）")
+        # ✅ 已取消：分析執行人（Operator）
         top_n = st.number_input("效率排行顯示人數（Top N）", 10, 100, 30, step=5)
         st.info("提醒：上傳 .xls 需 requirements.txt 安裝 xlrd==2.0.1")
 
@@ -572,7 +572,7 @@ def main():
         )
         payload = {
             "app_name": "上架產能分析（Putaway KPI）",
-            "operator": operator or None,
+            # ✅ operator 已取消：不再寫入
             "source_filename": uploaded.name,
             "source_sha256": sha256_bytes(content),
             "params": {
