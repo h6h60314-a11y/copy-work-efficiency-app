@@ -9,55 +9,52 @@ from common_ui import (
     KPI,
     render_kpis,
     bar_topN,
-    table_block,
     download_excel,
     card_open,
     card_close,
+    sidebar_controls,  # ✅ 新增：統一左側設定（不含 Operator）
 )
 
 from qc_core import run_qc_efficiency
 from audit_store import sha256_bytes, upload_export_bytes, insert_audit_run
 
 
+def _adapt_exclude_windows_to_skip_rules(exclude_windows):
+    """
+    將 common_ui.sidebar_controls() 的 exclude_windows 格式：
+      [{"start":"HH:MM","end":"HH:MM","data_entry":""}, ...]
+    轉回 qc_core.run_qc_efficiency 目前頁面原本使用的 skip_rules 格式：
+      [{"user":"", "t_start": datetime.time, "t_end": datetime.time}, ...]
+    """
+    skip_rules = []
+    for w in exclude_windows or []:
+        try:
+            s = pd.to_datetime(w.get("start", "")).time()
+            e = pd.to_datetime(w.get("end", "")).time()
+        except Exception:
+            # 若格式異常，跳過
+            continue
+
+        skip_rules.append(
+            {
+                "user": (w.get("data_entry") or "").strip(),
+                "t_start": s,
+                "t_end": e,
+            }
+        )
+    return skip_rules
+
+
 def main():
     inject_logistics_theme()
-    set_page("驗收作業效能（KPI）", icon="✅")
-    st.caption("驗收作業｜人時效率｜AM / PM 班別｜KPI 達標分析")
+    set_page("驗收作業效能（KPI）", icon="✅", subtitle="驗收作業｜人時效率｜AM / PM 班別｜KPI 達標分析")
 
     # ======================
-    # Sidebar：計算條件設定
+    # Sidebar：計算條件設定（✅ 已取消 Operator）
     # ======================
-    with st.sidebar:
-        st.header("⚙️ 計算條件設定")
-
-        operator = st.text_input("分析執行人（Operator）")
-        top_n = st.number_input("效率排行顯示人數（Top N）", 10, 100, 30, step=5)
-
-        st.markdown("#### 排除區間（非作業時段）")
-        st.caption("用於排除支援、離站、停機、非驗收作業時間")
-
-        if "skip_rules" not in st.session_state:
-            st.session_state.skip_rules = []
-
-        user = st.text_input("資料登錄人（Data Entry，可留空）")
-        t_start = st.time_input("開始時間")
-        t_end = st.time_input("結束時間")
-
-        if st.button("➕ 新增排除區間"):
-            st.session_state.skip_rules.append(
-                {
-                    "user": user.strip(),
-                    "t_start": t_start,
-                    "t_end": t_end,
-                }
-            )
-
-        if st.session_state.skip_rules:
-            st.dataframe(
-                pd.DataFrame(st.session_state.skip_rules),
-                use_container_width=True,
-                hide_index=True,
-            )
+    controls = sidebar_controls(default_top_n=30, enable_exclude_windows=True, state_key_prefix="qc")
+    top_n = int(controls["top_n"])
+    skip_rules = _adapt_exclude_windows_to_skip_rules(controls.get("exclude_windows", []))
 
     # ======================
     # 上傳資料
@@ -82,7 +79,7 @@ def main():
         result = run_qc_efficiency(
             uploaded.getvalue(),
             uploaded.name,
-            st.session_state.skip_rules,
+            skip_rules,  # ✅ 使用轉換後的 skip_rules
         )
 
     df = result.get("ampm_df", pd.DataFrame())
@@ -94,6 +91,7 @@ def main():
         return
 
     # 顯示層轉換為 AM / PM
+    df = df.copy()
     df["班別"] = df["時段"].replace({"上午": "AM 班", "下午": "PM 班"})
     am_df = df[df["班別"] == "AM 班"].copy()
     pm_df = df[df["班別"] == "PM 班"].copy()
@@ -103,31 +101,34 @@ def main():
     # ======================
     col_l, col_r = st.columns(2)
 
-    def render_shift(title, sdf):
+    def render_shift(title, sdf: pd.DataFrame):
         card_open(f"{title} KPI")
-        render_kpis(
-            [
-                KPI("人數", f"{len(sdf):,}"),
-                KPI("總驗收筆數", f"{sdf['筆數'].sum():,}"),
-                KPI("總工時", f"{sdf['總工時'].sum():.2f}"),
-                KPI("平均效率", f"{sdf['效率'].mean():.2f}"),
-                KPI(
-                    "達標率",
-                    f"{(sdf['效率'] >= target).mean():.0%}",
-                ),
-            ]
-        )
+        if sdf is None or sdf.empty:
+            st.info("本班別無資料")
+        else:
+            render_kpis(
+                [
+                    KPI("人數", f"{len(sdf):,}"),
+                    KPI("總驗收筆數", f"{sdf['筆數'].sum():,}"),
+                    KPI("總工時", f"{sdf['總工時'].sum():.2f}"),
+                    KPI("平均效率", f"{sdf['效率'].mean():.2f}"),
+                    KPI("達標率", f"{(sdf['效率'] >= target).mean():.0%}"),
+                ]
+            )
         card_close()
 
         card_open(f"{title} 效率排行（Top {top_n}）")
-        bar_topN(
-            sdf,
-            x_col="姓名",
-            y_col="效率",
-            hover_cols=["筆數", "總工時"],
-            top_n=top_n,
-            target=target,
-        )
+        if sdf is None or sdf.empty:
+            st.info("本班別無排行資料")
+        else:
+            bar_topN(
+                sdf,
+                x_col="姓名",
+                y_col="效率",
+                hover_cols=["筆數", "總工時"],
+                top_n=top_n,
+                target=target,
+            )
         card_close()
 
     with col_l:
@@ -160,16 +161,16 @@ def main():
 
         payload = {
             "app_name": "驗收作業效能（KPI）",
-            "operator": operator or None,
+            # ✅ operator 已取消：不再寫入
             "source_filename": uploaded.name,
             "source_sha256": sha256_bytes(uploaded.getvalue()),
             "params": {
                 "top_n": top_n,
                 "target_eff": target,
-                "skip_rules": st.session_state.skip_rules,
+                "skip_rules": skip_rules,  # ✅ 留存本次排除區間（轉換後格式）
             },
-            "kpi_am": {"avg_eff": am_df["效率"].mean(), "people": len(am_df)},
-            "kpi_pm": {"avg_eff": pm_df["效率"].mean(), "people": len(pm_df)},
+            "kpi_am": {"avg_eff": float(am_df["效率"].mean()) if not am_df.empty else None, "people": int(len(am_df))},
+            "kpi_pm": {"avg_eff": float(pm_df["效率"].mean()) if not pm_df.empty else None, "people": int(len(pm_df))},
             "export_object_path": export_path,
         }
 
