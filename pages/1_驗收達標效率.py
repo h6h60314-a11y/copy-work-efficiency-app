@@ -15,7 +15,6 @@ from qc_core import run_qc_efficiency
 
 
 def render_params():
-    """Sidebar 參數：排除規則 + TopN"""
     if "skip_rules" not in st.session_state:
         st.session_state.skip_rules = []
 
@@ -38,7 +37,7 @@ def render_params():
     if st.session_state.skip_rules:
         st.dataframe(pd.DataFrame(st.session_state.skip_rules), use_container_width=True, hide_index=True)
 
-    top_n = st.number_input("Top N", min_value=10, max_value=100, value=30, step=10)
+    top_n = st.number_input("排行顯示人數", min_value=10, max_value=100, value=30, step=10)
     return {"skip_rules": st.session_state.skip_rules, "top_n": int(top_n)}
 
 
@@ -63,12 +62,12 @@ def _fmt_int(x):
 def main():
     set_page("驗收達標效率", icon="✅")
 
-    # ===== Sidebar：只放參數（不放上傳）=====
+    # Sidebar：參數
     with st.sidebar:
         st.header("⚙️ 參數設定")
         params = render_params()
 
-    # ===== 主畫面中央：上傳檔案 + 開始計算 =====
+    # 中央：上傳
     st.markdown("## 📤 上傳資料檔案")
     st.caption("請上傳驗收資料（Excel / CSV）。上傳後按『開始計算』即可產出 KPI、圖表與下載報表。")
 
@@ -78,47 +77,28 @@ def main():
         label_visibility="collapsed",
     )
 
-    run_clicked = st.button(
-        "🚀 開始計算",
-        type="primary",
-        disabled=(uploaded is None),
-    )
+    run_clicked = st.button("🚀 開始計算", type="primary", disabled=(uploaded is None))
 
     if not run_clicked:
         st.info("請先上傳檔案，再點『開始計算』。")
         return
 
-    # ===== 計算 =====
     with st.spinner("計算中..."):
         result = run_qc_efficiency(uploaded.getvalue(), uploaded.name, params["skip_rules"])
 
     full_df = result.get("full_df", pd.DataFrame())
     ampm_df = result.get("ampm_df", pd.DataFrame())
     idle_df = result.get("idle_df", pd.DataFrame())
-
     target = float(result.get("target_eff", 20.0))
 
-    # ===== KPI（穩定容錯版，不依賴 numpy）=====
     people = len(full_df) if isinstance(full_df, pd.DataFrame) else 0
-
-    total_cnt = (
-        full_df["筆數"].sum()
-        if isinstance(full_df, pd.DataFrame) and "筆數" in full_df.columns
-        else None
-    )
-
-    total_hours = (
-        full_df["總工時"].sum()
-        if isinstance(full_df, pd.DataFrame) and "總工時" in full_df.columns
-        else None
-    )
-
+    total_cnt = full_df["筆數"].sum() if isinstance(full_df, pd.DataFrame) and "筆數" in full_df.columns else None
+    total_hours = full_df["總工時"].sum() if isinstance(full_df, pd.DataFrame) and "總工時" in full_df.columns else None
     avg_eff = (
         full_df["效率"].mean()
         if isinstance(full_df, pd.DataFrame) and "效率" in full_df.columns and len(full_df) > 0
         else None
     )
-
     pass_rate = None
     if isinstance(full_df, pd.DataFrame) and "效率" in full_df.columns and len(full_df) > 0:
         pass_rate = f"{(full_df['效率'] >= target).mean():.0%}"
@@ -126,18 +106,16 @@ def main():
     st.divider()
     render_kpis(
         [
-            KPI("人數", _fmt_int(people)),
-            KPI("總筆數", _fmt_int(total_cnt)),
-            KPI("總工時", _fmt_num(total_hours)),
-            KPI("平均效率", _fmt_num(avg_eff)),
-            KPI("達標率", pass_rate or "—"),
+            KPI("人數", _fmt_int(people), variant="purple"),
+            KPI("總筆數", _fmt_int(total_cnt), variant="blue"),
+            KPI("總工時", _fmt_num(total_hours), variant="green"),
+            KPI("平均效率", _fmt_num(avg_eff), variant="orange"),
+            KPI("達標率", pass_rate or "—", variant="gray"),
         ]
     )
     st.divider()
 
-    # ===== 圖表：左效率 TopN / 右空窗 TopN（若無則 AMPM）=====
     left, right = st.columns([1.2, 1])
-
     with left:
         if isinstance(full_df, pd.DataFrame) and not full_df.empty:
             x_col = "姓名" if "姓名" in full_df.columns else full_df.columns[0]
@@ -152,14 +130,10 @@ def main():
                 title="全日效率排行（Top N）",
             )
         else:
-            st.info("full_df 無資料（可能欄位不符或被排除規則排掉）。")
+            st.info("彙總資料為空，請確認檔案內容是否正確。")
 
     with right:
-        if (
-            isinstance(full_df, pd.DataFrame)
-            and not full_df.empty
-            and "空窗總分鐘" in full_df.columns
-        ):
+        if isinstance(full_df, pd.DataFrame) and not full_df.empty and "空窗總分鐘" in full_df.columns:
             x_col2 = "姓名" if "姓名" in full_df.columns else full_df.columns[0]
             bar_topN(
                 full_df.sort_values("空窗總分鐘", ascending=False),
@@ -167,7 +141,7 @@ def main():
                 y_col="空窗總分鐘",
                 hover_cols=[c for c in ["效率", "空窗筆數"] if c in full_df.columns],
                 top_n=params["top_n"],
-                target=-1.0,  # 讓顏色不影響解讀
+                target=-1.0,
                 title="空窗總分鐘排行（Top N）",
             )
         else:
@@ -175,7 +149,6 @@ def main():
 
     st.divider()
 
-    # ===== 表格：彙總（展開）+ 空窗明細（收合）=====
     table_block(
         summary_title="彙總表",
         summary_df=full_df if isinstance(full_df, pd.DataFrame) else pd.DataFrame(),
@@ -184,7 +157,6 @@ def main():
         detail_expanded=False,
     )
 
-    # ===== 下載 =====
     if result.get("xlsx_bytes"):
         download_excel(result["xlsx_bytes"], filename=result.get("xlsx_name", "驗收達標_含空窗_AMPM.xlsx"))
 
