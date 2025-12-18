@@ -1,164 +1,134 @@
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 import pandas as pd
 import streamlit as st
 
-try:
-    import plotly.express as px
-except Exception:
-    px = None
 
-
-# ========= UI Data =========
-@dataclass
-class KPI:
-    label: str
-    value: str
-    help: str = ""
-    variant: str = "purple"  # purple/blue/cyan/teal/gray
-
-
-# ========= Theme =========
-def inject_purple_theme():
+# =========================================================
+# Theme / CSS
+# =========================================================
+def inject_logistics_theme():
     """
-    Purple + Blue Tech SaaS theme.
-    NOTE: In navigation mode, DO NOT call st.set_page_config here (app.py owns config).
+    Logistics / Warehouse dashboard style:
+    - Industrial blue + steel gray
+    - Card layout
+    - Reduce "top white bar" feeling
     """
     st.markdown(
         """
 <style>
-/* ===== Purple-Blue Tech Dashboard Theme ===== */
+/* ---------- Base ---------- */
 :root{
-  --shadow: 0 14px 40px rgba(2, 6, 23, .10);
-  --shadow2: 0 10px 24px rgba(2, 6, 23, .08);
+  --ink: rgba(15, 23, 42, 0.92);          /* slate-900 */
+  --muted: rgba(15, 23, 42, 0.60);
+  --line: rgba(15, 23, 42, 0.10);
+  --card: rgba(255,255,255,0.88);
+  --card2: rgba(255,255,255,0.70);
+  --blue: rgba(2, 132, 199, 1.00);        /* sky-600 */
+  --blueSoft: rgba(2, 132, 199, 0.12);
+  --blueSoft2: rgba(2, 132, 199, 0.18);
+  --ok: rgba(22, 163, 74, 1.0);
+  --warn: rgba(245, 158, 11, 1.0);
+  --bad: rgba(220, 38, 38, 1.0);
 }
 
-/* App background */
-.stApp{
-  background:
-    radial-gradient(1200px 700px at 20% -10%, rgba(142,45,226,.18), transparent 55%),
-    radial-gradient(1100px 700px at 80% 0%, rgba(54,209,220,.16), transparent 50%),
-    #F5F7FB;
+.stApp {
+  color: var(--ink);
+  background: radial-gradient(1200px 700px at 20% 0%, rgba(2,132,199,0.10) 0%, rgba(245,248,252,1) 55%, rgba(236,242,250,1) 100%);
 }
 
-/* Content width like SaaS */
-.block-container{
-  padding-top: 0.65rem;     /* ⬅️ 減少頂部空白 */
-  padding-bottom: 2.4rem;
-  max-width: 1240px;
-}
+/* remove top bar feeling */
+header[data-testid="stHeader"] { background: transparent !important; }
+div[data-testid="stToolbar"] { right: 0.8rem; }
+div[data-testid="stDecoration"] { display: none; }
 
-/* Sidebar: glassy white */
+/* ---------- Sidebar ---------- */
 section[data-testid="stSidebar"]{
-  background: rgba(255,255,255,.82);
-  backdrop-filter: blur(12px);
-  border-right: 1px solid rgba(15,23,42,0.06);
+  background: rgba(248,250,252,1);
+  border-right: 1px solid var(--line);
 }
-section[data-testid="stSidebar"] .stMarkdown,
-section[data-testid="stSidebar"] label{
-  color: #0F172A;
+section[data-testid="stSidebar"] *{
+  color: var(--ink);
 }
 
-/* ===== Remove top white header block ===== */
-/* 移除 h1 上下多餘留白 */
-h1{
-  margin-top: 0.15rem !important;
-  margin-bottom: 0.75rem !important;
-}
-/* 讓頂部第一塊透明，不要看起來像白框 */
-.block-container > div:first-child{
-  background: transparent !important;
-  padding-top: 0.2rem !important;
-}
-/* 避免 markdown 區塊自己帶底色造成白帶 */
-.stMarkdown{
-  background: transparent !important;
+/* ---------- Container padding ---------- */
+.block-container{
+  padding-top: 1.2rem;
+  padding-bottom: 2.0rem;
 }
 
-/* Card container */
-.gt-card{
-  background: rgba(255,255,255,.92);
-  border: 1px solid rgba(15,23,42,0.06);
+/* ---------- Buttons ---------- */
+.stButton > button{
+  border-radius: 14px;
+  border: 1px solid rgba(2, 132, 199, 0.30);
+  background: var(--blueSoft);
+  color: var(--ink);
+  padding: 0.55rem 0.9rem;
+  font-weight: 600;
+}
+.stButton > button:hover{
+  border: 1px solid rgba(2, 132, 199, 0.45);
+  background: var(--blueSoft2);
+}
+
+/* ---------- File uploader ---------- */
+div[data-testid="stFileUploaderDropzone"]{
   border-radius: 18px;
-  padding: 18px 18px;
-  box-shadow: var(--shadow2);
+  border: 1px dashed rgba(15, 23, 42, 0.22);
+  background: rgba(255,255,255,0.80);
 }
 
-/* Section title inside card */
-.gt-card .gt-card-title{
-  font-weight: 900;
-  font-size: 1.02rem;
-  margin: 0 0 12px 0;
-  color: #0F172A;
+/* ---------- Card blocks ---------- */
+._gt_card{
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 20px;
+  padding: 16px 16px 6px 16px;
+  box-shadow: 0 10px 30px rgba(15,23,42,0.06);
+  margin-bottom: 14px;
+}
+._gt_card h3{
+  margin: 0 0 10px 0;
+  letter-spacing: .2px;
 }
 
-/* KPI gradient cards */
-.gt-kpi{
+/* ---------- KPI metric cards ---------- */
+[data-testid="stMetric"]{
+  background: rgba(255,255,255,0.90);
+  border: 1px solid var(--line);
   border-radius: 18px;
-  padding: 18px 18px;
-  color: #fff;
-  border: 1px solid rgba(255,255,255,0.18);
-  box-shadow: var(--shadow);
-  position: relative;
+  padding: 14px 14px 10px 14px;
+}
+[data-testid="stMetricLabel"]{
+  color: var(--muted) !important;
+  font-weight: 600;
+}
+[data-testid="stMetricValue"]{
+  font-weight: 800;
+}
+
+/* ---------- Tables ---------- */
+div[data-testid="stDataFrame"]{
+  border-radius: 16px;
   overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--card2);
 }
-.gt-kpi:after{
-  content:"";
-  position:absolute;
-  inset:-40px -60px auto auto;
-  width:160px;height:160px;
-  background: rgba(255,255,255,.16);
-  transform: rotate(25deg);
+
+/* ---------- Small helper ---------- */
+._gt_badge{
+  display: inline-block;
+  padding: 2px 10px;
   border-radius: 999px;
-}
-.gt-kpi .k{ font-size: .90rem; opacity:.92; margin:0 0 8px 0; }
-.gt-kpi .v{ font-size: 1.65rem; font-weight: 950; margin:0; line-height: 1.08; }
-.gt-kpi .h{ font-size: .82rem; opacity:.88; margin-top: 10px; }
-
-.gt-purple{ background: linear-gradient(135deg,#7C3AED,#4F46E5); } /* purple -> indigo */
-.gt-blue  { background: linear-gradient(135deg,#2563EB,#06B6D4); } /* blue -> cyan */
-.gt-cyan  { background: linear-gradient(135deg,#06B6D4,#22C55E); } /* cyan -> green */
-.gt-teal  { background: linear-gradient(135deg,#14B8A6,#3B82F6); } /* teal -> blue */
-.gt-gray  { background: linear-gradient(135deg,#64748B,#334155); } /* slate */
-
-/* Buttons: pill, tech */
-.stButton>button, .stDownloadButton>button{
-  border-radius: 14px !important;
-  padding: .62rem 1.05rem !important;
-  font-weight: 900 !important;
-  border: 1px solid rgba(15,23,42,0.10) !important;
-  box-shadow: 0 10px 22px rgba(2, 6, 23, .08) !important;
-}
-.stButton>button:hover, .stDownloadButton>button:hover{
-  transform: translateY(-1px);
-}
-
-/* File uploader better */
-[data-testid="stFileUploader"]{
-  background: rgba(255,255,255,.75);
-  border: 1px dashed rgba(79,70,229,.30);
-  border-radius: 16px;
-  padding: 10px 12px;
-}
-
-/* DataFrame: card-like */
-[data-testid="stDataFrame"]{
-  background: rgba(255,255,255,.92);
-  border-radius: 16px;
-  border: 1px solid rgba(15,23,42,0.06);
-  overflow: hidden;
-}
-
-/* Plotly card wrapper */
-[data-testid="stPlotlyChart"] > div{
-  background: rgba(255,255,255,.92);
-  border-radius: 16px;
-  border: 1px solid rgba(15,23,42,0.06);
-  box-shadow: var(--shadow2);
-  padding: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.85);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 </style>
 """,
@@ -166,149 +136,143 @@ h1{
     )
 
 
-# ========= Page Helpers =========
-def set_page(title: str, icon: str = "📊"):
-    """In navigation mode, DO NOT call st.set_page_config in pages. Only inject theme + title."""
-    inject_purple_theme()
-    st.markdown(f"# {icon} {title}")
+# Backward compatibility (you曾經用 inject_purple_theme)
+def inject_purple_theme():
+    inject_logistics_theme()
 
 
-def card_open(title: Optional[str] = None):
-    st.markdown('<div class="gt-card">', unsafe_allow_html=True)
-    if title:
-        st.markdown(f'<div class="gt-card-title">{title}</div>', unsafe_allow_html=True)
+# =========================================================
+# Page helpers
+# =========================================================
+def set_page(title: str, icon: str = "🏭"):
+    """
+    Consistent page header/title block.
+    Note: st.set_page_config should be in app.py or each page's top-level.
+    """
+    inject_logistics_theme()
+    st.markdown(f"## {icon} {title}")
+
+
+def card_open(title: str):
+    st.markdown(f'<div class="_gt_card"><h3>{title}</h3>', unsafe_allow_html=True)
 
 
 def card_close():
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def kpi_card(label: str, value: str, help_text: str = "", variant: str = "purple"):
-    v = (variant or "purple").strip().lower()
-    if v not in {"purple", "blue", "cyan", "teal", "gray"}:
-        v = "purple"
-
-    h = f'<div class="h">{help_text}</div>' if help_text else ""
-    st.markdown(
-        f"""
-<div class="gt-kpi gt-{v}">
-  <div class="k">{label}</div>
-  <div class="v">{value}</div>
-  {h}
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+# =========================================================
+# KPI / Metrics
+# =========================================================
+@dataclass
+class KPI:
+    label: str
+    value: str
+    delta: Optional[str] = None
+    variant: str = "blue"  # reserved for future
 
 
-def render_kpis(kpis: List[KPI]):
+def render_kpis(kpis: Sequence[KPI], cols: Optional[int] = None):
     if not kpis:
         return
-    cols = st.columns(len(kpis))
-    for c, k in zip(cols, kpis):
-        with c:
-            kpi_card(k.label, k.value, k.help, k.variant)
+    n = cols or min(5, len(kpis))
+    columns = st.columns(n)
+    for i, k in enumerate(kpis):
+        with columns[i % n]:
+            if k.delta is None:
+                st.metric(label=k.label, value=k.value)
+            else:
+                st.metric(label=k.label, value=k.value, delta=k.delta)
 
 
-# ========= Charts / Tables =========
-def _safe_float(x):
-    try:
-        if x is None or (isinstance(x, float) and pd.isna(x)):
-            return None
-        return float(x)
-    except Exception:
-        return None
-
-
+# =========================================================
+# Charts (no plotly dependency)
+# =========================================================
 def bar_topN(
     df: pd.DataFrame,
-    *,
     x_col: str,
     y_col: str,
-    hover_cols: List[str],
+    hover_cols: Optional[List[str]] = None,
     top_n: int = 30,
-    target: float = 20.0,
-    title: str = "排行（Top N）",
+    target: Optional[float] = None,
+    title: str = "",
 ):
-    if df is None or df.empty or y_col not in df.columns:
-        st.info("沒有可顯示的資料。")
+    """
+    Render a Top N bar chart using Altair (built-in friendly).
+    """
+    if df is None or df.empty:
+        st.info("無資料可視覺化")
         return
 
-    view = df.copy()
-    view = view.sort_values(y_col, ascending=False).head(int(top_n))
+    data = df.copy()
+    data = data[[c for c in [x_col, y_col] + (hover_cols or []) if c in data.columns]].copy()
+    data[y_col] = pd.to_numeric(data[y_col], errors="coerce")
+    data = data.dropna(subset=[y_col])
 
-    if px is None:
-        st.warning("plotly 未安裝：改用表格呈現（如需圖表請在 requirements.txt 加上 plotly）。")
-        st.dataframe(view[[x_col, y_col] + [c for c in hover_cols if c in view.columns]], use_container_width=True)
-        return
+    data = data.sort_values(y_col, ascending=False).head(int(top_n))
 
-    def status(v):
-        fv = _safe_float(v)
-        if fv is None:
-            return "—"
-        return "達標" if fv >= float(target) else "未達標"
+    # Try to use Altair if available; fallback to st.bar_chart
+    try:
+        import altair as alt  # type: ignore
 
-    view["_達標"] = view[y_col].apply(status)
+        base = alt.Chart(data).mark_bar().encode(
+            x=alt.X(f"{y_col}:Q", title=y_col),
+            y=alt.Y(f"{x_col}:N", sort="-x", title=""),
+            tooltip=[c for c in [x_col, y_col] + (hover_cols or []) if c in data.columns],
+        ).properties(height=min(560, 28 * max(6, len(data))))
 
-    fig = px.bar(
-        view,
-        x=x_col,
-        y=y_col,
-        color="_達標",
-        hover_data=[c for c in hover_cols if c in view.columns],
-    )
-    fig.update_layout(
-        title=None,
-        margin=dict(l=10, r=10, t=10, b=10),
-        legend_title_text="",
-        height=420,
-    )
-    st.plotly_chart(fig, use_container_width=True)
+        layers = [base]
 
+        if target is not None:
+            rule = alt.Chart(pd.DataFrame({"target": [float(target)]})).mark_rule(strokeDash=[6, 4]).encode(
+                x="target:Q"
+            )
+            layers.append(rule)
 
-def pivot_am_pm(
-    ampm_df: pd.DataFrame,
-    *,
-    index_col: str = "姓名",
-    segment_col: str = "時段",
-    value_col: str = "效率",
-    title: str = "上午 vs 下午（平均）",
-):
-    if ampm_df is None or ampm_df.empty:
-        st.info("沒有 AM/PM 資料。")
-        return
+        chart = alt.layer(*layers)
+        if title:
+            st.caption(title)
 
-    need = {index_col, segment_col, value_col}
-    if not need.issubset(set(ampm_df.columns)):
-        st.info("AM/PM 欄位不足，無法製作對照。")
-        return
+        st.altair_chart(chart, use_container_width=True)
 
-    pivot = ampm_df.pivot_table(index=index_col, columns=segment_col, values=value_col, aggfunc="mean").reset_index()
-    st.dataframe(pivot, use_container_width=True)
+    except Exception:
+        # fallback
+        st.bar_chart(data.set_index(x_col)[y_col])
 
 
+# =========================================================
+# Table blocks
+# =========================================================
 def table_block(
-    *,
     summary_title: str,
     summary_df: pd.DataFrame,
-    detail_title: str,
-    detail_df: pd.DataFrame,
+    detail_title: str = "",
+    detail_df: Optional[pd.DataFrame] = None,
     detail_expanded: bool = False,
 ):
     card_open(summary_title)
-    st.dataframe(summary_df, use_container_width=True)
+    if summary_df is None or summary_df.empty:
+        st.info("目前沒有可顯示的資料")
+    else:
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
     card_close()
 
-    with st.expander(detail_title, expanded=detail_expanded):
-        card_open()
-        st.dataframe(detail_df, use_container_width=True)
-        card_close()
+    if detail_title:
+        with st.expander(detail_title, expanded=detail_expanded):
+            if detail_df is None or detail_df.empty:
+                st.info("目前沒有明細資料")
+            else:
+                st.dataframe(detail_df, use_container_width=True, hide_index=True)
 
 
-def download_excel(xlsx_bytes: bytes, filename: str):
+# =========================================================
+# Downloads
+# =========================================================
+def download_excel(xlsx_bytes: bytes, filename: str = "KPI報表.xlsx"):
     st.download_button(
-        "⬇️ 下載 Excel 結果",
+        label="📥 匯出KPI報表（Excel）",
         data=xlsx_bytes,
         file_name=filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=False,
     )
