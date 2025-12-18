@@ -65,7 +65,6 @@ def download_from_storage(object_path: str) -> bytes:
 def remove_from_storage(object_path: str):
     client = sb()
     bucket = st.secrets.get("SUPABASE_BUCKET", "work-efficiency-exports")
-    # supabase-py 多數版本是 remove(list_of_paths)
     client.storage.from_(bucket).remove([object_path])
 
 
@@ -77,7 +76,7 @@ def delete_audit_run(run_id: str):
 def main():
     inject_logistics_theme()
     set_page("營運稽核與復盤中心", icon="📊")
-    st.caption("歷次分析留存｜AM/PM 班 KPI｜達標燈號｜下載/刪除留存報表")
+    st.caption("歷次分析留存｜AM/PM 班 KPI｜達標燈號｜下載/刪除留存報表（需密碼）")
 
     self_check()
 
@@ -131,13 +130,7 @@ def main():
     for _, r in df_f.iterrows():
         for k, label in [("kpi_am", "AM 班"), ("kpi_pm", "PM 班")]:
             obj = r.get(k) or {}
-            trend.append(
-                {
-                    "分析時間": r["created_at"],
-                    "班別": label,
-                    "平均效率": obj.get("avg_eff"),
-                }
-            )
+            trend.append({"分析時間": r["created_at"], "班別": label, "平均效率": obj.get("avg_eff")})
     tdf = pd.DataFrame(trend).dropna(subset=["分析時間"])
     st.line_chart(tdf, x="分析時間", y="平均效率", color="班別")
     card_close()
@@ -175,7 +168,7 @@ def main():
     )
     card_close()
 
-    # 操作區：下載 + 刪除
+    # 操作區：下載 + 刪除（密碼）
     card_open("🧰 歷史紀錄操作（下載 / 刪除）")
 
     idxs = df_f.index.tolist()
@@ -187,6 +180,7 @@ def main():
 
     run_id = str(df_f.loc[selected].get("id"))
     obj_path = df_f.loc[selected].get("export_object_path")
+
     st.markdown(f"- **紀錄ID**：`{run_id}`")
     st.markdown(f"- **留存報表**：`{obj_path}`" if obj_path else "- **留存報表**：無")
 
@@ -211,29 +205,38 @@ def main():
         else:
             st.info("此筆沒有留存 Excel")
 
-    # 刪除
+    # 刪除（密碼鎖）
     with c2:
-        st.warning("刪除為不可逆操作：會刪除 DB 紀錄，並嘗試刪除 Storage 報表。")
+        st.warning("刪除為不可逆操作：會刪除 DB 紀錄，並可選擇同步刪除 Storage 報表。")
+
+        # Secrets password
+        expected = st.secrets.get("DELETE_PASSWORD", "")
+        if not expected:
+            st.error("未設定 DELETE_PASSWORD（請到 Streamlit Secrets 新增）")
+            st.stop()
+
         del_storage = st.checkbox("同步刪除留存報表（Storage）", value=True, disabled=not bool(obj_path))
         confirmed = st.checkbox("我已確認要刪除這筆紀錄", value=False)
         token = st.text_input("輸入 DELETE 以解鎖刪除", value="")
+        pwd = st.text_input("刪除密碼（DELETE_PASSWORD）", value="", type="password")
 
-        if st.button("🗑️ 刪除選定紀錄", type="primary", use_container_width=True, disabled=not (confirmed and token.strip().upper() == "DELETE")):
+        unlocked = (confirmed and token.strip().upper() == "DELETE" and pwd == expected)
+
+        if st.button("🗑️ 刪除選定紀錄", type="primary", use_container_width=True, disabled=not unlocked):
             try:
-                # 先刪 Storage（可選）
+                # Storage（可選）
                 if del_storage and obj_path:
                     try:
                         remove_from_storage(obj_path)
                     except Exception as e:
-                        # Storage 刪除失敗不阻止 DB 刪除，但會提示
                         st.warning("Storage 報表刪除失敗，但會繼續刪除 DB 紀錄。")
                         st.code(repr(e))
 
-                # 再刪 DB
+                # DB
                 delete_audit_run(run_id)
 
                 st.success("✅ 已刪除完成（DB 紀錄已移除；若勾選 Storage 也已嘗試刪除）")
-                st.info("請按瀏覽器重新整理或等待頁面自動重跑以更新列表。")
+                st.info("請重新整理或等待頁面自動重跑以更新列表。")
             except APIError as e:
                 st.error("❌ 刪除 DB 紀錄失敗（APIError）")
                 st.code(_human_api_error(e))
