@@ -8,6 +8,7 @@ st.set_page_config(
 )
 
 inject_purple_theme()
+st.caption("✅ v-purple-001")
 
 st.title("🏭 工作效率平台")
 
@@ -29,3 +30,4 @@ st.markdown(
 )
 
 st.info("請由左側選單選擇要查看的功能項目。")
+
