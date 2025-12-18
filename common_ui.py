@@ -14,6 +14,8 @@ import streamlit as st
 def inject_logistics_theme():
     """
     Logistics / Warehouse dashboard style.
+    - 中間內容區更寬（完整呈現）
+    - 全站字體縮小一點（含側欄、Metric）
     """
     st.markdown(
         """
@@ -40,14 +42,35 @@ def inject_logistics_theme():
 header[data-testid="stHeader"] { background: transparent !important; }
 div[data-testid="stDecoration"] { display: none; }
 
+/* ============== Layout: make center wider ============== */
+.block-container{
+  max-width: 1600px !important;     /* 你可改 1400~1900 */
+  padding-top: 0.8rem !important;
+  padding-bottom: 1.6rem !important;
+  padding-left: 1.0rem !important;
+  padding-right: 1.0rem !important;
+}
+@media (min-width: 1800px){
+  .block-container{ max-width: 1800px !important; }
+}
+
+/* ============== Global font scale (smaller) ============== */
+html, body, [class*="st-"], .stApp{
+  font-size: 14px !important;       /* 可改 13~15 */
+}
+
+/* 標題縮小 */
+h1 { font-size: 28px !important; }
+h2 { font-size: 22px !important; }
+h3 { font-size: 16px !important; }
+
+/* Sidebar */
 section[data-testid="stSidebar"]{
   background: #f8fafc;
   border-right: 1px solid var(--line);
 }
-
-.block-container{
-  padding-top: 1.2rem;
-  padding-bottom: 2.0rem;
+section[data-testid="stSidebar"] *{
+  font-size: 13px !important;
 }
 
 /* Card */
@@ -55,12 +78,12 @@ section[data-testid="stSidebar"]{
   border: 1px solid var(--line);
   background: var(--card);
   border-radius: 20px;
-  padding: 16px 16px 10px 16px;
-  margin-bottom: 14px;
+  padding: 14px 14px 10px 14px;
+  margin-bottom: 12px;
   box-shadow: 0 10px 30px rgba(15,23,42,0.06);
 }
 ._gt_card h3{
-  margin: 0 0 10px 0;
+  margin: 0 0 8px 0;
   letter-spacing: .2px;
 }
 
@@ -89,18 +112,43 @@ div[data-testid="stDataFrame"]{
   background: var(--card2);
 }
 
+/* KPI Metric size */
+[data-testid="stMetricLabel"]{
+  font-size: 12px !important;
+  color: var(--muted) !important;
+  font-weight: 700 !important;
+}
+[data-testid="stMetricValue"]{
+  font-size: 22px !important;
+  font-weight: 900 !important;
+}
+
 /* Buttons */
 .stButton > button{
   border-radius: 14px;
   border: 1px solid rgba(2, 132, 199, 0.30);
   background: var(--blueSoft);
   color: var(--ink);
-  padding: 0.55rem 0.9rem;
-  font-weight: 800;
+  padding: 0.50rem 0.85rem;
+  font-weight: 850;
 }
 .stButton > button:hover{
   border: 1px solid rgba(2, 132, 199, 0.45);
   background: var(--blueSoft2);
+}
+
+/* Download button */
+div[data-testid="stDownloadButton"] button{
+  border-radius: 14px !important;
+  border: 1px solid rgba(2, 132, 199, 0.30) !important;
+  background: var(--blueSoft) !important;
+  color: var(--ink) !important;
+  padding: 0.55rem 0.9rem !important;
+  font-weight: 900 !important;
+}
+div[data-testid="stDownloadButton"] button:hover{
+  border: 1px solid rgba(2, 132, 199, 0.45) !important;
+  background: var(--blueSoft2) !important;
 }
 
 /* Uploader */
@@ -249,7 +297,6 @@ def bar_topN(
     try:
         import altair as alt  # type: ignore
 
-        # 顏色規則：低於 target 紅色，否則藍色
         if target is not None:
             color_enc = alt.condition(
                 alt.datum[y_col] < float(target),
@@ -287,7 +334,6 @@ def bar_topN(
         st.altair_chart(alt.layer(*layers), use_container_width=True)
 
     except Exception:
-        # fallback：st.bar_chart 無法分色，只能基本顯示
         st.bar_chart(data.set_index(x_col)[y_col])
 
 
@@ -429,9 +475,9 @@ def download_excel_card(
     show_title: bool = False,
 ):
     """
-    你要的「文字=按鈕」版：
+    「文字=按鈕」版：
     - 用卡片包住
-    - 卡片內只有一顆全寬按鈕（看起來就像文字本身可點）
+    - 卡片內只有一顆全寬按鈕
     """
     card_open(label if show_title else "")
     download_excel(
