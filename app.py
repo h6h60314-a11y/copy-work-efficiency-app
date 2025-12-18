@@ -2,7 +2,7 @@ import streamlit as st
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 st.set_page_config(
-    page_title="倉儲營運效能平台",
+    page_title="進貨課效能平台",
     page_icon="🏭",
     layout="wide",
 )
@@ -10,19 +10,17 @@ st.set_page_config(
 inject_logistics_theme()
 
 def main():
-    set_page("倉儲營運效能平台", icon="🏭")
-    st.caption("第三方物流｜作業KPI｜AM/PM 班別｜稽核留存｜主管復盤")
+    set_page("進貨課效能平台", icon="🏭")
+    st.caption("作業KPI｜AM/PM ")
 
     card_open("📌 模組導覽")
     st.markdown(
         """
-- ✅ **驗收作業效能（KPI）**：人時效率、達標率、AM/PM 班別切分、排除非作業區間（支援/離站/停機）
+- ✅ **驗收作業效能（KPI）**：人時效率、達標率、AM/PM 班別切分、排除非作業區間
 - 📦 **上架產能分析（Putaway KPI）**：上架產能、人時效率、區塊/報表規則、班別切分
-- 📊 **營運稽核與復盤中心**：歷次執行留存、趨勢視覺化、下載當次 KPI 報表
         """
-    )
-    st.info("請由左側選單切換功能；主管如需回溯檢討，請進入「營運稽核與復盤中心」。")
     card_close()
 
 if __name__ == "__main__":
     main()
+
