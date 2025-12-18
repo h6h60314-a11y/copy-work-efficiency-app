@@ -14,7 +14,7 @@ from common_ui import (
     bar_topN,
     card_open,
     card_close,
-    download_excel,
+    download_excel_card,   # ✅ 改用：一行=按鈕（且外框不分段）
     sidebar_controls,
 )
 
@@ -445,11 +445,15 @@ def build_excel_bytes(
 
 
 # =========================================================
-# Streamlit Page
+# Streamlit Page（✅ 匯出時 KPI 保留：session_state）
 # =========================================================
 def main():
     inject_logistics_theme()
     set_page("上架產能分析（Putaway KPI）", icon="📦", subtitle="總上組（上架）｜上午/下午分段｜效率門檻著色｜報表_區塊輸出")
+
+    # ✅ Session：保存上一筆 KPI 結果（避免按下載/互動 rerun 後畫面消失）
+    if "putaway_last" not in st.session_state:
+        st.session_state.putaway_last = None
 
     # Sidebar：統一條件（不含 Operator；排除區間手動輸入 HH:MM）
     controls = sidebar_controls(default_top_n=30, enable_exclude_windows=True, state_key_prefix="putaway")
@@ -467,125 +471,161 @@ def main():
         type=["xlsx", "xlsm", "xls", "csv"],
         label_visibility="collapsed",
     )
-    run = st.button("🚀 產出 KPI", type="primary", disabled=uploaded is None)
+    run_clicked = st.button("🚀 產出 KPI", type="primary", disabled=uploaded is None)
     card_close()
 
-    if not run:
-        st.info("請先上傳上架作業原始資料")
+    # ✅ 計算：只在按下「產出 KPI」時跑一次，並存到 session_state
+    if run_clicked:
+        with st.spinner("計算中，請稍候..."):
+            sheets = read_excel_any_quiet_bytes(uploaded.name, uploaded.getvalue())
+
+            kept_all = []
+            for sn, df in sheets.items():
+                k = prepare_filtered_df(df)
+                if not k.empty:
+                    k["__sheet__"] = sn
+                    kept_all.append(k)
+
+            if not kept_all:
+                st.error("無符合資料（可能缺『由/到』欄或過濾後為空）。")
+                st.session_state.putaway_last = None
+                return
+
+            data = pd.concat(kept_all, ignore_index=True)
+
+            user_col = find_first_column(data, INPUT_USER_CANDIDATES)
+            revdt_col = find_first_column(data, REV_DT_CANDIDATES)
+            if user_col is None:
+                st.error("找不到『記錄輸入人』欄位（候選：記錄輸入人/記錄輸入者/建立人/輸入人）。")
+                st.session_state.putaway_last = None
+                return
+            if revdt_col is None:
+                st.error("找不到『修訂日期/時間』欄位（候選：修訂日期/修訂時間/修訂日/異動時間/修改時間）。")
+                st.session_state.putaway_last = None
+                return
+
+            data["__dt__"] = pd.to_datetime(data[revdt_col], errors="coerce")
+            data["__code__"] = data[user_col].astype(str).str.strip()
+            data["對應姓名"] = data["__code__"].map(NAME_MAP).fillna("")
+
+            dt_data = data.dropna(subset=["__dt__"]).copy()
+            if dt_data.empty:
+                st.error("資料沒有可用的修訂日期時間，無法計算。")
+                st.session_state.putaway_last = None
+                return
+
+            dt_data["日期"] = dt_data["__dt__"].dt.date
+
+            daily = (
+                dt_data.groupby([user_col, "對應姓名", "日期"], dropna=False)
+                .apply(compute_am_pm_for_group)
+                .reset_index()
+            )
+
+            summary = (
+                daily.groupby([user_col, "對應姓名"], dropna=False, as_index=False)
+                .agg(
+                    総日數=("日期", "nunique"),
+                    總筆數=("當日筆數", "sum"),
+                    總工時_分鐘_扣休=("當日工時_分鐘_扣休", "sum"),
+                    上午筆數=("上午_筆數", "sum"),
+                    上午工時_分鐘=("上午_工時_分鐘", "sum"),
+                    下午筆數=("下午_筆數", "sum"),
+                    下午工時_分鐘_扣休=("下午_工時_分鐘_扣休", "sum"),
+                )
+            )
+
+            summary["上午效率_件每小時"] = summary.apply(lambda r: _eff(int(r["上午筆數"]), int(r["上午工時_分鐘"])), axis=1)
+            summary["下午效率_件每小時"] = summary.apply(lambda r: _eff(int(r["下午筆數"]), int(r["下午工時_分鐘_扣休"])), axis=1)
+            summary["總工時_分鐘_扣休"] = summary["上午工時_分鐘"].fillna(0).astype(int) + summary["下午工時_分鐘_扣休"].fillna(0).astype(int)
+            summary["效率_件每小時"] = summary.apply(lambda r: _eff(int(r["總筆數"]), int(r["總工時_分鐘_扣休"])), axis=1)
+
+            for c in ["總筆數", "總工時_分鐘_扣休", "上午筆數", "上午工時_分鐘", "下午筆數", "下午工時_分鐘_扣休"]:
+                summary[c] = summary[c].fillna(0).astype(int)
+
+            total_people = int(summary[user_col].nunique())
+            met_people = int((summary["效率_件每小時"] >= float(target_eff)).sum())
+            rate = (met_people / total_people) if total_people > 0 else 0.0
+
+            total_row = {
+                user_col: "整體合計",
+                "對應姓名": "",
+                "総日數": int(summary["総日數"].sum()),
+                "總筆數": int(summary["總筆數"].sum()),
+                "總工時_分鐘_扣休": int(summary["總工時_分鐘_扣休"].sum()),
+                "上午筆數": int(summary["上午筆數"].sum()),
+                "上午工時_分鐘": int(summary["上午工時_分鐘"].sum()),
+                "下午筆數": int(summary["下午筆數"].sum()),
+                "下午工時_分鐘_扣休": int(summary["下午工時_分鐘_扣休"].sum()),
+                "效率_件每小時": _eff(int(summary["總筆數"].sum()), int(summary["總工時_分鐘_扣休"].sum())),
+                "上午效率_件每小時": _eff(int(summary["上午筆數"].sum()), int(summary["上午工時_分鐘"].sum())),
+                "下午效率_件每小時": _eff(int(summary["下午筆數"].sum()), int(summary["下午工時_分鐘_扣休"].sum())),
+            }
+            summary_out = pd.concat([summary, pd.DataFrame([total_row])], ignore_index=True)
+
+            # 明細_時段（長表）
+            long_rows = []
+            for _, r in daily.iterrows():
+                if int(r["上午_筆數"]) > 0:
+                    long_rows.append({
+                        user_col: r[user_col], "對應姓名": r["對應姓名"], "日期": r["日期"], "時段": "上午",
+                        "第一筆時間": r["上午_第一筆"], "最後一筆時間": r["上午_最後一筆"],
+                        "筆數": int(r["上午_筆數"]), "工時_分鐘": int(r["上午_工時_分鐘"]),
+                        "休息分鐘": 0,
+                        "空窗分鐘": int(r["上午_空窗分鐘"]), "空窗時段": r["上午_空窗時段"],
+                        "效率_件每小時": float(r["上午_效率_件每小時"]),
+                        "命中規則": "上午不扣休",
+                    })
+                if int(r["下午_筆數"]) > 0:
+                    long_rows.append({
+                        user_col: r[user_col], "對應姓名": r["對應姓名"], "日期": r["日期"], "時段": "下午",
+                        "第一筆時間": r["下午_第一筆"], "最後一筆時間": r["下午_最後一筆"],
+                        "筆數": int(r["下午_筆數"]), "工時_分鐘": int(r["下午_工時_分鐘_扣休"]),
+                        "休息分鐘": int(r["下午_休息分鐘"]),
+                        "空窗分鐘": int(r["下午_空窗分鐘_扣休"]), "空窗時段": r["下午_空窗時段"],
+                        "效率_件每小時": float(r["下午_效率_件每小時"]),
+                        "命中規則": str(r["下午_命中規則"]),
+                    })
+            detail_long = pd.DataFrame(long_rows)
+            if not detail_long.empty:
+                detail_long = detail_long.sort_values([user_col, "日期", "時段", "第一筆時間"])
+
+            xlsx_bytes = build_excel_bytes(user_col, summary_out, daily, detail_long, target_eff=float(target_eff))
+            xlsx_name = f"{uploaded.name.rsplit('.', 1)[0]}_上架績效.xlsx"
+
+            # ✅ 存進 session_state，避免按下載 rerun 後畫面消失
+            st.session_state.putaway_last = {
+                "user_col": user_col,
+                "summary": summary,
+                "summary_out": summary_out,
+                "daily": daily,
+                "detail_long": detail_long,
+                "target_eff": float(target_eff),
+                "top_n": int(top_n),
+                "total_people": int(total_people),
+                "met_people": int(met_people),
+                "rate": float(rate),
+                "xlsx_bytes": xlsx_bytes,
+                "xlsx_name": xlsx_name,
+            }
+
+    # ======================
+    # 顯示：一律從 session_state 取（✅ 按匯出不會消失）
+    # ======================
+    last = st.session_state.putaway_last
+    if not last:
+        st.info("請先上傳上架作業原始資料並點選「🚀 產出 KPI」")
         return
 
-    with st.spinner("計算中，請稍候..."):
-        sheets = read_excel_any_quiet_bytes(uploaded.name, uploaded.getvalue())
-
-        kept_all = []
-        for sn, df in sheets.items():
-            k = prepare_filtered_df(df)
-            if not k.empty:
-                k["__sheet__"] = sn
-                kept_all.append(k)
-
-        if not kept_all:
-            st.error("無符合資料（可能缺『由/到』欄或過濾後為空）。")
-            return
-
-        data = pd.concat(kept_all, ignore_index=True)
-
-        user_col = find_first_column(data, INPUT_USER_CANDIDATES)
-        revdt_col = find_first_column(data, REV_DT_CANDIDATES)
-        if user_col is None:
-            st.error("找不到『記錄輸入人』欄位（候選：記錄輸入人/記錄輸入者/建立人/輸入人）。")
-            return
-        if revdt_col is None:
-            st.error("找不到『修訂日期/時間』欄位（候選：修訂日期/修訂時間/修訂日/異動時間/修改時間）。")
-            return
-
-        data["__dt__"] = pd.to_datetime(data[revdt_col], errors="coerce")
-        data["__code__"] = data[user_col].astype(str).str.strip()
-        data["對應姓名"] = data["__code__"].map(NAME_MAP).fillna("")
-
-        dt_data = data.dropna(subset=["__dt__"]).copy()
-        if dt_data.empty:
-            st.error("資料沒有可用的修訂日期時間，無法計算。")
-            return
-
-        dt_data["日期"] = dt_data["__dt__"].dt.date
-
-        daily = (
-            dt_data.groupby([user_col, "對應姓名", "日期"], dropna=False)
-            .apply(compute_am_pm_for_group)
-            .reset_index()
-        )
-
-        summary = (
-            daily.groupby([user_col, "對應姓名"], dropna=False, as_index=False)
-            .agg(
-                総日數=("日期", "nunique"),
-                總筆數=("當日筆數", "sum"),
-                總工時_分鐘_扣休=("當日工時_分鐘_扣休", "sum"),
-                上午筆數=("上午_筆數", "sum"),
-                上午工時_分鐘=("上午_工時_分鐘", "sum"),
-                下午筆數=("下午_筆數", "sum"),
-                下午工時_分鐘_扣休=("下午_工時_分鐘_扣休", "sum"),
-            )
-        )
-
-        summary["上午效率_件每小時"] = summary.apply(lambda r: _eff(int(r["上午筆數"]), int(r["上午工時_分鐘"])), axis=1)
-        summary["下午效率_件每小時"] = summary.apply(lambda r: _eff(int(r["下午筆數"]), int(r["下午工時_分鐘_扣休"])), axis=1)
-        summary["總工時_分鐘_扣休"] = summary["上午工時_分鐘"].fillna(0).astype(int) + summary["下午工時_分鐘_扣休"].fillna(0).astype(int)
-        summary["效率_件每小時"] = summary.apply(lambda r: _eff(int(r["總筆數"]), int(r["總工時_分鐘_扣休"])), axis=1)
-
-        for c in ["總筆數", "總工時_分鐘_扣休", "上午筆數", "上午工時_分鐘", "下午筆數", "下午工時_分鐘_扣休"]:
-            summary[c] = summary[c].fillna(0).astype(int)
-
-        total_people = int(summary[user_col].nunique())
-        met_people = int((summary["效率_件每小時"] >= float(target_eff)).sum())
-        rate = (met_people / total_people) if total_people > 0 else 0.0
-
-        total_row = {
-            user_col: "整體合計",
-            "對應姓名": "",
-            "総日數": int(summary["総日數"].sum()),
-            "總筆數": int(summary["總筆數"].sum()),
-            "總工時_分鐘_扣休": int(summary["總工時_分鐘_扣休"].sum()),
-            "上午筆數": int(summary["上午筆數"].sum()),
-            "上午工時_分鐘": int(summary["上午工時_分鐘"].sum()),
-            "下午筆數": int(summary["下午筆數"].sum()),
-            "下午工時_分鐘_扣休": int(summary["下午工時_分鐘_扣休"].sum()),
-            "效率_件每小時": _eff(int(summary["總筆數"].sum()), int(summary["總工時_分鐘_扣休"].sum())),
-            "上午效率_件每小時": _eff(int(summary["上午筆數"].sum()), int(summary["上午工時_分鐘"].sum())),
-            "下午效率_件每小時": _eff(int(summary["下午筆數"].sum()), int(summary["下午工時_分鐘_扣休"].sum())),
-        }
-        summary_out = pd.concat([summary, pd.DataFrame([total_row])], ignore_index=True)
-
-        # 明細_時段（長表）
-        long_rows = []
-        for _, r in daily.iterrows():
-            if int(r["上午_筆數"]) > 0:
-                long_rows.append({
-                    user_col: r[user_col], "對應姓名": r["對應姓名"], "日期": r["日期"], "時段": "上午",
-                    "第一筆時間": r["上午_第一筆"], "最後一筆時間": r["上午_最後一筆"],
-                    "筆數": int(r["上午_筆數"]), "工時_分鐘": int(r["上午_工時_分鐘"]),
-                    "休息分鐘": 0,
-                    "空窗分鐘": int(r["上午_空窗分鐘"]), "空窗時段": r["上午_空窗時段"],
-                    "效率_件每小時": float(r["上午_效率_件每小時"]),
-                    "命中規則": "上午不扣休",
-                })
-            if int(r["下午_筆數"]) > 0:
-                long_rows.append({
-                    user_col: r[user_col], "對應姓名": r["對應姓名"], "日期": r["日期"], "時段": "下午",
-                    "第一筆時間": r["下午_第一筆"], "最後一筆時間": r["下午_最後一筆"],
-                    "筆數": int(r["下午_筆數"]), "工時_分鐘": int(r["下午_工時_分鐘_扣休"]),
-                    "休息分鐘": int(r["下午_休息分鐘"]),
-                    "空窗分鐘": int(r["下午_空窗分鐘_扣休"]), "空窗時段": r["下午_空窗時段"],
-                    "效率_件每小時": float(r["下午_效率_件每小時"]),
-                    "命中規則": str(r["下午_命中規則"]),
-                })
-        detail_long = pd.DataFrame(long_rows)
-        if not detail_long.empty:
-            detail_long = detail_long.sort_values([user_col, "日期", "時段", "第一筆時間"])
-
-        xlsx_bytes = build_excel_bytes(user_col, summary_out, daily, detail_long, target_eff=float(target_eff))
-        xlsx_name = f"{uploaded.name.rsplit('.', 1)[0]}_上架績效.xlsx"
+    user_col = last["user_col"]
+    summary = last["summary"]
+    target_eff_show = float(last["target_eff"])
+    top_n_show = int(top_n)  # 排行顯示用「現在 sidebar 的 top_n」，更直覺
+    total_people = int(last["total_people"])
+    met_people = int(last["met_people"])
+    rate = float(last["rate"])
+    xlsx_bytes = last["xlsx_bytes"]
+    xlsx_name = last["xlsx_name"]
 
     # KPI 顯示
     card_open("📌 總覽 KPI")
@@ -593,7 +633,7 @@ def main():
         KPI("總人數", f"{total_people:,}"),
         KPI("達標人數", f"{met_people:,}"),
         KPI("達標率", f"{rate:.1%}"),
-        KPI("達標門檻", f"效率 ≥ {int(target_eff)}"),
+        KPI("達標門檻", f"效率 ≥ {int(target_eff_show)}"),
     ])
     card_close()
 
@@ -601,25 +641,41 @@ def main():
     col_l, col_r = st.columns(2)
 
     with col_l:
-        card_open(f"🌓 AM（上午）效率排行（Top {top_n}）")
+        card_open(f"🌓 AM（上午）效率排行（Top {top_n_show}）")
         am_rank = summary[[user_col, "對應姓名", "上午筆數", "上午工時_分鐘", "上午效率_件每小時"]].copy()
         am_rank = am_rank.rename(columns={"上午效率_件每小時": "效率", "上午筆數": "筆數", "上午工時_分鐘": "工時"})
         am_rank["姓名"] = am_rank["對應姓名"].where(am_rank["對應姓名"].astype(str).str.len() > 0, am_rank[user_col].astype(str))
-        bar_topN(am_rank[["姓名", "效率", "筆數", "工時"]], x_col="姓名", y_col="效率", hover_cols=["筆數", "工時"], top_n=top_n, target=float(target_eff))
+        bar_topN(
+            am_rank[["姓名", "效率", "筆數", "工時"]],
+            x_col="姓名",
+            y_col="效率",
+            hover_cols=["筆數", "工時"],
+            top_n=top_n_show,
+            target=float(target_eff_show),
+        )
         card_close()
 
     with col_r:
-        card_open(f"🌙 PM（下午）效率排行（Top {top_n}）")
+        card_open(f"🌙 PM（下午）效率排行（Top {top_n_show}）")
         pm_rank = summary[[user_col, "對應姓名", "下午筆數", "下午工時_分鐘_扣休", "下午效率_件每小時"]].copy()
         pm_rank = pm_rank.rename(columns={"下午效率_件每小時": "效率", "下午筆數": "筆數", "下午工時_分鐘_扣休": "工時"})
         pm_rank["姓名"] = pm_rank["對應姓名"].where(pm_rank["對應姓名"].astype(str).str.len() > 0, pm_rank[user_col].astype(str))
-        bar_topN(pm_rank[["姓名", "效率", "筆數", "工時"]], x_col="姓名", y_col="效率", hover_cols=["筆數", "工時"], top_n=top_n, target=float(target_eff))
+        bar_topN(
+            pm_rank[["姓名", "效率", "筆數", "工時"]],
+            x_col="姓名",
+            y_col="效率",
+            hover_cols=["筆數", "工時"],
+            top_n=top_n_show,
+            target=float(target_eff_show),
+        )
         card_close()
 
-    # 匯出
-    card_open("⬇️ 匯出 KPI 報表（Excel）")
-    download_excel(xlsx_bytes, xlsx_name)
-    card_close()
+    # ✅ 匯出：一行=按鈕；按下去 KPI 仍保留
+    download_excel_card(
+        xlsx_bytes,
+        xlsx_name,
+        label="⬇️ 匯出 KPI 報表（Excel）",
+    )
 
 
 if __name__ == "__main__":
