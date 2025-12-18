@@ -582,6 +582,11 @@ def run_qc_efficiency(file_bytes: bytes, original_name: str, skip_rules: list[di
             if df is None or df.empty:
                 processed[name] = df
                 continue
+            # ===== 固定排除：姓名=羅仲宇（所有統計/圖表/匯出一致） =====
+            if df is not None and not df.empty and '姓名' in df.columns:
+                s = df['姓名'].fillna('').astype(str).str.strip()
+                df = df[s.ne('羅仲宇')].copy()
+
 
             df = df.copy()
             dest_col = pick_col(df.columns, [DEST_COL])
@@ -719,6 +724,20 @@ def run_qc_efficiency(file_bytes: bytes, original_name: str, skip_rules: list[di
         ampm_df = _filter_user_and_name(ampm_df)
 
         idle_details = _filter_user_and_name(idle_details)
+
+        # ===== 固定排除：姓名=羅仲宇（KPI/圖表/匯出 Excel 全部一致）=====
+        def _exclude_name(df: pd.DataFrame, name: str = '羅仲宇') -> pd.DataFrame:
+            if df is None or df.empty:
+                return df
+            if '姓名' not in df.columns:
+                return df
+            s = df['姓名'].fillna('').astype(str).str.strip()
+            return df[s.ne(name)].copy()
+
+        full_df = _exclude_name(full_df)
+        ampm_df = _exclude_name(ampm_df)
+        idle_details = _exclude_name(idle_details)
+
 
         total_idle = int(idle_details["空窗分鐘"].notna().sum()) if not idle_details.empty else 0
         total_df = pd.DataFrame({"項目":[f"全體空窗筆數(>{THRESHOLD_MIN}分)"], "數量":[total_idle]})
