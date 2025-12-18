@@ -407,14 +407,40 @@ def sidebar_controls(
 # =========================================================
 # Downloads
 # =========================================================
-def download_excel(xlsx_bytes: bytes, filename: str = "KPI報表.xlsx"):
+def download_excel(
+    xlsx_bytes: bytes,
+    filename: str = "KPI報表.xlsx",
+    label: str = "⬇️ 匯出 KPI 報表（Excel）",
+    use_container_width: bool = True,  # ✅ 預設整條按鈕，符合「文字=按鈕」
+):
     st.download_button(
-        label="📥 匯出 KPI 報表（Excel）",
+        label=label,
         data=xlsx_bytes,
         file_name=filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=False,
+        use_container_width=use_container_width,
     )
+
+
+def download_excel_card(
+    xlsx_bytes: bytes,
+    filename: str = "KPI報表.xlsx",
+    label: str = "⬇️ 匯出 KPI 報表（Excel）",
+    show_title: bool = False,
+):
+    """
+    你要的「文字=按鈕」版：
+    - 用卡片包住
+    - 卡片內只有一顆全寬按鈕（看起來就像文字本身可點）
+    """
+    card_open(label if show_title else "")
+    download_excel(
+        xlsx_bytes=xlsx_bytes,
+        filename=filename,
+        label=label,
+        use_container_width=True,
+    )
+    card_close()
 
 
 # =========================================================
