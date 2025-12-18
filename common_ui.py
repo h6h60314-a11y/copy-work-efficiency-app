@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional, Dict, Any, List, Tuple
+from typing import List, Optional
 
 import pandas as pd
 import streamlit as st
@@ -12,108 +12,147 @@ except Exception:
     px = None
 
 
+# ========= UI Data =========
 @dataclass
 class KPI:
     label: str
     value: str
     help: str = ""
-    variant: str = "purple"  # purple/blue/green/orange/gray
+    variant: str = "purple"  # purple/blue/cyan/teal/gray
 
 
+# ========= Theme =========
 def inject_purple_theme():
+    """
+    Purple + Blue Tech SaaS theme.
+    NOTE: do NOT call st.set_page_config here (app.py owns config in navigation mode).
+    """
     st.markdown(
         """
 <style>
-/* ===== Purple SaaS Theme ===== */
-.stApp {
-    background: #F5F7FB;
+/* ===== Purple-Blue Tech Dashboard Theme ===== */
+:root{
+  --bg: #0B1020;
+  --bg2:#0F1631;
+  --card:#FFFFFF;
+  --text:#0F172A;
+  --muted:#64748B;
+  --stroke: rgba(15,23,42,0.08);
+  --shadow: 0 14px 40px rgba(2, 6, 23, .10);
+  --shadow2: 0 10px 24px rgba(2, 6, 23, .08);
 }
 
-/* 讓內容左右留白更像 Dashboard */
-.block-container {
-    padding-top: 1.25rem;
-    padding-bottom: 2.5rem;
+/* App background */
+.stApp{
+  background: radial-gradient(1200px 700px at 20% -10%, rgba(142,45,226,.18), transparent 55%),
+              radial-gradient(1100px 700px at 80% 0%, rgba(54,209,220,.16), transparent 50%),
+              #F5F7FB;
 }
 
-/* Sidebar 更乾淨 */
-section[data-testid="stSidebar"] {
-    background: #FFFFFF;
-    border-right: 1px solid rgba(15, 23, 42, 0.06);
+/* Content width like SaaS */
+.block-container{
+  padding-top: 1.2rem;
+  padding-bottom: 2.4rem;
+  max-width: 1240px;
 }
 
-/* 全局卡片風格 */
-.gt-card {
-    background: #FFFFFF;
-    border-radius: 18px;
-    padding: 18px 18px;
-    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
-    border: 1px solid rgba(15, 23, 42, 0.04);
+/* Sidebar: glassy white */
+section[data-testid="stSidebar"]{
+  background: rgba(255,255,255,.82);
+  backdrop-filter: blur(12px);
+  border-right: 1px solid rgba(15,23,42,0.06);
+}
+section[data-testid="stSidebar"] .stMarkdown,
+section[data-testid="stSidebar"] label{
+  color: #0F172A;
 }
 
-/* KPI 漸層卡 */
-.gt-kpi {
-    border-radius: 18px;
-    padding: 18px 18px;
-    color: #FFFFFF;
-    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12);
-    border: 1px solid rgba(255,255,255,0.18);
+/* Headings */
+h1,h2,h3{
+  letter-spacing: .2px;
 }
 
-.gt-kpi .kpi-label {
-    font-size: 0.92rem;
-    opacity: 0.92;
-    margin: 0 0 8px 0;
+/* Card container */
+.gt-card{
+  background: rgba(255,255,255,.92);
+  border: 1px solid rgba(15,23,42,0.06);
+  border-radius: 18px;
+  padding: 18px 18px;
+  box-shadow: var(--shadow2);
 }
 
-.gt-kpi .kpi-value {
-    font-size: 1.7rem;
-    font-weight: 800;
-    letter-spacing: 0.2px;
-    margin: 0;
-    line-height: 1.1;
+/* Section title inside card */
+.gt-card .gt-card-title{
+  font-weight: 900;
+  font-size: 1.02rem;
+  margin: 0 0 12px 0;
+  color: #0F172A;
 }
 
-.gt-kpi .kpi-help {
-    font-size: 0.82rem;
-    opacity: 0.85;
-    margin-top: 10px;
+/* KPI gradient cards */
+.gt-kpi{
+  border-radius: 18px;
+  padding: 18px 18px;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.18);
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+.gt-kpi:after{
+  content:"";
+  position:absolute;
+  inset:-40px -60px auto auto;
+  width:160px;height:160px;
+  background: rgba(255,255,255,.16);
+  transform: rotate(25deg);
+  border-radius: 999px;
+}
+.gt-kpi .k{ font-size: .90rem; opacity:.92; margin:0 0 8px 0; }
+.gt-kpi .v{ font-size: 1.65rem; font-weight: 950; margin:0; line-height: 1.08; }
+.gt-kpi .h{ font-size: .82rem; opacity:.88; margin-top: 10px; }
+
+.gt-purple{ background: linear-gradient(135deg,#7C3AED,#4F46E5); } /* purple -> indigo */
+.gt-blue  { background: linear-gradient(135deg,#2563EB,#06B6D4); } /* blue -> cyan */
+.gt-cyan  { background: linear-gradient(135deg,#06B6D4,#22C55E); } /* cyan -> green */
+.gt-teal  { background: linear-gradient(135deg,#14B8A6,#3B82F6); } /* teal -> blue */
+.gt-gray  { background: linear-gradient(135deg,#64748B,#334155); } /* slate */
+
+/* Buttons: pill, tech */
+.stButton>button, .stDownloadButton>button{
+  border-radius: 14px !important;
+  padding: .62rem 1.05rem !important;
+  font-weight: 900 !important;
+  border: 1px solid rgba(15,23,42,0.10) !important;
+  box-shadow: 0 10px 22px rgba(2, 6, 23, .08) !important;
+}
+.stButton>button:hover, .stDownloadButton>button:hover{
+  transform: translateY(-1px);
 }
 
-/* variants */
-.gt-purple { background: linear-gradient(135deg, #8E2DE2, #4A00E0); }
-.gt-blue   { background: linear-gradient(135deg, #36D1DC, #5B86E5); }
-.gt-green  { background: linear-gradient(135deg, #43E97B, #38F9D7); }
-.gt-orange { background: linear-gradient(135deg, #FF512F, #DD2476); }
-.gt-gray   { background: linear-gradient(135deg, #64748B, #334155); }
-
-/* 讓按鈕更像 SaaS */
-.stButton>button {
-    border-radius: 12px !important;
-    padding: 0.6rem 1rem !important;
-    font-weight: 700 !important;
+/* File uploader better */
+[data-testid="stFileUploader"]{
+  background: rgba(255,255,255,.75);
+  border: 1px dashed rgba(79,70,229,.30);
+  border-radius: 16px;
+  padding: 10px 12px;
 }
 
-.stDownloadButton>button {
-    border-radius: 12px !important;
-    padding: 0.6rem 1rem !important;
-    font-weight: 700 !important;
+/* DataFrame: card-like */
+[data-testid="stDataFrame"]{
+  background: rgba(255,255,255,.92);
+  border-radius: 16px;
+  border: 1px solid rgba(15,23,42,0.06);
+  overflow: hidden;
 }
 
-/* dataframes 外觀更乾淨 */
-[data-testid="stDataFrame"] {
-    background: white;
-    border-radius: 16px;
-    border: 1px solid rgba(15, 23, 42, 0.05);
-    overflow: hidden;
-}
-
-/* Plotly 圖表外框像卡片 */
-[data-testid="stPlotlyChart"] > div {
-    background: white;
-    border-radius: 16px;
-    border: 1px solid rgba(15, 23, 42, 0.05);
-    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
-    padding: 10px;
+/* Plotly card wrapper */
+[data-testid="stPlotlyChart"] > div{
+  background: rgba(255,255,255,.92);
+  border-radius: 16px;
+  border: 1px solid rgba(15,23,42,0.06);
+  box-shadow: var(--shadow2);
+  padding: 10px;
 }
 </style>
 """,
@@ -121,53 +160,58 @@ section[data-testid="stSidebar"] {
     )
 
 
+# ========= Page Helpers =========
 def set_page(title: str, icon: str = "📊"):
-    st.set_page_config(page_title=title, layout="wide", page_icon=icon)
+    """In navigation mode, DO NOT call st.set_page_config in pages. Only inject theme + title."""
     inject_purple_theme()
-    st.title(f"{icon} {title}")
+    st.markdown(f"# {icon} {title}")
 
 
-def sidebar_params_only(params_renderer: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
-    with st.sidebar:
-        st.header("⚙️ 參數設定")
-        return params_renderer() or {}
+def card_open(title: Optional[str] = None):
+    st.markdown('<div class="gt-card">', unsafe_allow_html=True)
+    if title:
+        st.markdown(f'<div class="gt-card-title">{title}</div>', unsafe_allow_html=True)
+
+
+def card_close():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def kpi_card(label: str, value: str, help_text: str = "", variant: str = "purple"):
+    v = (variant or "purple").strip().lower()
+    if v not in {"purple", "blue", "cyan", "teal", "gray"}:
+        v = "purple"
+
+    h = f'<div class="h">{help_text}</div>' if help_text else ""
+    st.markdown(
+        f"""
+<div class="gt-kpi gt-{v}">
+  <div class="k">{label}</div>
+  <div class="v">{value}</div>
+  {h}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 def render_kpis(kpis: List[KPI]):
     if not kpis:
         return
-
     cols = st.columns(len(kpis))
     for c, k in zip(cols, kpis):
-        variant = (k.variant or "purple").strip().lower()
-        if variant not in {"purple", "blue", "green", "orange", "gray"}:
-            variant = "purple"
-
-        help_text = k.help.strip() if k.help else ""
-        help_html = f'<div class="kpi-help">{help_text}</div>' if help_text else ""
-
-        c.markdown(
-            f"""
-<div class="gt-kpi gt-{variant}">
-  <div class="kpi-label">{k.label}</div>
-  <div class="kpi-value">{k.value}</div>
-  {help_html}
-</div>
-""",
-            unsafe_allow_html=True,
-        )
+        with c:
+            kpi_card(k.label, k.value, k.help, k.variant)
 
 
-def _pass_fail(series: pd.Series, target: float) -> pd.Series:
-    def f(x):
-        try:
-            if pd.isna(x):
-                return "—"
-            return "達標" if float(x) >= target else "未達標"
-        except Exception:
-            return "—"
-
-    return series.apply(f)
+# ========= Charts / Tables =========
+def _safe_float(x):
+    try:
+        if x is None or (isinstance(x, float) and pd.isna(x)):
+            return None
+        return float(x)
+    except Exception:
+        return None
 
 
 def bar_topN(
@@ -178,10 +222,8 @@ def bar_topN(
     hover_cols: List[str],
     top_n: int = 30,
     target: float = 20.0,
-    title: str = "效率排行（Top N）",
+    title: str = "排行（Top N）",
 ):
-    st.subheader(title)
-
     if df is None or df.empty or y_col not in df.columns:
         st.info("沒有可顯示的資料。")
         return
@@ -194,13 +236,26 @@ def bar_topN(
         st.dataframe(view[[x_col, y_col] + [c for c in hover_cols if c in view.columns]], use_container_width=True)
         return
 
-    view["_達標狀態"] = _pass_fail(view[y_col], target)
+    def status(v):
+        fv = _safe_float(v)
+        if fv is None:
+            return "—"
+        return "達標" if fv >= float(target) else "未達標"
+
+    view["_達標"] = view[y_col].apply(status)
+
     fig = px.bar(
         view,
         x=x_col,
         y=y_col,
-        color="_達標狀態",
+        color="_達標",
         hover_data=[c for c in hover_cols if c in view.columns],
+    )
+    fig.update_layout(
+        title=None,
+        margin=dict(l=10, r=10, t=10, b=10),
+        legend_title_text="",
+        height=420,
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -211,10 +266,8 @@ def pivot_am_pm(
     index_col: str = "姓名",
     segment_col: str = "時段",
     value_col: str = "效率",
-    title: str = "上午 vs 下午效率（平均）",
+    title: str = "上午 vs 下午（平均）",
 ):
-    st.subheader(title)
-
     if ampm_df is None or ampm_df.empty:
         st.info("沒有 AM/PM 資料。")
         return
@@ -236,15 +289,14 @@ def table_block(
     detail_df: pd.DataFrame,
     detail_expanded: bool = False,
 ):
-    st.subheader(summary_title)
-    st.markdown('<div class="gt-card">', unsafe_allow_html=True)
+    card_open(summary_title)
     st.dataframe(summary_df, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    card_close()
 
     with st.expander(detail_title, expanded=detail_expanded):
-        st.markdown('<div class="gt-card">', unsafe_allow_html=True)
+        card_open()
         st.dataframe(detail_df, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        card_close()
 
 
 def download_excel(xlsx_bytes: bytes, filename: str):
