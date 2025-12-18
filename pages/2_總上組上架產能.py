@@ -1,6 +1,5 @@
 import io
 import re
-import uuid
 import datetime as dt
 from typing import Dict, List, Tuple, Optional
 
@@ -17,9 +16,6 @@ from common_ui import (
     card_close,
     download_excel,
 )
-
-from audit_store import sha256_bytes, upload_export_bytes, insert_audit_run
-
 
 # =========================
 # 依照你檔案規則（上架 v8.9）
@@ -90,7 +86,7 @@ def read_excel_any_quiet_bytes(name: str, content: bytes) -> Dict[str, pd.DataFr
         xl = pd.ExcelFile(io.BytesIO(content), engine="openpyxl")
         return {sn: pd.read_excel(xl, sheet_name=sn) for sn in xl.sheet_names}
 
-    # ✅ 舊版 .xls：需要 requirements.txt 安裝 xlrd==2.0.1
+    # 舊版 .xls：需要 requirements.txt 安裝 xlrd==2.0.1
     if ext == "xls":
         xl = pd.ExcelFile(io.BytesIO(content), engine="xlrd")
         return {sn: pd.read_excel(xl, sheet_name=sn) for sn in xl.sheet_names}
@@ -122,7 +118,6 @@ def find_first_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
         if name in s:
             return name
 
-    # 去掉括號/空白做容錯
     norm_map = {re.sub(r"[（）\(\)\s]", "", c): c for c in cols}
     for name in candidates:
         key = re.sub(r"[（）\(\)\s]", "", name)
@@ -161,7 +156,6 @@ def break_minutes_for_span(first_dt: pd.Timestamp, last_dt: pd.Timestamp) -> Tup
 
 
 def _subtract_exclusions(s_dt: pd.Timestamp, e_dt: pd.Timestamp, exclude_ranges):
-    """把重疊部分完整切掉（避免重疊錯留）"""
     if s_dt >= e_dt or not exclude_ranges:
         return [(s_dt, e_dt)]
     segments = [(s_dt, e_dt)]
@@ -300,7 +294,6 @@ def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFC
 def build_excel_bytes(user_col: str, summary_out: pd.DataFrame, daily: pd.DataFrame, detail_long: pd.DataFrame) -> bytes:
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl", datetime_format="yyyy-mm-dd hh:mm:ss", date_format="yyyy-mm-dd") as writer:
-        # 彙總
         sum_cols = [
             user_col, "對應姓名", "総日數",
             "總筆數", "總工時_分鐘_扣休", "效率_件每小時",
@@ -312,7 +305,6 @@ def build_excel_bytes(user_col: str, summary_out: pd.DataFrame, daily: pd.DataFr
         autosize_columns(ws_sum, summary_out[sum_cols])
         shade_rows_by_efficiency(ws_sum, "效率_件每小時")
 
-        # 明細（每日）
         det_cols = [
             user_col, "對應姓名", "日期",
             "第一筆時間", "最後一筆時間", "當日筆數",
@@ -328,7 +320,6 @@ def build_excel_bytes(user_col: str, summary_out: pd.DataFrame, daily: pd.DataFr
         autosize_columns(ws_det, daily[det_cols])
         shade_rows_by_efficiency(ws_det, "效率_件每小時")
 
-        # 明細_時段（長表）
         if detail_long is not None and not detail_long.empty:
             long_cols = [
                 user_col, "對應姓名", "日期", "時段",
@@ -342,7 +333,6 @@ def build_excel_bytes(user_col: str, summary_out: pd.DataFrame, daily: pd.DataFr
             autosize_columns(ws_long, detail_long[long_cols])
             shade_rows_by_efficiency(ws_long, "效率_件每小時")
 
-        # 休息規則
         rules_rows = []
         for i, (st_ge, ed_le, mins, tag) in enumerate(BREAK_RULES, start=1):
             rules_rows.append({
@@ -369,7 +359,6 @@ def main():
 
     with st.sidebar:
         st.header("⚙️ 計算條件設定")
-        # ✅ 已取消：分析執行人（Operator）
         top_n = st.number_input("效率排行顯示人數（Top N）", 10, 100, 30, step=5)
         st.info("提醒：上傳 .xls 需 requirements.txt 安裝 xlrd==2.0.1")
 
@@ -448,7 +437,6 @@ def main():
         for c in ["總筆數", "總工時_分鐘_扣休", "上午筆數", "上午工時_分鐘", "下午筆數", "下午工時_分鐘_扣休"]:
             summary[c] = summary[c].fillna(0).astype(int)
 
-        # 合計列（彙總）
         total_people = int(summary[user_col].nunique())
         total_met = int((summary["效率_件每小時"] >= TARGET_EFF).sum())
         total_rate = (total_met / total_people) if total_people > 0 else 0.0
@@ -468,7 +456,6 @@ def main():
         }
         summary_out = pd.concat([summary, pd.DataFrame([total_row])], ignore_index=True)
 
-        # 長表：明細_時段
         long_rows = []
         for _, r in daily.iterrows():
             if r["上午_筆數"] > 0:
@@ -499,14 +486,9 @@ def main():
         if not detail_long.empty:
             detail_long = detail_long.sort_values([user_col, "日期", "時段", "第一筆時間"])
 
-        # 匯出 bytes
         xlsx_bytes = build_excel_bytes(user_col, summary_out, daily, detail_long)
 
-    # ======================
-    # 介面：左右 AM/PM
-    # ======================
     plot_df = summary.copy()
-
     col_l, col_r = st.columns(2)
 
     with col_l:
@@ -514,6 +496,7 @@ def main():
         render_kpis([
             KPI("人數", f"{int(plot_df[user_col].nunique()):,}"),
             KPI("達標門檻", f"效率 ≥ {TARGET_EFF}"),
+            KPI("整體達標率", f"{total_rate:.1%}"),
         ])
         card_close()
 
@@ -556,43 +539,10 @@ def main():
         )
         card_close()
 
-    # 匯出
     card_open("⬇️ 匯出 KPI 報表（Excel）")
     default_name = f"{uploaded.name.rsplit('.', 1)[0]}_上架績效.xlsx"
     download_excel(xlsx_bytes, default_name)
     card_close()
-
-    # 稽核留存（DB + Storage）
-    st.divider()
-    st.subheader("🧾 稽核留存狀態")
-    try:
-        export_path = upload_export_bytes(
-            content=xlsx_bytes,
-            object_path=f"putaway_runs/{dt.datetime.now():%Y%m%d}/{uuid.uuid4().hex}_putaway.xlsx",
-        )
-        payload = {
-            "app_name": "上架產能分析（Putaway KPI）",
-            # ✅ operator 已取消：不再寫入
-            "source_filename": uploaded.name,
-            "source_sha256": sha256_bytes(content),
-            "params": {
-                "top_n": int(top_n),
-                "target_eff": TARGET_EFF,
-                "filter": "由=QC 且 到不含關鍵字",
-                "am_range": "07:00-12:30",
-                "pm_range": "13:30-23:59:59",
-                "idle_min_threshold": IDLE_MIN_THRESHOLD,
-                "idle_exclude_ranges": [(a.strftime("%H:%M"), b.strftime("%H:%M")) for a, b in EXCLUDE_IDLE_RANGES],
-            },
-            "kpi_am": {"people": total_people, "pass_rate": total_rate},
-            "kpi_pm": {"people": int(plot_df[user_col].nunique()), "pass_rate": float(pm_rate)},
-            "export_object_path": export_path,
-        }
-        row = insert_audit_run(payload)
-        st.success(f"✅ 已成功留存本次分析（ID：{row.get('id','')}）")
-    except Exception as e:
-        st.error("❌ 稽核留存發生錯誤")
-        st.code(repr(e))
 
 
 if __name__ == "__main__":
