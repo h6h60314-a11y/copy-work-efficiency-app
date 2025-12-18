@@ -9,6 +9,8 @@ from common_ui import (
     pivot_am_pm,
     table_block,
     download_excel,
+    card_open,
+    card_close,
 )
 
 from qc_core import run_qc_efficiency
@@ -67,17 +69,16 @@ def main():
         st.header("⚙️ 參數設定")
         params = render_params()
 
-    # 中央：上傳
-    st.markdown("## 📤 上傳資料檔案")
+    # 中央：上傳（卡片）
+    card_open("📤 上傳資料檔案")
     st.caption("請上傳驗收資料（Excel / CSV）。上傳後按『開始計算』即可產出 KPI、圖表與下載報表。")
-
     uploaded = st.file_uploader(
         "請上傳驗收資料",
         type=["xlsx", "xlsm", "xls", "csv", "txt"],
         label_visibility="collapsed",
     )
-
     run_clicked = st.button("🚀 開始計算", type="primary", disabled=(uploaded is None))
+    card_close()
 
     if not run_clicked:
         st.info("請先上傳檔案，再點『開始計算』。")
@@ -91,6 +92,7 @@ def main():
     idle_df = result.get("idle_df", pd.DataFrame())
     target = float(result.get("target_eff", 20.0))
 
+    # KPI
     people = len(full_df) if isinstance(full_df, pd.DataFrame) else 0
     total_cnt = full_df["筆數"].sum() if isinstance(full_df, pd.DataFrame) and "筆數" in full_df.columns else None
     total_hours = full_df["總工時"].sum() if isinstance(full_df, pd.DataFrame) and "總工時" in full_df.columns else None
@@ -103,20 +105,21 @@ def main():
     if isinstance(full_df, pd.DataFrame) and "效率" in full_df.columns and len(full_df) > 0:
         pass_rate = f"{(full_df['效率'] >= target).mean():.0%}"
 
-    st.divider()
     render_kpis(
         [
             KPI("人數", _fmt_int(people), variant="purple"),
             KPI("總筆數", _fmt_int(total_cnt), variant="blue"),
-            KPI("總工時", _fmt_num(total_hours), variant="green"),
-            KPI("平均效率", _fmt_num(avg_eff), variant="orange"),
+            KPI("總工時", _fmt_num(total_hours), variant="cyan"),
+            KPI("平均效率", _fmt_num(avg_eff), variant="teal"),
             KPI("達標率", pass_rate or "—", variant="gray"),
         ]
     )
-    st.divider()
 
-    left, right = st.columns([1.2, 1])
+    # 圖表（卡片）
+    left, right = st.columns([1.15, 1])
+
     with left:
+        card_open("📊 全日效率排行")
         if isinstance(full_df, pd.DataFrame) and not full_df.empty:
             x_col = "姓名" if "姓名" in full_df.columns else full_df.columns[0]
             y_col = "效率" if "效率" in full_df.columns else full_df.columns[-1]
@@ -127,12 +130,14 @@ def main():
                 hover_cols=[c for c in ["記錄輸入人", "筆數", "總工時", "空窗總分鐘"] if c in full_df.columns],
                 top_n=params["top_n"],
                 target=target,
-                title="全日效率排行（Top N）",
+                title="",
             )
         else:
             st.info("彙總資料為空，請確認檔案內容是否正確。")
+        card_close()
 
     with right:
+        card_open("⏱️ 空窗 / AM-PM")
         if isinstance(full_df, pd.DataFrame) and not full_df.empty and "空窗總分鐘" in full_df.columns:
             x_col2 = "姓名" if "姓名" in full_df.columns else full_df.columns[0]
             bar_topN(
@@ -142,23 +147,26 @@ def main():
                 hover_cols=[c for c in ["效率", "空窗筆數"] if c in full_df.columns],
                 top_n=params["top_n"],
                 target=-1.0,
-                title="空窗總分鐘排行（Top N）",
+                title="",
             )
         else:
-            pivot_am_pm(ampm_df, index_col="姓名", segment_col="時段", value_col="效率", title="上午 vs 下午效率（平均）")
+            pivot_am_pm(ampm_df, index_col="姓名", segment_col="時段", value_col="效率", title="")
+        card_close()
 
-    st.divider()
-
+    # 表格（卡片）
     table_block(
-        summary_title="彙總表",
+        summary_title="📄 彙總表",
         summary_df=full_df if isinstance(full_df, pd.DataFrame) else pd.DataFrame(),
         detail_title="空窗明細（收合）",
         detail_df=idle_df if isinstance(idle_df, pd.DataFrame) else pd.DataFrame(),
         detail_expanded=False,
     )
 
+    # 下載
     if result.get("xlsx_bytes"):
+        card_open("⬇️ 匯出")
         download_excel(result["xlsx_bytes"], filename=result.get("xlsx_name", "驗收達標_含空窗_AMPM.xlsx"))
+        card_close()
 
 
 if __name__ == "__main__":
