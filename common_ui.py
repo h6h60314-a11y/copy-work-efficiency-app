@@ -25,33 +25,28 @@ class KPI:
 def inject_purple_theme():
     """
     Purple + Blue Tech SaaS theme.
-    NOTE: do NOT call st.set_page_config here (app.py owns config in navigation mode).
+    NOTE: In navigation mode, DO NOT call st.set_page_config here (app.py owns config).
     """
     st.markdown(
         """
 <style>
 /* ===== Purple-Blue Tech Dashboard Theme ===== */
 :root{
-  --bg: #0B1020;
-  --bg2:#0F1631;
-  --card:#FFFFFF;
-  --text:#0F172A;
-  --muted:#64748B;
-  --stroke: rgba(15,23,42,0.08);
   --shadow: 0 14px 40px rgba(2, 6, 23, .10);
   --shadow2: 0 10px 24px rgba(2, 6, 23, .08);
 }
 
 /* App background */
 .stApp{
-  background: radial-gradient(1200px 700px at 20% -10%, rgba(142,45,226,.18), transparent 55%),
-              radial-gradient(1100px 700px at 80% 0%, rgba(54,209,220,.16), transparent 50%),
-              #F5F7FB;
+  background:
+    radial-gradient(1200px 700px at 20% -10%, rgba(142,45,226,.18), transparent 55%),
+    radial-gradient(1100px 700px at 80% 0%, rgba(54,209,220,.16), transparent 50%),
+    #F5F7FB;
 }
 
 /* Content width like SaaS */
 .block-container{
-  padding-top: 1.2rem;
+  padding-top: 0.65rem;     /* ⬅️ 減少頂部空白 */
   padding-bottom: 2.4rem;
   max-width: 1240px;
 }
@@ -67,9 +62,20 @@ section[data-testid="stSidebar"] label{
   color: #0F172A;
 }
 
-/* Headings */
-h1,h2,h3{
-  letter-spacing: .2px;
+/* ===== Remove top white header block ===== */
+/* 移除 h1 上下多餘留白 */
+h1{
+  margin-top: 0.15rem !important;
+  margin-bottom: 0.75rem !important;
+}
+/* 讓頂部第一塊透明，不要看起來像白框 */
+.block-container > div:first-child{
+  background: transparent !important;
+  padding-top: 0.2rem !important;
+}
+/* 避免 markdown 區塊自己帶底色造成白帶 */
+.stMarkdown{
+  background: transparent !important;
 }
 
 /* Card container */
