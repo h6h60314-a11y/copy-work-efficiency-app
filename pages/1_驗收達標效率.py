@@ -7,10 +7,10 @@ from common_ui import (
     KPI,
     render_kpis,
     bar_topN,
-    download_excel,
+    download_excel_card,   # ✅ 用卡片外框但不分段（common_ui 已改成無標題卡片）
+    sidebar_controls,      # ✅ 統一左側設定（不含 Operator）
     card_open,
     card_close,
-    sidebar_controls,  # ✅ 統一左側設定（不含 Operator）
 )
 
 from qc_core import run_qc_efficiency
@@ -45,6 +45,12 @@ def main():
     inject_logistics_theme()
     set_page("驗收作業效能（KPI）", icon="✅", subtitle="驗收作業｜人時效率｜AM / PM 班別｜KPI 達標分析")
 
+    # ✅ Session：保存上一筆 KPI 結果（避免按下載/互動 rerun 後畫面消失）
+    if "qc_last_result" not in st.session_state:
+        st.session_state.qc_last_result = None
+    if "qc_last_filename" not in st.session_state:
+        st.session_state.qc_last_filename = None
+
     # ======================
     # Sidebar：計算條件設定（不含 Operator）
     # ======================
@@ -61,22 +67,32 @@ def main():
         type=["xlsx", "xls", "csv"],
         label_visibility="collapsed",
     )
-    run = st.button("🚀 產出 KPI", type="primary", disabled=uploaded is None)
+
+    # ⚠️ 點擊會 rerun；所以我們在點擊後把結果寫進 session_state
+    run_clicked = st.button("🚀 產出 KPI", type="primary", disabled=uploaded is None)
     card_close()
 
-    if not run:
-        st.info("請先上傳驗收作業原始資料")
-        return
+    if run_clicked:
+        with st.spinner("KPI 計算中，請稍候..."):
+            result = run_qc_efficiency(
+                uploaded.getvalue(),
+                uploaded.name,
+                skip_rules,
+            )
+
+        # ✅ 存起來，之後按下載也不會清掉
+        st.session_state.qc_last_result = result
+        st.session_state.qc_last_filename = uploaded.name
 
     # ======================
-    # 計算
+    # 取用結果（✅ 一律從 session_state 讀）
     # ======================
-    with st.spinner("KPI 計算中，請稍候..."):
-        result = run_qc_efficiency(
-            uploaded.getvalue(),
-            uploaded.name,
-            skip_rules,
-        )
+    result = st.session_state.qc_last_result
+
+    # 尚未產出 KPI 才提示
+    if not result:
+        st.info("請先上傳驗收作業原始資料並點選「🚀 產出 KPI」")
+        return
 
     df = result.get("ampm_df", pd.DataFrame())
     target = float(result.get("target_eff", 20.0))
@@ -121,7 +137,7 @@ def main():
                 y_col="效率",
                 hover_cols=["筆數", "總工時"],
                 top_n=top_n,
-                target=target,  # ✅ <target 自動紅色（由 common_ui.bar_topN 處理）
+                target=target,  # ✅ 低於 target 自動紅色（common_ui.bar_topN）
             )
         card_close()
 
@@ -132,12 +148,14 @@ def main():
         render_shift("🌙 PM 班（驗收）", pm_df)
 
     # ======================
-    # 匯出
+    # 匯出（✅ 按下去 KPI 畫面仍保留）
     # ======================
     if result.get("xlsx_bytes"):
-        card_open("⬇️ 匯出 KPI 報表")
-        download_excel(result["xlsx_bytes"], result.get("xlsx_name", "驗收作業KPI.xlsx"))
-        card_close()
+        download_excel_card(
+            result["xlsx_bytes"],
+            result.get("xlsx_name", "驗收作業KPI.xlsx"),
+            label="⬇️ 匯出 KPI 報表（Excel）",
+        )
 
 
 if __name__ == "__main__":
