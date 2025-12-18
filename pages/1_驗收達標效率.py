@@ -19,24 +19,50 @@ def render_params():
     if "skip_rules" not in st.session_state:
         st.session_state.skip_rules = []
 
-    st.caption("排除規則：該人(或全員)在此時間區間的紀錄不參與統計，且會從總分鐘/空窗扣除。")
-    user = st.text_input("記錄輸入人（可空白＝全員）", value="")
-    t1 = st.time_input("開始時間")
-    t2 = st.time_input("結束時間")
+    st.caption("排除規則：可選擇『全天』或『指定時間區間』排除；未勾選時間即視為全天。")
 
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("➕ 加入規則"):
-            if t2 < t1:
-                st.error("結束時間需 >= 開始時間")
+    user = st.text_input("記錄輸入人（可空白＝全員）", value="")
+
+    # ✅ 關鍵：預設不啟用時間，完全不顯示 time_input（避免預設時間）
+    use_time = st.checkbox("啟用時間區間條件（自行輸入）", value=False)
+
+    t_start = None
+    t_end = None
+    if use_time:
+        c1, c2 = st.columns(2)
+        with c1:
+            t_start = st.time_input("開始時間")
+        with c2:
+            t_end = st.time_input("結束時間")
+
+    c_add, c_clear = st.columns(2)
+    with c_add:
+        if st.button("➕ 加入排除規則"):
+            if use_time:
+                if t_start is None or t_end is None:
+                    st.error("請完整輸入開始與結束時間。")
+                elif t_end < t_start:
+                    st.error("結束時間需大於等於開始時間。")
+                else:
+                    st.session_state.skip_rules.append(
+                        {"user": user.strip(), "t_start": t_start, "t_end": t_end}
+                    )
             else:
-                st.session_state.skip_rules.append({"user": user.strip(), "t_start": t1, "t_end": t2})
-    with c2:
-        if st.button("🧹 清空規則"):
+                # 全天排除：t_start/t_end 以 None 表示
+                st.session_state.skip_rules.append(
+                    {"user": user.strip(), "t_start": None, "t_end": None}
+                )
+
+    with c_clear:
+        if st.button("🧹 清空排除規則"):
             st.session_state.skip_rules = []
 
     if st.session_state.skip_rules:
-        st.dataframe(pd.DataFrame(st.session_state.skip_rules), use_container_width=True, hide_index=True)
+        st.dataframe(
+            pd.DataFrame(st.session_state.skip_rules),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     top_n = st.number_input("排行顯示人數", min_value=10, max_value=100, value=30, step=10)
     return {"skip_rules": st.session_state.skip_rules, "top_n": int(top_n)}
@@ -83,10 +109,7 @@ def _build_kpis_from_df(df: pd.DataFrame, target: float):
 
 
 def _filter_segment(df: pd.DataFrame, segment: str) -> pd.DataFrame:
-    """
-    segment: '上午' or '下午'
-    If df has column '時段', filter by it; otherwise return df as-is.
-    """
+    """segment: '上午' or '下午'"""
     if df is None or df.empty:
         return df
     if "時段" in df.columns:
@@ -127,7 +150,7 @@ def main():
     with st.spinner("計算中..."):
         result = run_qc_efficiency(uploaded.getvalue(), uploaded.name, params["skip_rules"])
 
-    # 這三個資料 qc_core 會回傳（你已在 qc_core 做一致過濾：姓名+記錄輸入人）
+    # qc_core 回傳（你已在 qc_core 做一致過濾：姓名+記錄輸入人 + 排除羅仲宇）
     full_df = result.get("full_df", pd.DataFrame())
     ampm_df = result.get("ampm_df", pd.DataFrame())
     idle_df = result.get("idle_df", pd.DataFrame())
@@ -135,27 +158,26 @@ def main():
     target = float(result.get("target_eff", 20.0))
     top_n = int(params.get("top_n", 30))
 
-    # 分段資料：上午 / 下午
-    am_df = _filter_segment(ampm_df, "上午")
-    pm_df = _filter_segment(ampm_df, "下午")
-
-    am_idle = _filter_segment(idle_df, "上午")
-    pm_idle = _filter_segment(idle_df, "下午")
-
-    # 若 ampm_df 沒有時段欄，仍可顯示全體提示
-    if isinstance(ampm_df, pd.DataFrame) and (ampm_df.empty or ("時段" not in ampm_df.columns)):
+    # 必須要能用「時段」拆 AM/PM
+    if not (isinstance(ampm_df, pd.DataFrame) and (not ampm_df.empty) and ("時段" in ampm_df.columns)):
         st.warning("目前回傳的 AM/PM 資料缺少「時段」欄位，無法分上午/下午顯示。請確認 qc_core 是否有產出 ampm_df['時段']。")
-        # 仍顯示全體（fallback）
         card_open("📄 全體彙總（Fallback）")
         st.dataframe(full_df, use_container_width=True)
         card_close()
+
         if result.get("xlsx_bytes"):
             card_open("⬇️ 匯出")
             download_excel(result["xlsx_bytes"], filename=result.get("xlsx_name", "驗收達標_含空窗_AMPM.xlsx"))
             card_close()
         return
 
-    # 主畫面：Tabs 分上午/下午
+    # 分段：上午 / 下午
+    am_df = _filter_segment(ampm_df, "上午")
+    pm_df = _filter_segment(ampm_df, "下午")
+
+    am_idle = _filter_segment(idle_df, "上午")
+    pm_idle = _filter_segment(idle_df, "下午")
+
     tab_am, tab_pm = st.tabs(["🌓 上午", "🌙 下午"])
 
     def render_segment(segment_name: str, seg_df: pd.DataFrame, seg_idle: pd.DataFrame):
@@ -174,10 +196,9 @@ def main():
         card_close()
 
         if seg_df is None or seg_df.empty:
-            st.info(f"{segment_name} 沒有可顯示的資料（可能都被過濾：需同時有『記錄輸入人』+『姓名』）。")
+            st.info(f"{segment_name} 沒有可顯示的資料（可能都被過濾或排除）。")
             return
 
-        # 圖表區：效率 TopN + 空窗 TopN（如有）
         left, right = st.columns([1.15, 1])
 
         with left:
@@ -196,7 +217,7 @@ def main():
             card_close()
 
         with right:
-            if seg_df is not None and ("空窗總分鐘" in seg_df.columns):
+            if "空窗總分鐘" in seg_df.columns:
                 card_open(f"⏱️ {segment_name} 空窗總分鐘排行（Top {top_n}）")
                 x2 = _safe_col(seg_df, ["姓名", "人員", "員工姓名"], 0)
                 bar_topN(
@@ -211,10 +232,10 @@ def main():
                 card_close()
             else:
                 card_open(f"ℹ️ {segment_name} 空窗")
-                st.caption("此段資料沒有「空窗總分鐘」欄位，改以明細表呈現空窗。")
+                st.caption("此段資料沒有「空窗總分鐘」欄位，改以下方『空窗明細』呈現。")
                 card_close()
 
-        # 表格區：彙總 + 空窗明細（若能依時段切）
+        # 表格：彙總 + 空窗明細
         table_block(
             summary_title=f"📄 {segment_name} 彙總表",
             summary_df=seg_df if isinstance(seg_df, pd.DataFrame) else pd.DataFrame(),
