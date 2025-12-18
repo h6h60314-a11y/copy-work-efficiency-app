@@ -16,6 +16,7 @@ def inject_logistics_theme():
     Logistics / Warehouse dashboard style.
     - 中間內容區更寬（完整呈現）
     - 全站字體縮小一點（含側欄、Metric）
+    - 下載按鈕一致化
     """
     st.markdown(
         """
@@ -26,7 +27,7 @@ def inject_logistics_theme():
   --line: rgba(15, 23, 42, 0.10);
   --card: rgba(255,255,255,0.88);
   --card2: rgba(255,255,255,0.70);
-  --blue: rgba(2, 132, 199, 1.00);        /* sky-600 */
+  --blue: rgba(2, 132, 199, 1.00);
   --blueSoft: rgba(2, 132, 199, 0.12);
   --blueSoft2: rgba(2, 132, 199, 0.18);
   --badBg: #FDE2E2;
@@ -44,7 +45,7 @@ div[data-testid="stDecoration"] { display: none; }
 
 /* ============== Layout: make center wider ============== */
 .block-container{
-  max-width: 1600px !important;     /* 你可改 1400~1900 */
+  max-width: 1600px !important;
   padding-top: 0.8rem !important;
   padding-bottom: 1.6rem !important;
   padding-left: 1.0rem !important;
@@ -56,7 +57,7 @@ div[data-testid="stDecoration"] { display: none; }
 
 /* ============== Global font scale (smaller) ============== */
 html, body, [class*="st-"], .stApp{
-  font-size: 14px !important;       /* 可改 13~15 */
+  font-size: 14px !important;
 }
 
 /* 標題縮小 */
@@ -143,7 +144,7 @@ div[data-testid="stDownloadButton"] button{
   border: 1px solid rgba(2, 132, 199, 0.30) !important;
   background: var(--blueSoft) !important;
   color: var(--ink) !important;
-  padding: 0.55rem 0.9rem !important;
+  padding: 0.60rem 0.95rem !important;
   font-weight: 900 !important;
 }
 div[data-testid="stDownloadButton"] button:hover{
@@ -163,7 +164,7 @@ div[data-testid="stFileUploaderDropzone"]{
     )
 
 
-# Backward compatibility (你曾經用 inject_purple_theme)
+# Backward compatibility
 def inject_purple_theme():
     inject_logistics_theme()
 
@@ -172,9 +173,6 @@ def inject_purple_theme():
 # Page helpers
 # =========================================================
 def set_page(title: str, icon: str = "🏭", subtitle: Optional[str] = None):
-    """
-    Consistent page header/title block.
-    """
     inject_logistics_theme()
     st.markdown(f"## {icon} {title}")
     if subtitle:
@@ -234,9 +232,6 @@ def render_kpis(kpis: Sequence[KPI], cols: Optional[int] = None):
 # KPI Table Styling（低於門檻 → 紅色）
 # =========================================================
 def style_kpi_below_target(df: pd.DataFrame, eff_col: str, target: float):
-    """
-    KPI 表顯示用：eff_col < target → 整列紅色。
-    """
     def _row_style(row):
         try:
             val = float(row.get(eff_col))
@@ -251,9 +246,6 @@ def style_kpi_below_target(df: pd.DataFrame, eff_col: str, target: float):
 
 
 def show_kpi_table(df: pd.DataFrame, *, eff_col: str, target: float):
-    """
-    統一顯示 KPI 表（自動套用未達標紅色）
-    """
     if df is None or df.empty:
         st.info("目前沒有可顯示的資料")
         return
@@ -277,11 +269,6 @@ def bar_topN(
     target: Optional[float] = None,
     title: str = "",
 ):
-    """
-    Top N 長條圖：
-    - 若有 target：y < target 以紅色顯示，y >= target 以藍色顯示
-    - 並畫出 target 虛線
-    """
     if df is None or df.empty:
         st.info("目前無資料可視覺化")
         return
@@ -300,8 +287,8 @@ def bar_topN(
         if target is not None:
             color_enc = alt.condition(
                 alt.datum[y_col] < float(target),
-                alt.value("#DC2626"),  # red-600
-                alt.value("#0284C7"),  # sky-600
+                alt.value("#DC2626"),
+                alt.value("#0284C7"),
             )
         else:
             color_enc = alt.value("#0284C7")
@@ -319,7 +306,6 @@ def bar_topN(
         )
 
         layers = [base]
-
         if target is not None:
             rule = (
                 alt.Chart(pd.DataFrame({"target": [float(target)]}))
@@ -358,11 +344,6 @@ def sidebar_controls(
     enable_exclude_windows: bool = True,
     state_key_prefix: str = "gt",
 ) -> Dict[str, Any]:
-    """
-    統一左側「計算條件設定」（不含 Operator）：
-    - TopN
-    - 排除區間（非作業時段）手動輸入 HH:MM
-    """
     inject_logistics_theme()
     result: Dict[str, Any] = {}
 
@@ -456,8 +437,8 @@ def sidebar_controls(
 def download_excel(
     xlsx_bytes: bytes,
     filename: str = "KPI報表.xlsx",
-    label: str = "⬇️ 匯出 KPI 報表（Excel）",
-    use_container_width: bool = True,  # ✅ 預設整條按鈕，符合「文字=按鈕」
+    label: str = "⬇️ 匯出 KPI 報表",
+    use_container_width: bool = True,
 ):
     st.download_button(
         label=label,
@@ -468,24 +449,35 @@ def download_excel(
     )
 
 
+def download_excel_button(
+    xlsx_bytes: bytes,
+    filename: str = "KPI報表.xlsx",
+    label: str = "⬇️ 匯出 KPI 報表",
+):
+    """
+    你要的效果：畫面上「只看到一行文字」，而且那一行本身就是下載按鈕。
+    用法（頁面上直接呼叫，不要再 card_open）：
+        download_excel_button(xlsx_bytes, xlsx_name, "⬇️ 匯出 KPI 報表")
+    """
+    st.download_button(
+        label=label,
+        data=xlsx_bytes,
+        file_name=filename,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+
 def download_excel_card(
     xlsx_bytes: bytes,
     filename: str = "KPI報表.xlsx",
-    label: str = "⬇️ 匯出 KPI 報表（Excel）",
-    show_title: bool = False,
+    label: str = "⬇️ 匯出 KPI 報表",
 ):
     """
-    「文字=按鈕」版：
-    - 用卡片包住
-    - 卡片內只有一顆全寬按鈕
+    保留舊函式：卡片外框 + 內部按鈕（卡片無標題，避免「標題+按鈕」變兩段）
     """
-    card_open(label if show_title else "")
-    download_excel(
-        xlsx_bytes=xlsx_bytes,
-        filename=filename,
-        label=label,
-        use_container_width=True,
-    )
+    card_open("")
+    download_excel_button(xlsx_bytes=xlsx_bytes, filename=filename, label=label)
     card_close()
 
 
@@ -493,10 +485,6 @@ def download_excel_card(
 # Excel helpers
 # =========================================================
 def dataframe_to_excel_bytes(sheets: Dict[str, pd.DataFrame]) -> bytes:
-    """
-    將多分頁 DataFrame 匯出成 Excel bytes（供 download_excel 使用）
-    sheets: {"總表": df1, "明細": df2, ...}
-    """
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         for name, df in sheets.items():
@@ -508,7 +496,7 @@ def dataframe_to_excel_bytes(sheets: Dict[str, pd.DataFrame]) -> bytes:
 
 
 # =========================================================
-# Optional: table_block（若你其他頁面有用到）
+# Optional: table_block
 # =========================================================
 def table_block(
     summary_title: str,
@@ -520,10 +508,6 @@ def table_block(
     style_eff_col: Optional[str] = None,
     style_target: Optional[float] = None,
 ):
-    """
-    Card + dataframe 顯示。
-    若提供 style_eff_col & style_target，則套用未達標紅色（整列）。
-    """
     card_open(summary_title)
     if summary_df is None or summary_df.empty:
         st.info("目前沒有可顯示的資料")
