@@ -199,7 +199,9 @@ def _chart_unused(res_df: pd.DataFrame):
 
 def _render_category_card(item: dict, warn_threshold: float):
     """
-    卡片：使用率 < warn_threshold 整塊紅底，否則綠底
+    ✅ 卡片 KPI 直向顯示
+    - 使用率 < warn_threshold → 整塊紅底
+    - 否則綠底
     """
     cat = str(item.get("類別", ""))
     valid = int(item.get("有效貨位", 0))
@@ -218,32 +220,40 @@ def _render_category_card(item: dict, warn_threshold: float):
   border: 1px solid {bd};
   background: {bg};
   border-radius: 18px;
-  padding: 14px 14px 10px 14px;
+  padding: 14px 16px 14px 16px;
   box-shadow: 0 10px 24px rgba(15,23,42,0.06);
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 ">
-  <div style="font-weight: 900; font-size: 18px; margin-bottom: 6px; color: {fg};">
+  <div style="font-weight: 900; font-size: 18px; margin-bottom: 12px; color: {fg};">
     {cat}
+  </div>
+
+  <div style="display:flex; flex-direction:column; gap:10px;">
+    <div>
+      <div style="opacity:0.70; font-weight:700;">有效貨位</div>
+      <div style="font-size:22px; font-weight:900;">{valid:,}</div>
+    </div>
+
+    <div>
+      <div style="opacity:0.70; font-weight:700;">已使用貨位</div>
+      <div style="font-size:22px; font-weight:900;">{used:,}</div>
+    </div>
+
+    <div>
+      <div style="opacity:0.70; font-weight:700;">使用率</div>
+      <div style="font-size:22px; font-weight:900;">{rate:.2f}%</div>
+    </div>
   </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
-    render_kpis(
-        [
-            KPI("有效貨位", f"{valid:,}"),
-            KPI("已使用貨位", f"{used:,}"),
-            KPI("使用率", f"{rate:.2f}%"),
-        ],
-        cols=3,
-    )
-
 
 def main():
     st.set_page_config(page_title="儲位分類統計", page_icon="📦", layout="wide")
     inject_logistics_theme()
-    set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜圖格在最上方｜門檻常駐顯示")
+    set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜圖格一列一張｜門檻常駐顯示｜卡片直向")
 
     # ======================
     # 上傳
@@ -280,7 +290,7 @@ def main():
 
         st.divider()
         st.header("🎯 圖表門檻（同目標線）")
-        _ = st.checkbox("顯示使用率目標線", value=False)  # 保留 UI，但門檻與著色永遠照下面數值
+        _ = st.checkbox("顯示使用率目標線", value=False)  # UI 常駐保留
         chart_threshold = st.number_input(
             "使用率門檻（%）",
             min_value=0.0,
@@ -337,23 +347,15 @@ def main():
     card_close()
 
     # ======================
-    # 🧾 圖格總覽（在圖表最上方）
+    # 🧾 圖格總覽（一列一張｜完全直向）
     # ======================
     card_open("🧾 依格式顯示（圖格總覽｜低於門檻紅卡）")
-
-    cats = res_df.to_dict("records")
-    rows = [cats[i:i + 2] for i in range(0, len(cats), 2)]
-
-    for row in rows:
-        cols = st.columns(2)
-        for i, item in enumerate(row):
-            with cols[i]:
-                _render_category_card(item, warn_threshold=float(warn_threshold))
-
+    for item in res_df.to_dict("records"):
+        _render_category_card(item, warn_threshold=float(warn_threshold))
     card_close()
 
     # ======================
-    # KPI 圖表（✅ 已移除「有效 vs 已使用」）
+    # KPI 圖表（✅ 不含「有效 vs 已使用」）
     # ======================
     card_open("📊 各類別使用率(%)（>門檻紅色）")
     _chart_usage_rate(res_df, threshold=float(chart_threshold))
