@@ -36,6 +36,34 @@ def _to_num(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s, errors="coerce").fillna(0)
 
 
+def _inject_responsive_grid_css():
+    """
+    ✅ 依螢幕寬度自動切欄數：CSS Grid auto-fit + minmax
+    - 大螢幕：通常 4 欄以上
+    - 中螢幕：2-3 欄
+    - 手機：1 欄
+    """
+    st.markdown(
+        """
+<style>
+/* Responsive Card Grid */
+.gt-card-grid{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* make each card fill its grid cell height nicely */
+.gt-card-grid .gt-slot{
+  min-width: 0;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
 def sidebar_category_editor() -> dict:
     """
     Sidebar：可手動調整分類定義（逗號分隔）。
@@ -197,7 +225,7 @@ def _chart_unused(res_df: pd.DataFrame):
         st.bar_chart(res_df.set_index("類別")["未使用貨位"])
 
 
-def _render_category_card(item: dict, warn_threshold: float):
+def _category_card_html(item: dict, warn_threshold: float) -> str:
     """
     ✅ 卡片 KPI：完全直向一項一列（符合你示意）
       類別
@@ -218,48 +246,42 @@ def _render_category_card(item: dict, warn_threshold: float):
     bd = "rgba(156,0,6,0.45)" if is_bad else "rgba(0,97,0,0.30)"
     fg = "rgba(156,0,6,1.0)" if is_bad else "rgba(0,97,0,1.0)"
 
-    st.markdown(
-        f"""
+    return f"""
 <div style="
+  width:100%;
   border: 1px solid {bd};
   background: {bg};
   border-radius: 18px;
   padding: 16px 18px;
   box-shadow: 0 10px 24px rgba(15,23,42,0.06);
-  margin-bottom: 18px;
 ">
-  <!-- 類別 -->
   <div style="font-weight:900; font-size:18px; margin-bottom:16px; color:{fg};">
     {cat}
   </div>
 
-  <!-- 有效貨位 -->
   <div style="margin-bottom:14px;">
     <div style="opacity:0.70; font-weight:700;">有效貨位</div>
     <div style="font-size:22px; font-weight:900;">{valid:,}</div>
   </div>
 
-  <!-- 已使用貨位 -->
   <div style="margin-bottom:14px;">
     <div style="opacity:0.70; font-weight:700;">已使用貨位</div>
     <div style="font-size:22px; font-weight:900;">{used:,}</div>
   </div>
 
-  <!-- 使用率 -->
   <div>
     <div style="opacity:0.70; font-weight:700;">使用率</div>
     <div style="font-size:22px; font-weight:900;">{rate:.2f}%</div>
   </div>
 </div>
-""",
-        unsafe_allow_html=True,
-    )
+"""
 
 
 def main():
     st.set_page_config(page_title="儲位分類統計", page_icon="📦", layout="wide")
     inject_logistics_theme()
-    set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜圖格一列一張｜卡片直向一項一列")
+    _inject_responsive_grid_css()
+    set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜卡片橫向自動切欄｜卡片內容直向")
 
     # ======================
     # 上傳
@@ -353,11 +375,15 @@ def main():
     card_close()
 
     # ======================
-    # 🧾 圖格總覽（一列一張｜完全直向）
+    # 🧾 圖格總覽（✅ 橫向 + 依螢幕自動切欄）
     # ======================
     card_open("🧾 依格式顯示（圖格總覽｜低於門檻紅卡）")
-    for item in res_df.to_dict("records"):
-        _render_category_card(item, warn_threshold=float(warn_threshold))
+
+    items = res_df.to_dict("records")
+    cards_html = "\n".join([f'<div class="gt-slot">{_category_card_html(it, float(warn_threshold))}</div>' for it in items])
+
+    st.markdown(f'<div class="gt-card-grid">{cards_html}</div>', unsafe_allow_html=True)
+
     card_close()
 
     # ======================
