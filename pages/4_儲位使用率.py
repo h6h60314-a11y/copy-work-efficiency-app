@@ -46,23 +46,29 @@ def compute(df: pd.DataFrame, col_zone: str, col_valid: str, col_used: str):
 
     rows = []
     for name, zones in CATEGORIES.items():
-        data = df[df[col_zone].isin([str(z) for z in zones])]
+        zones_str = [str(z) for z in zones]
+        data = df[df[col_zone].isin(zones_str)]
+
         total_valid = float(data[col_valid].sum())
         total_used = float(data[col_used].sum())
+        unused = max(total_valid - total_used, 0.0)
         usage_rate = (total_used / total_valid * 100.0) if total_valid > 0 else 0.0
+
         rows.append(
             {
                 "類別": name,
                 "有效貨位": int(round(total_valid)),
                 "已使用貨位": int(round(total_used)),
-                "未使用貨位": int(round(max(total_valid - total_used, 0))),
+                "未使用貨位": int(round(unused)),
                 "使用率(%)": round(usage_rate, 2),
             }
         )
 
+    # 未分類區(溫層)
     all_defined = [z for v in CATEGORIES.values() for z in v]
+    all_defined_str = [str(x) for x in all_defined]
     others = sorted(
-        df.loc[~df[col_zone].isin([str(x) for x in all_defined]), col_zone]
+        df.loc[~df[col_zone].isin(all_defined_str), col_zone]
         .dropna()
         .astype(str)
         .str.strip()
@@ -75,7 +81,10 @@ def compute(df: pd.DataFrame, col_zone: str, col_valid: str, col_used: str):
 
 
 def _chart_usage_rate(res_df: pd.DataFrame, target: float | None = None):
-    # Altair 失敗就 fallback
+    if res_df is None or res_df.empty:
+        st.info("無資料可視覺化")
+        return
+
     try:
         import altair as alt  # type: ignore
 
@@ -103,10 +112,20 @@ def _chart_usage_rate(res_df: pd.DataFrame, target: float | None = None):
 
 
 def _chart_valid_used(res_df: pd.DataFrame):
+    if res_df is None or res_df.empty:
+        st.info("無資料可視覺化")
+        return
+
     try:
         import altair as alt  # type: ignore
 
-        melted = res_df.melt(id_vars=["類別"], value_vars=["有效貨位", "已使用貨位"], var_name="指標", value_name="數量")
+        melted = res_df.melt(
+            id_vars=["類別"],
+            value_vars=["有效貨位", "已使用貨位"],
+            var_name="指標",
+            value_name="數量",
+        )
+
         chart = (
             alt.Chart(melted)
             .mark_bar()
@@ -124,6 +143,10 @@ def _chart_valid_used(res_df: pd.DataFrame):
 
 
 def _chart_unused(res_df: pd.DataFrame):
+    if res_df is None or res_df.empty:
+        st.info("無資料可視覺化")
+        return
+
     try:
         import altair as alt  # type: ignore
 
@@ -172,10 +195,12 @@ def main():
     df.columns = df.columns.astype(str).str.strip()
 
     # ======================
-    # 欄位設定 + KPI目標（可選）
+    # Sidebar：欄位設定 + 目標線
     # ======================
     with st.sidebar:
         st.header("⚙️ 欄位設定")
+        st.caption("若你的欄位名稱不同，請在這裡調整。")
+
         col_zone = st.text_input("區(溫層) 欄位", value=DEFAULT_COL_ZONE)
         col_valid = st.text_input("有效貨位 欄位", value=DEFAULT_COL_VALID)
         col_used = st.text_input("已使用貨位 欄位", value=DEFAULT_COL_USED)
@@ -183,13 +208,18 @@ def main():
         st.divider()
         st.header("🎯 目標線（可選）")
         use_target = st.checkbox("顯示使用率目標線", value=False)
-        target_rate = st.number_input("使用率目標(%)", min_value=0.0, max_value=100.0, value=90.0, step=1.0) if use_target else None
+        target_rate = (
+            st.number_input("使用率目標(%)", min_value=0.0, max_value=100.0, value=90.0, step=1.0)
+            if use_target
+            else None
+        )
 
         st.divider()
         st.header("🧩 分類定義（固定）")
         for k, v in CATEGORIES.items():
             st.write(f"- **{k}**：{', '.join(v)}")
 
+    # 欄位檢查
     missing = [c for c in [col_zone, col_valid, col_used] if c not in df.columns]
     if missing:
         st.error("❌ 找不到欄位")
@@ -197,10 +227,13 @@ def main():
         st.write("目前欄位：", list(df.columns))
         return
 
+    # ======================
+    # 計算
+    # ======================
     res_df, others = compute(df, col_zone, col_valid, col_used)
 
     # ======================
-    # KPI 卡片
+    # KPI 總覽
     # ======================
     total_valid = int(res_df["有效貨位"].sum()) if not res_df.empty else 0
     total_used = int(res_df["已使用貨位"].sum()) if not res_df.empty else 0
@@ -238,17 +271,32 @@ def main():
     card_close()
 
     # ======================
-    # 文字輸出（保留你原本格式）
+    # 🧾 依格式顯示（B：2x2 圖格總覽）
     # ======================
-    card_open("🧾 依格式顯示（與 Console 同邏輯）")
-    for _, r in res_df.iterrows():
-        st.markdown(f"### {r['類別']}:")
-        st.write(f"有效貨位={int(r['有效貨位']):,}")
-        st.write(f"已使用貨位={int(r['已使用貨位']):,}")
-        st.write(f"使用率={float(r['使用率(%)']):.2f}%")
-        st.write("")
+    card_open("🧾 依格式顯示（圖格總覽）")
+
+    cats = res_df.to_dict("records")
+    rows = [cats[i:i + 2] for i in range(0, len(cats), 2)]
+
+    for row in rows:
+        cols = st.columns(2)
+        for i, item in enumerate(row):
+            with cols[i]:
+                st.markdown(f"### {item['類別']}")
+                render_kpis(
+                    [
+                        KPI("有效貨位", f"{int(item['有效貨位']):,}"),
+                        KPI("已使用貨位", f"{int(item['已使用貨位']):,}"),
+                        KPI("使用率", f"{float(item['使用率(%)']):.2f}%"),
+                    ],
+                    cols=3,
+                )
+
     card_close()
 
+    # ======================
+    # 未分類清單
+    # ======================
     card_open("🔍 未納入四類分類的 區(溫層)")
     if others:
         st.write(others)
@@ -257,7 +305,7 @@ def main():
     card_close()
 
     # ======================
-    # 匯出
+    # 匯出 Excel
     # ======================
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
