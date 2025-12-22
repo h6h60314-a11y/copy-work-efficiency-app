@@ -9,14 +9,16 @@ import streamlit as st
 
 
 # =========================================================
-# Theme / CSS（物流專業風格）
+# Theme / CSS（公司化：深色側欄 + 物流專業風格）
 # =========================================================
 def inject_logistics_theme():
     """
-    Logistics / Warehouse dashboard style.
-    - 中間內容區更寬（完整呈現）
-    - 全站字體縮小一點（含側欄、Metric）
-    - 下載按鈕一致化
+    Company-like internal dashboard style (Logistics).
+    - 深色 Sidebar（像公司內網選單）
+    - 內容區卡片化 + 更寬
+    - 字體縮小、層級更清楚
+    - Primary/Secondary/Danger 按鈕分級
+    - 表格更像 BI 報表
     """
     st.markdown(
         """
@@ -25,13 +27,24 @@ def inject_logistics_theme():
   --ink: rgba(15, 23, 42, 0.92);
   --muted: rgba(15, 23, 42, 0.60);
   --line: rgba(15, 23, 42, 0.10);
-  --card: rgba(255,255,255,0.88);
-  --card2: rgba(255,255,255,0.70);
+
+  --card: rgba(255,255,255,0.90);
+  --card2: rgba(255,255,255,0.72);
+
   --blue: rgba(2, 132, 199, 1.00);
   --blueSoft: rgba(2, 132, 199, 0.12);
   --blueSoft2: rgba(2, 132, 199, 0.18);
+
   --badBg: #FDE2E2;
   --badText: #7F1D1D;
+
+  --goodBg: #DCFCE7;
+  --goodText: #14532D;
+
+  --sidebarBg: #0B1220;
+  --sidebarInk: #E7EEF9;
+  --sidebarMuted: rgba(231,238,249,0.72);
+  --sidebarLine: rgba(255,255,255,0.10);
 }
 
 .stApp {
@@ -45,14 +58,14 @@ div[data-testid="stDecoration"] { display: none; }
 
 /* ============== Layout: make center wider ============== */
 .block-container{
-  max-width: 1600px !important;
+  max-width: 1650px !important;
   padding-top: 0.8rem !important;
   padding-bottom: 1.6rem !important;
   padding-left: 1.0rem !important;
   padding-right: 1.0rem !important;
 }
 @media (min-width: 1800px){
-  .block-container{ max-width: 1800px !important; }
+  .block-container{ max-width: 1850px !important; }
 }
 
 /* ============== Global font scale (smaller) ============== */
@@ -60,21 +73,60 @@ html, body, [class*="st-"], .stApp{
   font-size: 14px !important;
 }
 
-/* 標題縮小 */
+/* 標題縮小更像公司系統 */
 h1 { font-size: 28px !important; }
 h2 { font-size: 22px !important; }
 h3 { font-size: 16px !important; }
 
-/* Sidebar */
+/* ================= Sidebar（深色公司內網選單） ================= */
 section[data-testid="stSidebar"]{
-  background: #f8fafc;
-  border-right: 1px solid var(--line);
+  background: var(--sidebarBg);
+  border-right: 1px solid var(--sidebarLine);
 }
 section[data-testid="stSidebar"] *{
+  color: var(--sidebarInk) !important;
   font-size: 13px !important;
 }
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{
+  color: var(--sidebarInk) !important;
+}
+section[data-testid="stSidebar"] hr{
+  border-color: var(--sidebarLine) !important;
+}
+section[data-testid="stSidebar"] .stCaption, section[data-testid="stSidebar"] small{
+  color: var(--sidebarMuted) !important;
+}
 
-/* Card */
+/* Sidebar inputs */
+section[data-testid="stSidebar"] input,
+section[data-testid="stSidebar"] textarea{
+  background: rgba(255,255,255,0.06) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  color: var(--sidebarInk) !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="select"] > div{
+  background: rgba(255,255,255,0.06) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+}
+section[data-testid="stSidebar"] label{
+  color: var(--sidebarMuted) !important;
+  font-weight: 700 !important;
+}
+
+/* Sidebar button */
+section[data-testid="stSidebar"] .stButton>button{
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.14);
+  color: var(--sidebarInk);
+  border-radius: 14px;
+  font-weight: 900;
+}
+section[data-testid="stSidebar"] .stButton>button:hover{
+  background: rgba(255,255,255,0.14);
+  border: 1px solid rgba(255,255,255,0.18);
+}
+
+/* ================= Card（內容卡片） ================= */
 ._gt_card{
   border: 1px solid var(--line);
   background: var(--card);
@@ -101,8 +153,20 @@ section[data-testid="stSidebar"] *{
   border-radius:999px;
   border:1px solid var(--line);
   font-size:12px;
-  font-weight:800;
+  font-weight:900;
   background:#fff;
+  color: var(--ink);
+}
+
+/* Status line (company-like) */
+._gt_status{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  flex-wrap:wrap;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
 }
 
 /* Tables */
@@ -117,25 +181,31 @@ div[data-testid="stDataFrame"]{
 [data-testid="stMetricLabel"]{
   font-size: 12px !important;
   color: var(--muted) !important;
-  font-weight: 700 !important;
+  font-weight: 750 !important;
 }
 [data-testid="stMetricValue"]{
   font-size: 22px !important;
-  font-weight: 900 !important;
+  font-weight: 950 !important;
 }
 
-/* Buttons */
+/* Buttons (global) */
 .stButton > button{
   border-radius: 14px;
   border: 1px solid rgba(2, 132, 199, 0.30);
   background: var(--blueSoft);
   color: var(--ink);
   padding: 0.50rem 0.85rem;
-  font-weight: 850;
+  font-weight: 900;
 }
 .stButton > button:hover{
   border: 1px solid rgba(2, 132, 199, 0.45);
   background: var(--blueSoft2);
+}
+
+/* Primary button emphasis */
+button[kind="primary"]{
+  background: rgba(2,132,199,0.22) !important;
+  border: 1px solid rgba(2,132,199,0.45) !important;
 }
 
 /* Download button */
@@ -145,7 +215,7 @@ div[data-testid="stDownloadButton"] button{
   background: var(--blueSoft) !important;
   color: var(--ink) !important;
   padding: 0.60rem 0.95rem !important;
-  font-weight: 900 !important;
+  font-weight: 950 !important;
 }
 div[data-testid="stDownloadButton"] button:hover{
   border: 1px solid rgba(2, 132, 199, 0.45) !important;
@@ -156,7 +226,13 @@ div[data-testid="stDownloadButton"] button:hover{
 div[data-testid="stFileUploaderDropzone"]{
   border-radius: 18px;
   border: 1px dashed rgba(15, 23, 42, 0.22);
-  background: rgba(255,255,255,0.80);
+  background: rgba(255,255,255,0.86);
+}
+
+/* Danger wrapper (optional) */
+._gt_danger button, ._gt_danger div[data-testid="stDownloadButton"] button{
+  background: rgba(220,38,38,0.14) !important;
+  border: 1px solid rgba(220,38,38,0.35) !important;
 }
 </style>
 """,
@@ -170,10 +246,64 @@ def inject_purple_theme():
 
 
 # =========================================================
+# Brand bar（公司化頂部品牌列）
+# =========================================================
+def brand_bar(
+    system_name: str,
+    *,
+    warehouse: str = "大樹物流",
+    version: str = "v1.0",
+    right_text: str = "Internal Dashboard",
+    tags: Optional[List[str]] = None,
+):
+    """
+    Company-like brand bar shown at the top of pages.
+    """
+    tags = tags or ["營運報表", "物流KPI"]
+    tag_html = "".join([f'<span class="_gt_badge">{t}</span>' for t in tags])
+
+    st.markdown(
+        f"""
+        <div style="
+            display:flex; align-items:center; justify-content:space-between;
+            padding: 10px 14px; border:1px solid var(--line);
+            border-radius: 18px; background: rgba(255,255,255,0.88);
+            box-shadow: 0 10px 30px rgba(15,23,42,0.06);
+            margin-bottom: 12px;
+        ">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="
+                width:38px;height:38px;border-radius:12px;
+                background: rgba(2,132,199,0.14);
+                display:flex;align-items:center;justify-content:center;
+                font-weight:950; color: rgba(2,132,199,1);
+                letter-spacing: .6px;
+            ">GT</div>
+            <div>
+              <div style="font-weight:950; font-size:15px; color: var(--ink); line-height:1.2;">
+                {warehouse}｜{system_name}
+              </div>
+              <div style="font-size:12px; color: var(--muted); font-weight:750;">
+                {right_text} · {version}
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            {tag_html}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================================================
 # Page helpers
 # =========================================================
 def set_page(title: str, icon: str = "🏭", subtitle: Optional[str] = None):
     inject_logistics_theme()
+    # 你可以在各 page 自己呼叫 brand_bar()；不強制放在這裡，避免你有些頁想客製
     st.markdown(f"## {icon} {title}")
     if subtitle:
         st.markdown(f'<div class="_gt_hint">{subtitle}</div>', unsafe_allow_html=True)
@@ -185,6 +315,18 @@ def hint(text: str):
 
 def badge(text: str):
     st.markdown(f'<span class="_gt_badge">{text}</span>', unsafe_allow_html=True)
+
+
+def status_line(items: List[str]):
+    """
+    顯示公司化「狀態列」：例如 檔名 / 更新時間 / 資料日期
+    用法：status_line([f"資料來源：{name}", f"更新時間：{ts}"])
+    """
+    safe_items = [str(x) for x in (items or []) if str(x).strip()]
+    if not safe_items:
+        return
+    html = "　｜　".join(safe_items)
+    st.markdown(f'<div class="_gt_status">{html}</div>', unsafe_allow_html=True)
 
 
 def card_open(title: str, right_badge: Optional[str] = None):
@@ -239,7 +381,7 @@ def render_kpis(kpis: Sequence[KPI], cols: Optional[int] = None):
 
 
 # =========================================================
-# KPI Table Styling（低於門檻 → 紅色）
+# KPI Table Styling（低於門檻 → 紅色；數字右對齊更像公司報表）
 # =========================================================
 def style_kpi_below_target(df: pd.DataFrame, eff_col: str, target: float):
     def _row_style(row):
@@ -252,7 +394,18 @@ def style_kpi_below_target(df: pd.DataFrame, eff_col: str, target: float):
             return ["background-color: #FDE2E2; color: #7F1D1D; font-weight: 650"] * len(row)
         return [""] * len(row)
 
-    return df.style.apply(_row_style, axis=1)
+    styler = df.style.apply(_row_style, axis=1)
+
+    # 對齊：文字左、數字右（更像公司 BI）
+    text_cols = [c for c in df.columns if c in ("姓名", "班別", "時段", "區域", "儲位區域", "作業別", "線別", "組別")]
+    num_cols = [c for c in df.columns if c not in text_cols]
+
+    if text_cols:
+        styler = styler.set_properties(**{"text-align": "left"}, subset=text_cols)
+    if num_cols:
+        styler = styler.set_properties(**{"text-align": "right"}, subset=num_cols)
+
+    return styler
 
 
 def show_kpi_table(df: pd.DataFrame, *, eff_col: str, target: float):
@@ -358,7 +511,7 @@ def sidebar_controls(
     result: Dict[str, Any] = {}
 
     st.sidebar.markdown("### ⚙️ 計算條件設定")
-    st.sidebar.markdown('<div class="_gt_hint">本區設定僅影響本次分析</div>', unsafe_allow_html=True)
+    st.sidebar.markdown('<div style="color: rgba(231,238,249,0.72); font-weight:700; font-size:12px;">本區設定僅影響本次分析</div>', unsafe_allow_html=True)
 
     top_n = st.sidebar.number_input(
         "效率排行顯示人數（Top N）",
@@ -372,7 +525,7 @@ def sidebar_controls(
     if enable_exclude_windows:
         st.sidebar.markdown("---")
         st.sidebar.markdown("### ⛔ 排除區間（非作業時段）")
-        st.sidebar.markdown('<div class="_gt_hint">請手動輸入時間（HH:MM），例如 12:30</div>', unsafe_allow_html=True)
+        st.sidebar.markdown('<div style="color: rgba(231,238,249,0.72); font-weight:700; font-size:12px;">請手動輸入時間（HH:MM），例如 12:30</div>', unsafe_allow_html=True)
 
         state_key = f"{state_key_prefix}_exclude_windows"
         _init_exclude_state(state_key)
@@ -424,9 +577,9 @@ def sidebar_controls(
                     label = f"{w.start} - {w.end}"
                     if (w.data_entry or "").strip():
                         label += f"｜登錄：{w.data_entry}"
-                    st.write(label)
+                    st.sidebar.write(label)
                 with cols[1]:
-                    if st.button("刪除", key=f"{state_key_prefix}_ex_del_{idx}"):
+                    if st.sidebar.button("刪除", key=f"{state_key_prefix}_ex_del_{idx}"):
                         st.session_state[state_key].pop(idx)
                         st.experimental_rerun()
         else:
@@ -483,7 +636,7 @@ def download_excel_card(
     label: str = "⬇️ 匯出 KPI 報表",
 ):
     """
-    卡片外框 + 內部按鈕（✅ 無標題，不會分成兩段）
+    卡片外框 + 內部按鈕（✅ 無標題，不會分段）
     """
     card_open_plain()
     download_excel_button(xlsx_bytes=xlsx_bytes, filename=filename, label=label)
