@@ -199,9 +199,13 @@ def _chart_unused(res_df: pd.DataFrame):
 
 def _render_category_card(item: dict, warn_threshold: float):
     """
-    ✅ 卡片 KPI 直向顯示
-    - 使用率 < warn_threshold → 整塊紅底
-    - 否則綠底
+    ✅ 卡片 KPI：完全直向一項一列（符合你示意）
+      類別
+      有效貨位
+      已使用貨位
+      使用率
+
+    使用率 < warn_threshold → 整塊紅底
     """
     cat = str(item.get("類別", ""))
     valid = int(item.get("有效貨位", 0))
@@ -220,29 +224,31 @@ def _render_category_card(item: dict, warn_threshold: float):
   border: 1px solid {bd};
   background: {bg};
   border-radius: 18px;
-  padding: 14px 16px 14px 16px;
+  padding: 16px 18px;
   box-shadow: 0 10px 24px rgba(15,23,42,0.06);
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 ">
-  <div style="font-weight: 900; font-size: 18px; margin-bottom: 12px; color: {fg};">
+  <!-- 類別 -->
+  <div style="font-weight:900; font-size:18px; margin-bottom:16px; color:{fg};">
     {cat}
   </div>
 
-  <div style="display:flex; flex-direction:column; gap:10px;">
-    <div>
-      <div style="opacity:0.70; font-weight:700;">有效貨位</div>
-      <div style="font-size:22px; font-weight:900;">{valid:,}</div>
-    </div>
+  <!-- 有效貨位 -->
+  <div style="margin-bottom:14px;">
+    <div style="opacity:0.70; font-weight:700;">有效貨位</div>
+    <div style="font-size:22px; font-weight:900;">{valid:,}</div>
+  </div>
 
-    <div>
-      <div style="opacity:0.70; font-weight:700;">已使用貨位</div>
-      <div style="font-size:22px; font-weight:900;">{used:,}</div>
-    </div>
+  <!-- 已使用貨位 -->
+  <div style="margin-bottom:14px;">
+    <div style="opacity:0.70; font-weight:700;">已使用貨位</div>
+    <div style="font-size:22px; font-weight:900;">{used:,}</div>
+  </div>
 
-    <div>
-      <div style="opacity:0.70; font-weight:700;">使用率</div>
-      <div style="font-size:22px; font-weight:900;">{rate:.2f}%</div>
-    </div>
+  <!-- 使用率 -->
+  <div>
+    <div style="opacity:0.70; font-weight:700;">使用率</div>
+    <div style="font-size:22px; font-weight:900;">{rate:.2f}%</div>
   </div>
 </div>
 """,
@@ -253,7 +259,7 @@ def _render_category_card(item: dict, warn_threshold: float):
 def main():
     st.set_page_config(page_title="儲位分類統計", page_icon="📦", layout="wide")
     inject_logistics_theme()
-    set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜圖格一列一張｜門檻常駐顯示｜卡片直向")
+    set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜圖格一列一張｜卡片直向一項一列")
 
     # ======================
     # 上傳
