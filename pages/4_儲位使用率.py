@@ -358,6 +358,23 @@ def main():
     )
     card_close()
 
+      # ======================
+    # 🧾 2x2 圖格總覽（低於門檻紅卡）
+    # ======================
+    card_open("🧾 依格式顯示（圖格總覽｜低於門檻紅卡）")
+
+    cats = res_df.to_dict("records")
+    rows = [cats[i:i + 2] for i in range(0, len(cats), 2)]
+
+    for row in rows:
+        cols = st.columns(2)
+        for i, item in enumerate(row):
+            with cols[i]:
+                _render_category_card(item, warn_threshold=float(warn_threshold))
+
+    card_close()
+
+
     # ======================
     # KPI 圖表
     # ======================
@@ -375,22 +392,6 @@ def main():
 
     card_open("📊 各類別未使用貨位（有效-已使用）")
     _chart_unused(res_df)
-    card_close()
-
-    # ======================
-    # 🧾 2x2 圖格總覽（低於門檻紅卡）
-    # ======================
-    card_open("🧾 依格式顯示（圖格總覽｜低於門檻紅卡）")
-
-    cats = res_df.to_dict("records")
-    rows = [cats[i:i + 2] for i in range(0, len(cats), 2)]
-
-    for row in rows:
-        cols = st.columns(2)
-        for i, item in enumerate(row):
-            with cols[i]:
-                _render_category_card(item, warn_threshold=float(warn_threshold))
-
     card_close()
 
     # ======================
