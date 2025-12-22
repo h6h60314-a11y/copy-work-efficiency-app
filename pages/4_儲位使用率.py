@@ -17,7 +17,7 @@ from common_ui import (
 # ========= 預設分類（可在 sidebar 調整） =========
 DEFAULT_CATEGORIES = {
     "輕型料架": ["001", "002", "003", "017", "016"],
-    "落地儲": ["014", "018", "019", "020", "010", "081", "401", "402", "403","015"],
+    "落地儲": ["014", "018", "019", "020", "010", "081", "401", "402", "403"],
     "重型低空": ["011", "012", "013", "031", "032", "033", "034", "035", "036", "037", "038"],
     "高空儲": [
         "021", "022", "023",
@@ -59,6 +59,10 @@ def _inject_responsive_grid_css():
 
 
 def sidebar_category_editor() -> dict:
+    """
+    Sidebar：可手動調整分類定義（逗號分隔）。
+    回傳格式：{類別: [區碼, ...]}
+    """
     if "categories" not in st.session_state:
         st.session_state.categories = {k: v[:] for k, v in DEFAULT_CATEGORIES.items()}
 
@@ -148,9 +152,10 @@ def compute(df: pd.DataFrame, col_zone: str, col_valid: str, col_used: str, cate
     return res_df, others
 
 
-def _chart_usage_rate(res_df: pd.DataFrame, threshold: float):
+def _chart_usage_rate(res_df: pd.DataFrame, threshold: float, show_target_line: bool):
     """
     ✅ 使用率 > threshold → bar 變紅（壓力過高）
+    ✅ show_target_line 控制目標線（但 Sidebar 永遠顯示，不會消失）
     """
     if res_df is None or res_df.empty:
         st.info("無資料可視覺化")
@@ -180,15 +185,19 @@ def _chart_usage_rate(res_df: pd.DataFrame, threshold: float):
             .properties(height=220)
         )
 
-        rule = alt.Chart(pd.DataFrame({"target": [threshold]})).mark_rule(strokeDash=[6, 4]).encode(
-            x="target:Q"
-        )
+        layers = [base]
+        if show_target_line:
+            rule = alt.Chart(pd.DataFrame({"target": [threshold]})).mark_rule(strokeDash=[6, 4]).encode(
+                x="target:Q"
+            )
+            layers.append(rule)
 
-        st.altair_chart(alt.layer(base, rule), use_container_width=True)
+        st.altair_chart(alt.layer(*layers), use_container_width=True)
 
     except Exception:
         st.bar_chart(res_df.set_index("類別")["使用率(%)"])
-        st.caption(f"⚠️ 無法套用條件著色（門檻：{threshold:.0f}%）")
+        if show_target_line:
+            st.caption(f"目標線：{threshold:.0f}%（此模式下無法畫虛線）")
 
 
 def _chart_unused(res_df: pd.DataFrame):
@@ -270,6 +279,49 @@ def main():
     set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜卡片橫向自動切欄｜使用率>門檻紅色")
 
     # ======================
+    # ✅ Sidebar：設定永遠顯示（不寫在任何 if 裡）
+    # ======================
+    with st.sidebar:
+        st.header("⚙️ 欄位設定")
+        col_zone = st.text_input("區(溫層) 欄位", value=DEFAULT_COL_ZONE, key="col_zone")
+        col_valid = st.text_input("有效貨位 欄位", value=DEFAULT_COL_VALID, key="col_valid")
+        col_used = st.text_input("已使用貨位 欄位", value=DEFAULT_COL_USED, key="col_used")
+
+        st.divider()
+
+        st.header("🎯 圖表門檻（同目標線）")
+        show_target_line = st.checkbox(
+            "顯示使用率目標線",
+            value=True,
+            key="show_usage_target_line",
+        )
+        chart_threshold = st.number_input(
+            "使用率門檻（%）",
+            min_value=0.0,
+            max_value=100.0,
+            value=90.0,
+            step=1.0,
+            key="chart_threshold",
+        )
+        st.caption("圖表：使用率 > 門檻 → 紅色 bar")
+
+        st.divider()
+
+        st.header("🔴 卡片紅卡門檻")
+        warn_threshold = st.number_input(
+            "紅卡門檻（使用率 %）",
+            min_value=0.0,
+            max_value=100.0,
+            value=90.0,
+            step=1.0,
+            key="card_warn_threshold",
+        )
+        st.caption("卡片：使用率 > 紅卡門檻 → 整塊紅底（壓力過高）")
+
+    # 分類可調（Sidebar 下方常駐）
+    categories = sidebar_category_editor()
+
+    # ======================
     # 上傳
     # ======================
     card_open("📤 上傳 Excel（儲位明細）")
@@ -292,41 +344,6 @@ def main():
         return
 
     df.columns = df.columns.astype(str).str.strip()
-
-    # ======================
-    # Sidebar：常駐顯示（不使用 expander）
-    # ======================
-    with st.sidebar:
-        st.header("⚙️ 欄位設定")
-        col_zone = st.text_input("區(溫層) 欄位", value=DEFAULT_COL_ZONE)
-        col_valid = st.text_input("有效貨位 欄位", value=DEFAULT_COL_VALID)
-        col_used = st.text_input("已使用貨位 欄位", value=DEFAULT_COL_USED)
-
-        st.divider()
-        st.header("🎯 圖表門檻（同目標線）")
-        _ = st.checkbox("顯示使用率目標線", value=False)  # UI 常駐保留
-        chart_threshold = st.number_input(
-            "使用率門檻（%）",
-            min_value=0.0,
-            max_value=100.0,
-            value=90.0,
-            step=1.0,
-        )
-        st.caption("圖表：使用率 > 門檻 → 紅色 bar")
-
-        st.divider()
-        st.header("🔴 卡片紅卡門檻")
-        warn_threshold = st.number_input(
-            "紅卡門檻（使用率 %）",
-            min_value=0.0,
-            max_value=100.0,
-            value=90.0,
-            step=1.0,
-        )
-        st.caption("卡片：使用率 > 紅卡門檻 → 整塊紅底（壓力過高）")
-
-    # 分類可調（Sidebar 下方常駐）
-    categories = sidebar_category_editor()
 
     # 欄位檢查
     missing = [c for c in [col_zone, col_valid, col_used] if c not in df.columns]
@@ -377,7 +394,11 @@ def main():
     # KPI 圖表（不含「有效 vs 已使用」）
     # ======================
     card_open("📊 各類別使用率(%)（>門檻紅色）")
-    _chart_usage_rate(res_df, threshold=float(chart_threshold))
+    _chart_usage_rate(res_df, threshold=float(chart_threshold), show_target_line=bool(show_target_line))
+    card_close()
+
+    card_open("📊 各類別未使用貨位（有效-已使用）")
+    _chart_unused(res_df)
     card_close()
 
     # ======================
