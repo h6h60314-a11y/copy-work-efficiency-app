@@ -39,22 +39,16 @@ def _to_num(s: pd.Series) -> pd.Series:
 def _inject_responsive_grid_css():
     """
     ✅ 依螢幕寬度自動切欄數：CSS Grid auto-fit + minmax
-    - 大螢幕：通常 4 欄以上
-    - 中螢幕：2-3 欄
-    - 手機：1 欄
     """
     st.markdown(
         """
 <style>
-/* Responsive Card Grid */
 .gt-card-grid{
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px;
   align-items: stretch;
 }
-
-/* make each card fill its grid cell height nicely */
 .gt-card-grid .gt-slot{
   min-width: 0;
 }
@@ -65,10 +59,6 @@ def _inject_responsive_grid_css():
 
 
 def sidebar_category_editor() -> dict:
-    """
-    Sidebar：可手動調整分類定義（逗號分隔）。
-    回傳格式：{類別: [區碼, ...]}
-    """
     if "categories" not in st.session_state:
         st.session_state.categories = {k: v[:] for k, v in DEFAULT_CATEGORIES.items()}
 
@@ -160,8 +150,7 @@ def compute(df: pd.DataFrame, col_zone: str, col_valid: str, col_used: str, cate
 
 def _chart_usage_rate(res_df: pd.DataFrame, threshold: float):
     """
-    ✅ 使用率 > threshold → bar 變紅
-    並顯示 threshold 虛線
+    ✅ 使用率 > threshold → bar 變紅（壓力過高）
     """
     if res_df is None or res_df.empty:
         st.info("無資料可視覺化")
@@ -227,20 +216,16 @@ def _chart_unused(res_df: pd.DataFrame):
 
 def _category_card_html(item: dict, warn_threshold: float) -> str:
     """
-    ✅ 卡片 KPI：完全直向一項一列（符合你示意）
-      類別
-      有效貨位
-      已使用貨位
-      使用率
-
-    使用率 < warn_threshold → 整塊紅底
+    ✅ 卡片 KPI：直向一項一列（符合你示意）
+    ✅ 使用率 > warn_threshold → 紅卡（壓力過高）
     """
     cat = str(item.get("類別", ""))
     valid = int(item.get("有效貨位", 0))
     used = int(item.get("已使用貨位", 0))
     rate = float(item.get("使用率(%)", 0.0))
 
-    is_bad = rate < float(warn_threshold)
+    # 🔴 使用率 > 門檻 → 紅卡
+    is_bad = rate > float(warn_threshold)
 
     bg = "rgba(255,199,206,0.85)" if is_bad else "rgba(198,239,206,0.70)"
     bd = "rgba(156,0,6,0.45)" if is_bad else "rgba(0,97,0,0.30)"
@@ -281,7 +266,8 @@ def main():
     st.set_page_config(page_title="儲位分類統計", page_icon="📦", layout="wide")
     inject_logistics_theme()
     _inject_responsive_grid_css()
-    set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜卡片橫向自動切欄｜卡片內容直向")
+
+    set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜卡片橫向自動切欄｜使用率>門檻紅色")
 
     # ======================
     # 上傳
@@ -337,7 +323,7 @@ def main():
             value=90.0,
             step=1.0,
         )
-        st.caption("卡片：使用率 < 紅卡門檻 → 整塊紅底")
+        st.caption("卡片：使用率 > 紅卡門檻 → 整塊紅底（壓力過高）")
 
     # 分類可調（Sidebar 下方常駐）
     categories = sidebar_category_editor()
@@ -375,19 +361,20 @@ def main():
     card_close()
 
     # ======================
-    # 🧾 圖格總覽（✅ 橫向 + 依螢幕自動切欄）
+    # 🧾 圖格總覽（橫向 + 自動切欄）
     # ======================
-    card_open("🧾 依格式顯示（圖格總覽｜低於門檻紅卡）")
+    card_open("🧾 依格式顯示（圖格總覽｜使用率>門檻紅卡）")
 
     items = res_df.to_dict("records")
-    cards_html = "\n".join([f'<div class="gt-slot">{_category_card_html(it, float(warn_threshold))}</div>' for it in items])
-
+    cards_html = "\n".join(
+        [f'<div class="gt-slot">{_category_card_html(it, float(warn_threshold))}</div>' for it in items]
+    )
     st.markdown(f'<div class="gt-card-grid">{cards_html}</div>', unsafe_allow_html=True)
 
     card_close()
 
     # ======================
-    # KPI 圖表（✅ 不含「有效 vs 已使用」）
+    # KPI 圖表（不含「有效 vs 已使用」）
     # ======================
     card_open("📊 各類別使用率(%)（>門檻紅色）")
     _chart_usage_rate(res_df, threshold=float(chart_threshold))
