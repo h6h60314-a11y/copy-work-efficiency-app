@@ -1,48 +1,44 @@
 # pages/3_總揀達標.py
+# ------------------------------------------------------------
+#  總揀達標獎金計算報表（合併版：上午 + 下午同頁呈現）
+#  - 第一階段：上午（<=12:30，休息 10:00-10:15）
+#  - 第二階段：下午（13:30-18:00，休息 15:30-15:45）
+#  - 版面：同一個 Sheet1 上下分段（符合你截圖的呈現方式）
+#  - 匯出：openpyxl（避免 Streamlit Cloud 缺 xlsxwriter）
+#  v2025-12-22 (streamlit)
+# ------------------------------------------------------------
+
 from __future__ import annotations
 
 import io
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Dict, List, Tuple, Optional
 
 import pandas as pd
 import streamlit as st
 
-from common_ui import (
-    inject_logistics_theme,
-    set_page,
-    KPI,
-    render_kpis,
-    bar_topN,
-    download_excel,
-    card_open,
-    card_close,
-    sidebar_controls,  # 你已經有的：排除區間手動輸入 HH:MM（不下拉）
-)
+from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
-# =========================================================
-# Config (上午/下午規則)
-# =========================================================
-MORNING_END_STR = "12:30:00"
-M_REST_START_STR = "10:00:00"
-M_REST_END_STR = "10:15:00"
+# ---------- 可視參數 -------------------------------------------------
+# 上午
+MORNING_END = datetime.strptime("12:30:00", "%H:%M:%S").time()
+M_REST_START = datetime.strptime("10:00:00", "%H:%M:%S").time()
+M_REST_END = datetime.strptime("10:15:00", "%H:%M:%S").time()
 
-AFTERNOON_START_STR = "13:30:00"
-AFTERNOON_END_STR = "18:00:00"
-A_REST_START_STR = "15:30:00"
-A_REST_END_STR = "15:45:00"
+# 下午
+AFTERNOON_START = datetime.strptime("13:30:00", "%H:%M:%S").time()
+AFTERNOON_END = datetime.strptime("18:00:00", "%H:%M:%S").time()
+A_REST_START = datetime.strptime("15:30:00", "%H:%M:%S").time()
+A_REST_END = datetime.strptime("15:45:00", "%H:%M:%S").time()
 
-IDLE_THRESHOLD_MINUTES = 10  # 空窗門檻(分鐘)
-DEFAULT_START_TIME_STR = "08:05:00"
+IDLE_THRESHOLD = timedelta(minutes=10)  # 空窗門檻
+default_start_time_str = "08:05:00"
 
-# 低空/高空達標門檻（可在 sidebar 調整）
-LOW_TARGET_DEFAULT = 48
-HIGH_TARGET_DEFAULT = 20
-
-# =========================================================
-# 揀貨人預設資料（合併版）
-#  - 這段你原本合併版就有：姓名中文 & 起始時間 & 區域
-# =========================================================
-preset_picker_info = {
+# ---------- 揀貨人預設資料 ------------------------------------------
+# 若「區域」留空 → 以「低空」處理
+# （此段來自你提供的合併版，原樣保留）
+preset_picker_info: Dict[str, Dict[str, str]] = {
     "20230412002": {"姓名": "吳秉丞", "起始時間": "8:05:00", "區域": "低空"},
     "20200812002": {"姓名": "彭慈暉", "起始時間": "7:05:00", "區域": "低空"},
     "20210104001": {"姓名": "楊承珉", "起始時間": "7:05:00", "區域": "低空"},
@@ -51,6 +47,7 @@ preset_picker_info = {
     "20231226003": {"姓名": "顏秀菁", "起始時間": "8:05:00", "區域": "低空"},
     "20200922002": {"姓名": "葉欲弘", "起始時間": "8:05:00", "區域": "低空"},
     "20200924001": {"姓名": "黃雅君", "起始時間": "8:05:00", "區域": "低空"},
+    "20201019001": {"姓名": "邱清瑞", "起始時間": "8:05:00", "區域": "低空"},
     "20220526001": {"姓名": "黃芷憶", "起始時間": "8:05:00", "區域": "低空"},
     "20240221003": {"姓名": "呂治明", "起始時間": "8:05:00", "區域": "低空"},
     "20240909001": {"姓名": "蔡麗珠", "起始時間": "8:05:00", "區域": "低空"},
@@ -69,40 +66,47 @@ preset_picker_info = {
     "20250226021": {"姓名": "潘氏青江", "起始時間": "7:05:00", "區域": "低空"},
     "20250923019": {"姓名": "阮氏紅深", "起始時間": "8:05:00", "區域": "低空"},
     "20250226026": {"姓名": "黎氏瓊", "起始時間": "7:05:00", "區域": "低空"},
+    "20191205002": {"姓名": "阮功水", "起始時間": "8:05:00", "區域": "低空"},
     "20230119001": {"姓名": "陶春青", "起始時間": "7:05:00", "區域": "高空"},
+    "20210318001": {"姓名": "陳文勇", "起始時間": "8:05:00", "區域": "低空"},
+    "20210805001": {"姓名": "郭中合", "起始時間": "8:05:00", "區域": "低空"},
+    "20220421002": {"姓名": "楊文點", "起始時間": "8:05:00", "區域": "低空"},
+    "20220505001": {"姓名": "阮伊黃", "起始時間": "8:05:00", "區域": "低空"},
+    "20220505002": {"姓名": "阮文青明", "起始時間": "7:05:00", "區域": "高空"},
+    "20221222005": {"姓名": "謝忠龍", "起始時間": "8:05:00", "區域": "高空"},
+    "20221222009": {"姓名": "潘文一", "起始時間": "8:05:00", "區域": "低空"},
+    "20221221001": {"姓名": "阮文全", "起始時間": "7:05:00", "區域": "高空"},
+    "20230504001": {"姓名": "黃文重", "起始時間": "8:05:00", "區域": "低空"},
+    "20230511003": {"姓名": "范日明", "起始時間": "7:05:00", "區域": "低空"},
+    "20230810003": {"姓名": "范明俊", "起始時間": "8:05:00", "區域": "低空"},
+    "20231211004": {"姓名": "河文南", "起始時間": "8:05:00", "區域": "低空"},
+    "20231218004": {"姓名": "河文強", "起始時間": "8:05:00", "區域": "低空"},
+    "20240107001": {"姓名": "范文春", "起始時間": "8:05:00", "區域": "低空"},
+    "20240313001": {"姓名": "陳文越", "起始時間": "8:05:00", "區域": "低空"},
     "20240313003": {"姓名": "阮曰忠", "起始時間": "7:05:00", "區域": "高空"},
+    "20240730001": {"姓名": "阮文忠", "起始時間": "8:05:00", "區域": "低空"},
+    "20241204005": {"姓名": "阮春水", "起始時間": "7:05:00", "區域": "低空"},
+    "20241204007": {"姓名": "阮玉名", "起始時間": "8:05:00", "區域": "低空"},
+    "20241204009": {"姓名": "阮長文", "起始時間": "7:05:00", "區域": "低空"},
     "20220421001": {"姓名": "阮德平", "起始時間": "8:05:00", "區域": "高空"},
+    "20250502001": {"姓名": "吳詩敏", "起始時間": "8:05:00", "區域": "低空"},
+    "20250617003": {"姓名": "喬家寶", "起始時間": "8:05:00", "區域": "低空"},
+    "20250901011": {"姓名": "章愛玲", "起始時間": "8:35:00", "區域": "低空"},
     "20250617001": {"姓名": "阮文譚", "起始時間": "7:05:00", "區域": "高空"},
     "09963": {"姓名": "黃謙凱", "起始時間": "8:05:00", "區域": "低空"},
     "11399": {"姓名": "陳哲沅", "起始時間": "8:05:00", "區域": "低空"},
 }
 
-
 # =========================================================
-# Utilities
+# Utils
 # =========================================================
-def _t(s: str):
-    return datetime.strptime(s, "%H:%M:%S").time()
-
-
-MORNING_END = _t(MORNING_END_STR)
-M_REST_START = _t(M_REST_START_STR)
-M_REST_END = _t(M_REST_END_STR)
-
-AFTERNOON_START = _t(AFTERNOON_START_STR)
-AFTERNOON_END = _t(AFTERNOON_END_STR)
-A_REST_START = _t(A_REST_START_STR)
-A_REST_END = _t(A_REST_END_STR)
-
-IDLE_THRESHOLD = timedelta(minutes=IDLE_THRESHOLD_MINUTES)
-
-
 def parse_tw_datetime(series: pd.Series) -> pd.Series:
     """
-    支援：
-      1) 2025/06/26 上午 09:35:01
-      2) 2025/6/30 10:37:51
-      3) Excel 浮點序列
+    同時支援：
+      1. 2025/06/26 上午 09:35:01  （中文 AM/PM）
+      2. 2025/6/30 10:37:51       （24h 制字串）
+      3. 45549.435694444          （Excel 浮點序列）
+    解析失敗 → NaT
     """
     if pd.api.types.is_datetime64_any_dtype(series):
         return series
@@ -110,14 +114,19 @@ def parse_tw_datetime(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.strip()
     out = pd.Series(pd.NaT, index=s.index, dtype="datetime64[ns]")
 
+    # Excel 浮點
     num_mask = s.str.match(r"^\d+(\.\d+)?$")
     if num_mask.any():
-        out.loc[num_mask] = pd.to_datetime(s[num_mask].astype(float), unit="d", origin="1899-12-30")
+        out.loc[num_mask] = pd.to_datetime(
+            s[num_mask].astype(float), unit="d", origin="1899-12-30"
+        )
 
+    # 字串解析
     str_mask = ~num_mask
     if str_mask.any():
         tmp = s[str_mask]
         pm_mask = tmp.str.contains("下午")
+
         tmp = (
             tmp.str.replace("上午", "", regex=False)
             .str.replace("下午", "", regex=False)
@@ -130,6 +139,7 @@ def parse_tw_datetime(series: pd.Series) -> pd.Series:
         if need_fallback.any():
             parsed.loc[need_fallback] = pd.to_datetime(tmp[need_fallback], errors="coerce")
 
+        # 原字串有「下午」且解析結果 <12 點 → +12h
         if pm_mask.any():
             pm_idx = pm_mask[pm_mask].index
             adjust_idx = pm_idx[parsed.loc[pm_idx].dt.hour < 12]
@@ -140,173 +150,164 @@ def parse_tw_datetime(series: pd.Series) -> pd.Series:
     return out
 
 
-def _get_name(picker: str) -> str:
-    info = preset_picker_info.get(str(picker).strip())
-    if info and info.get("姓名"):
-        return str(info["姓名"]).strip()
-    return ""
+def _get_region(picker: str, mapping: Dict[str, Dict[str, str]]) -> str:
+    return (mapping.get(picker, {}).get("區域", "低空") or "低空").strip() or "低空"
 
 
-def _get_region(picker: str) -> str:
-    info = preset_picker_info.get(str(picker).strip())
-    region = (info or {}).get("區域", "")
-    region = str(region).strip() if region is not None else ""
-    return region if region else "低空"
+def _get_name(picker: str, mapping: Dict[str, Dict[str, str]]) -> str:
+    return (mapping.get(picker, {}).get("姓名", picker) or picker).strip() or picker
 
 
-def _get_start_time(picker: str) -> str:
-    info = preset_picker_info.get(str(picker).strip())
-    s = (info or {}).get("起始時間", "") or ""
-    s = str(s).strip()
-    return s if s else DEFAULT_START_TIME_STR
+def _get_start_time_str(picker: str, mapping: Dict[str, Dict[str, str]]) -> str:
+    return (mapping.get(picker, {}).get("起始時間", default_start_time_str) or default_start_time_str).strip()
 
 
-def _storage_area_str(df: pd.DataFrame) -> str:
-    # 你原始檔可能有「儲位區域」或相近欄位；沒有就回空
-    for col in ["儲位區域", "到", "儲位", "儲位明細"]:
-        if col in df.columns:
-            vals = df[col].astype(str).str.strip()
-            vals = vals[vals != ""].dropna().unique().tolist()
-            if vals:
-                return "、".join(vals[:12]) + ("…" if len(vals) > 12 else "")
-    return ""
+def _storage_area_str(working_records: pd.DataFrame) -> str:
+    storage_prefixes: List[str] = []
+    for loc in working_records.get("儲位", []):
+        prefix = str(loc)[:3]
+        if prefix not in storage_prefixes:
+            storage_prefixes.append(prefix)
+    return ",".join(storage_prefixes)
 
 
-def _overlap_segments(a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime) -> list[tuple[datetime, datetime]]:
-    s = max(a_start, b_start)
-    e = min(a_end, b_end)
-    if e > s:
-        return [(s, e)]
-    return []
-
-
-def _split_idle_segment(seg_start: datetime, seg_end: datetime, rest_start: datetime, rest_end: datetime) -> list[tuple[datetime, datetime]]:
-    """
-    把空窗段扣掉休息段的重疊（避免把休息算空窗）
-    """
-    if seg_end <= seg_start:
-        return []
-
-    # 沒有重疊休息
+def split_idle_segment(seg_start, seg_end, rest_start, rest_end):
+    segments = []
     if seg_end <= rest_start or seg_start >= rest_end:
-        return [(seg_start, seg_end)]
+        segments.append((seg_start, seg_end))
+    else:
+        if seg_start < rest_start:
+            segments.append((seg_start, rest_start))
+        if seg_end > rest_end:
+            segments.append((rest_end, seg_end))
+    return segments
 
-    parts = []
-    if seg_start < rest_start:
-        parts.append((seg_start, rest_start))
-    if seg_end > rest_end:
-        parts.append((rest_end, seg_end))
-    return [(s, e) for s, e in parts if e > s]
+
+def get_effective_idle_segments(seg_start, seg_end, rest_start, rest_end, threshold=IDLE_THRESHOLD):
+    segments = split_idle_segment(seg_start, seg_end, rest_start, rest_end)
+    return [(s, e) for s, e in segments if (e - s) >= threshold]
 
 
-def _get_effective_idle_segments(prev_t: datetime, curr_t: datetime, rest_start: datetime, rest_end: datetime) -> list[tuple[datetime, datetime]]:
+def ensure_datetime(full_df: pd.DataFrame) -> pd.DataFrame:
+    if not pd.api.types.is_datetime64_any_dtype(full_df["揀貨完成時間"]):
+        full_df = full_df.copy()
+        full_df["揀貨完成時間"] = parse_tw_datetime(full_df["揀貨完成時間"])
+    return full_df
+
+
+def remove_boxed_rows(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    if "成箱箱號" in df.columns:
+        df["成箱箱號"] = df["成箱箱號"].astype(str).str.strip()
+        df = df[df["成箱箱號"] == ""]
+    return df
+
+
+def combine_rows(df: pd.DataFrame) -> pd.DataFrame:
+    # 與你合併版一致：同儲位/商品/揀貨人/完成時間 → 數量加總
+    group_cols = ["儲位", "商品", "揀貨人", "揀貨完成時間"]
+    if "數量" not in df.columns:
+        # 若來源沒有數量，仍保留原筆數統計（不影響你原本主邏輯：以筆數做效率）
+        df = df.copy()
+        df["數量"] = 1
+    combined_df = df.groupby(group_cols, as_index=False).agg({"數量": "sum"})
+    return combined_df
+
+
+def filter_morning_period(df: pd.DataFrame) -> pd.DataFrame:
+    dtv = parse_tw_datetime(df["揀貨完成時間"])
+    df = df.assign(揀貨完成時間=dtv).dropna(subset=["揀貨完成時間"])
+    df = df[df["揀貨完成時間"].dt.time <= MORNING_END]
+    return df
+
+
+def filter_afternoon_period(df: pd.DataFrame) -> pd.DataFrame:
+    dtv = parse_tw_datetime(df["揀貨完成時間"])
+    df = df.assign(揀貨完成時間=dtv).dropna(subset=["揀貨完成時間"])
+    df = df[(df["揀貨完成時間"].dt.time >= AFTERNOON_START) & (df["揀貨完成時間"].dt.time <= AFTERNOON_END)]
+    return df
+
+
+# =========================================================
+# 計算：上午 / 下午（保留你合併版邏輯）
+# =========================================================
+def calculate_statistics_morning(morning_df: pd.DataFrame, full_df: pd.DataFrame, mapping: Dict[str, Dict[str, str]]) -> pd.DataFrame:
     """
-    只有 gap >= IDLE_THRESHOLD 才算空窗，並扣除休息重疊
+    早班（保留你原本上午版邏輯）：
+    - effective_start = min(第一筆, 設定起始時間)
+    - effective_end：若有下午紀錄 -> 12:30；否則 min(最後一筆, 12:30)
+    - 休息：10:00-10:15（交集才扣）
+    - 空窗：>=10 分，且切掉休息重疊
+    - 結尾空窗：只有「有下午紀錄」才補到 12:30
     """
-    gap = curr_t - prev_t
-    if gap < IDLE_THRESHOLD:
-        return []
-    return _split_idle_segment(prev_t, curr_t, rest_start, rest_end)
+    full_df = ensure_datetime(full_df)
 
+    if morning_df.empty:
+        raise ValueError("早班未找到任何有效紀錄，請檢查時間格式或篩選條件")
 
-def _calc_shift_stats(
-    full_df: pd.DataFrame,
-    shift: str,
-    low_target: float,
-    high_target: float,
-) -> pd.DataFrame:
-    """
-    shift: "morning" or "afternoon"
-    回傳 columns:
-      區域, 揀貨人, 姓名, 筆數, 工作區間, 總分鐘, 效率, 空窗分鐘, 儲位區域, 空窗時間段
-    """
-    if full_df is None or full_df.empty:
-        return pd.DataFrame(columns=["區域", "揀貨人", "姓名", "筆數", "工作區間", "總分鐘", "效率", "空窗分鐘", "儲位區域", "空窗時間段"])
+    stats = []
+    pickers = morning_df["揀貨人"].unique()
 
-    if "揀貨人" not in full_df.columns or "揀貨完成時間" not in full_df.columns:
-        return pd.DataFrame(columns=["區域", "揀貨人", "姓名", "筆數", "工作區間", "總分鐘", "效率", "空窗分鐘", "儲位區域", "空窗時間段"])
-
-    df = full_df.copy()
-    df["揀貨人"] = df["揀貨人"].astype(str).str.strip()
-    df["揀貨完成時間"] = parse_tw_datetime(df["揀貨完成時間"])
-    df = df.dropna(subset=["揀貨完成時間"]).sort_values(["揀貨人", "揀貨完成時間"])
-
-    stats_rows = []
-    for picker, picker_df in df.groupby("揀貨人"):
-        picker_df = picker_df.sort_values("揀貨完成時間").copy()
-        times = picker_df["揀貨完成時間"].tolist()
+    for picker in pickers:
+        picker_morning = morning_df[morning_df["揀貨人"] == picker].sort_values("揀貨完成時間")
+        times = list(picker_morning["揀貨完成時間"])
         if not times:
             continue
 
+        config_time = datetime.strptime(_get_start_time_str(picker, mapping), "%H:%M:%S").time()
         first_record = times[0]
         last_record = times[-1]
 
-        # 基準日：用第一筆日期
-        base_date = first_record.date()
+        configured_start = datetime.combine(first_record.date(), config_time)
+        effective_start = min(first_record, configured_start)
 
-        if shift == "morning":
-            start_time = _t(_get_start_time(picker) if ":" in _get_start_time(picker) else DEFAULT_START_TIME_STR)
-            shift_start = datetime.combine(base_date, start_time)
-            shift_end = datetime.combine(base_date, MORNING_END)
-            rest_start = datetime.combine(base_date, M_REST_START)
-            rest_end = datetime.combine(base_date, M_REST_END)
-        else:
-            shift_start = datetime.combine(base_date, AFTERNOON_START)
-            shift_end = datetime.combine(base_date, AFTERNOON_END)
-            rest_start = datetime.combine(base_date, A_REST_START)
-            rest_end = datetime.combine(base_date, A_REST_END)
+        morning_end_dt = datetime.combine(first_record.date(), MORNING_END)
 
-        # 有效起訖：以班別規則框住，再和實際有資料的範圍交集
-        effective_start = max(shift_start, first_record)
-        effective_end = min(shift_end, last_record)
+        picker_full = full_df[full_df["揀貨人"] == picker]
+        has_afternoon = any(rec.time() > MORNING_END for rec in picker_full["揀貨完成時間"])
+        effective_end = morning_end_dt if has_afternoon else min(last_record, morning_end_dt)
 
-        # 若完全沒有落在該班別，略過
-        if effective_end <= effective_start:
-            continue
-
-        # 扣除休息（只扣和有效區間有重疊的部分）
-        rest_overlap = _overlap_segments(effective_start, effective_end, rest_start, rest_end)
-        rest_duration = sum((e - s for s, e in rest_overlap), timedelta(0))
+        rest_start_dt = datetime.combine(effective_start.date(), M_REST_START)
+        rest_end_dt = datetime.combine(effective_start.date(), M_REST_END)
+        overlap_start = max(effective_start, rest_start_dt)
+        overlap_end = min(effective_end, rest_end_dt)
+        rest_duration = (overlap_end - overlap_start) if overlap_end > overlap_start else timedelta(0)
 
         work_duration = (effective_end - effective_start) - rest_duration
         total_minutes = round(work_duration.total_seconds() / 60, 2)
-        if total_minutes <= 0:
-            total_minutes = 0.0
 
-        # 只統計落在有效區間內的筆數
-        working = picker_df[(picker_df["揀貨完成時間"] >= effective_start) & (picker_df["揀貨完成時間"] <= effective_end)]
-        num_records = int(len(working))
+        num_records = len(picker_morning)
 
-        # 空窗段
-        idle_segments: list[tuple[datetime, datetime]] = []
-        work_times = working["揀貨完成時間"].tolist()
-
-        if work_times:
-            # 開頭空窗
-            if work_times[0] > effective_start:
-                idle_segments.extend(_split_idle_segment(effective_start, work_times[0], rest_start, rest_end))
-            # 中間空窗
-            for i in range(1, len(work_times)):
-                idle_segments.extend(_get_effective_idle_segments(work_times[i - 1], work_times[i], rest_start, rest_end))
-            # 結尾空窗
-            if work_times[-1] < effective_end:
-                idle_segments.extend(_get_effective_idle_segments(work_times[-1], effective_end, rest_start, rest_end))
+        idle_segments: List[Tuple[datetime, datetime]] = []
+        # 開頭空窗
+        if times[0] > effective_start:
+            idle_segments.extend(split_idle_segment(effective_start, times[0], rest_start_dt, rest_end_dt))
+        # 中間空窗 >=10
+        for i in range(1, len(times)):
+            idle_segments.extend(get_effective_idle_segments(times[i - 1], times[i], rest_start_dt, rest_end_dt))
+        # 結尾空窗：只有有下午紀錄才補到 12:30
+        if last_record < morning_end_dt:
+            overall_max = picker_full["揀貨完成時間"].max()
+            if last_record != overall_max:
+                idle_segments.extend(get_effective_idle_segments(last_record, morning_end_dt, rest_start_dt, rest_end_dt))
 
         idle_minutes = round(sum((e - s).total_seconds() for s, e in idle_segments) / 60, 2)
-
         efficiency = round((num_records / total_minutes * 60) if total_minutes else 0, 2)
+
         time_period_str = f"{effective_start.strftime('%H:%M:%S')} ~ {effective_end.strftime('%H:%M:%S')}"
         idle_segments_str = "; ".join(f"{s.strftime('%H:%M:%S')} ~ {e.strftime('%H:%M:%S')}" for s, e in idle_segments)
 
-        storage_area_str = _storage_area_str(working)
-        region = _get_region(picker)
-        name = _get_name(picker)
+        working_records = picker_morning[
+            (picker_morning["揀貨完成時間"] >= effective_start) & (picker_morning["揀貨完成時間"] <= effective_end)
+        ]
+        storage_area_str = _storage_area_str(working_records)
+        region = _get_region(picker, mapping)
 
-        stats_rows.append(
+        stats.append(
             {
                 "區域": region,
                 "揀貨人": picker,
-                "姓名": name,  # 中文
+                "姓名": _get_name(picker, mapping),
                 "筆數": num_records,
                 "工作區間": time_period_str,
                 "總分鐘": total_minutes,
@@ -317,360 +318,448 @@ def _calc_shift_stats(
             }
         )
 
-    out = pd.DataFrame(stats_rows)
-    if out.empty:
-        return pd.DataFrame(columns=["區域", "揀貨人", "姓名", "筆數", "工作區間", "總分鐘", "效率", "空窗分鐘", "儲位區域", "空窗時間段"])
+    statistics_df = pd.DataFrame(stats)
+    statistics_df["區域"] = pd.Categorical(statistics_df["區域"], categories=["低空", "高空"], ordered=True)
+    statistics_df = statistics_df.sort_values(by=["區域", "揀貨人"])
 
-    out["區域"] = pd.Categorical(out["區域"], categories=["低空", "高空"], ordered=True)
-    out = out.sort_values(["區域", "揀貨人"], ascending=[True, True]).reset_index(drop=True)
-    return out[
-        ["區域", "揀貨人", "姓名", "筆數", "工作區間", "總分鐘", "效率", "空窗分鐘", "儲位區域", "空窗時間段"]
-    ]
+    columns_order = ["區域", "揀貨人", "姓名", "筆數", "工作區間", "總分鐘", "效率", "空窗分鐘", "儲位區域", "空窗時間段"]
+    return statistics_df[columns_order]
 
 
-def build_export_xlsx_bytes_single_sheet(
+def calculate_statistics_afternoon(afternoon_df: pd.DataFrame, full_df: pd.DataFrame, mapping: Dict[str, Dict[str, str]]) -> pd.DataFrame:
+    """
+    下午（對稱邏輯）：
+    - effective_start：max(第一筆, 13:30)
+    - effective_end：若有 18:00 後紀錄 -> 18:00；否則 min(最後一筆, 18:00)
+    - 休息：15:30-15:45（交集才扣）
+    - 空窗：>=10 分，切掉休息重疊
+    - 結尾空窗：計算到 effective_end
+    """
+    full_df = ensure_datetime(full_df)
+
+    columns_order = ["區域", "揀貨人", "姓名", "筆數", "工作區間", "總分鐘", "效率", "空窗分鐘", "儲位區域", "空窗時間段"]
+    if afternoon_df.empty:
+        return pd.DataFrame(columns=columns_order)
+
+    stats = []
+    pickers = afternoon_df["揀貨人"].unique()
+
+    for picker in pickers:
+        picker_a = afternoon_df[afternoon_df["揀貨人"] == picker].sort_values("揀貨完成時間")
+        times = list(picker_a["揀貨完成時間"])
+        if not times:
+            continue
+
+        first_record = times[0]
+        last_record = times[-1]
+
+        start_dt = datetime.combine(first_record.date(), AFTERNOON_START)
+        end_dt = datetime.combine(first_record.date(), AFTERNOON_END)
+        effective_start = max(first_record, start_dt)
+
+        picker_full = full_df[full_df["揀貨人"] == picker]
+        has_after_end = any(rec.time() > AFTERNOON_END for rec in picker_full["揀貨完成時間"])
+        effective_end = end_dt if has_after_end else min(last_record, end_dt)
+
+        rest_start_dt = datetime.combine(first_record.date(), A_REST_START)
+        rest_end_dt = datetime.combine(first_record.date(), A_REST_END)
+
+        overlap_start = max(effective_start, rest_start_dt)
+        overlap_end = min(effective_end, rest_end_dt)
+        rest_duration = (overlap_end - overlap_start) if overlap_end > overlap_start else timedelta(0)
+
+        work_duration = (effective_end - effective_start) - rest_duration
+        total_minutes = round(work_duration.total_seconds() / 60, 2)
+
+        num_records = len(picker_a)
+
+        idle_segments: List[Tuple[datetime, datetime]] = []
+        # 開頭空窗
+        if times[0] > effective_start:
+            idle_segments.extend(split_idle_segment(effective_start, times[0], rest_start_dt, rest_end_dt))
+        # 中間空窗 >=10
+        for i in range(1, len(times)):
+            idle_segments.extend(get_effective_idle_segments(times[i - 1], times[i], rest_start_dt, rest_end_dt))
+        # 結尾空窗：到 effective_end
+        if last_record < effective_end:
+            idle_segments.extend(get_effective_idle_segments(last_record, effective_end, rest_start_dt, rest_end_dt))
+
+        idle_minutes = round(sum((e - s).total_seconds() for s, e in idle_segments) / 60, 2)
+        efficiency = round((num_records / total_minutes * 60) if total_minutes else 0, 2)
+
+        time_period_str = f"{effective_start.strftime('%H:%M:%S')} ~ {effective_end.strftime('%H:%M:%S')}"
+        idle_segments_str = "; ".join(f"{s.strftime('%H:%M:%S')} ~ {e.strftime('%H:%M:%S')}" for s, e in idle_segments)
+
+        working_records = picker_a[
+            (picker_a["揀貨完成時間"] >= effective_start) & (picker_a["揀貨完成時間"] <= effective_end)
+        ]
+        storage_area_str = _storage_area_str(working_records)
+
+        region = _get_region(picker, mapping)
+
+        stats.append(
+            {
+                "區域": region,
+                "揀貨人": picker,
+                "姓名": _get_name(picker, mapping),
+                "筆數": num_records,
+                "工作區間": time_period_str,
+                "總分鐘": total_minutes,
+                "效率": efficiency,
+                "空窗分鐘": idle_minutes,
+                "儲位區域": storage_area_str,
+                "空窗時間段": idle_segments_str,
+            }
+        )
+
+    statistics_df = pd.DataFrame(stats)
+    statistics_df["區域"] = pd.Categorical(statistics_df["區域"], categories=["低空", "高空"], ordered=True)
+    statistics_df = statistics_df.sort_values(by=["區域", "揀貨人"])
+    return statistics_df[columns_order]
+
+
+# =========================================================
+# 匯出 Excel（openpyxl）：同一張 Sheet 上下分段 + 達標紅綠底色
+# =========================================================
+def build_export_xlsx_bytes(
     title: str,
     morning_df: pd.DataFrame,
     afternoon_df: pd.DataFrame,
-    low_target: float,
-    high_target: float,
+    low_threshold: float = 48.0,
+    high_threshold: float = 20.0,
 ) -> bytes:
-    """
-    單一 Sheet1 上下分段（第一階段=上午、第二階段=下午）
-    並依區域門檻套色：達標綠 / 未達標紅
-    """
-    import openpyxl
-    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+    from openpyxl.formatting.rule import FormulaRule
 
-    cols = ["區域", "揀貨人", "姓名", "筆數", "工作區間", "總分鐘", "效率", "空窗分鐘", "儲位區域", "空窗時間段"]
-    max_col = len(cols)
-
-    thin = Side(style="thin", color="999999")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-    fill_green = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    fill_red = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-
-    title_font = Font(name="新細明體", size=18, bold=True)
-    stage_font = Font(name="新細明體", size=16, bold=True)
-    head_font = Font(name="新細明體", size=11, bold=True)
-    body_font = Font(name="新細明體", size=11)
-
-    align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    def threshold(region: str) -> float:
-        return float(high_target) if str(region).strip() == "高空" else float(low_target)
-
-    wb = openpyxl.Workbook()
+    wb = Workbook()
     ws = wb.active
     ws.title = "Sheet1"
 
-    def merge_row(row: int, text: str, font: Font):
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=max_col)
-        cell = ws.cell(row=row, column=1, value=text)
-        cell.font = font
-        cell.alignment = align_center
-        for c in range(1, max_col + 1):
-            ws.cell(row=row, column=c).border = border
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    def write_header(row: int):
-        for c, h in enumerate(cols, start=1):
-            cell = ws.cell(row=row, column=c, value=h)
-            cell.font = head_font
+    title_font = Font(name="新細明體", size=18, bold=True)
+    stage_font = Font(name="新細明體", size=16, bold=True)
+    header_font = Font(name="新細明體", size=12, bold=True)
+    body_font = Font(name="新細明體", size=12)
+
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    fill_green = PatternFill("solid", fgColor="C6EFCE")
+    fill_red = PatternFill("solid", fgColor="FFC7CE")
+
+    def write_table(start_row: int, df: pd.DataFrame) -> Tuple[int, int]:
+        """回傳 (first_data_row, last_data_row)"""
+        if df is None:
+            df = pd.DataFrame()
+
+        # header
+        for c, col in enumerate(df.columns, start=1):
+            cell = ws.cell(row=start_row, column=c, value=col)
+            cell.font = header_font
             cell.alignment = align_center
             cell.border = border
 
-    def write_df(start_row: int, df: pd.DataFrame) -> int:
-        if df is None or df.empty:
-            return start_row - 1
-
-        for r_idx, (_, r) in enumerate(df.iterrows(), start=start_row):
-            for c_idx, col in enumerate(cols, start=1):
-                val = r.get(col, "")
-                cell = ws.cell(row=r_idx, column=c_idx, value=val)
+        # body
+        for r, row in enumerate(df.itertuples(index=False), start=start_row + 1):
+            for c, value in enumerate(row, start=1):
+                cell = ws.cell(row=r, column=c, value=value)
                 cell.font = body_font
-                cell.alignment = align_center
+                cell.alignment = align_left if c in (10,) else align_center  # 空窗時間段較長
                 cell.border = border
-        return start_row + len(df) - 1
 
-    def paint_rows(data_first_row: int, data_last_row: int, eff_col_idx: int, region_col_idx: int):
-        if data_last_row < data_first_row:
+        first_data = start_row + 1
+        last_data = start_row + len(df)
+        return first_data, last_data
+
+    def set_col_width(df: pd.DataFrame):
+        if df is None or df.empty:
             return
-        for rr in range(data_first_row, data_last_row + 1):
-            reg = str(ws.cell(row=rr, column=region_col_idx).value or "").strip()
-            th = threshold(reg)
-            try:
-                eff = float(ws.cell(row=rr, column=eff_col_idx).value)
-            except Exception:
-                eff = 0.0
-            fill = fill_green if eff >= th else fill_red
-            for cc in range(1, max_col + 1):
-                ws.cell(row=rr, column=cc).fill = fill
+        widths = {}
+        for idx, col in enumerate(df.columns, start=1):
+            # 簡單抓長度
+            max_len = max([len(str(col))] + [len(str(x)) for x in df[col].astype(str).head(80).tolist()])
+            widths[idx] = min(max(10, max_len + 2), 60)
 
-    # ===== Title / Stage1 / Morning =====
-    merge_row(1, title, title_font)
-    merge_row(2, "第一階段", stage_font)
+        for col_idx, w in widths.items():
+            ws.column_dimensions[get_column_letter(col_idx)].width = w
 
+    def add_conditional_format(first_data_row: int, last_data_row: int, max_col: int):
+        """
+        整列著色（依區域 + 效率門檻）
+        - 高空：效率>=20 綠 / <20 紅
+        - 低空：效率>=48 綠 / <48 紅
+        欄位位置依你合併版：A=區域, G=效率
+        """
+        if last_data_row < first_data_row:
+            return
+
+        # Excel row number is 1-based already in openpyxl
+        # 套用範圍：A..最後欄，從 first_data_row 到 last_data_row
+        start_cell = f"A{first_data_row}"
+        end_cell = f"{get_column_letter(max_col)}{last_data_row}"
+        rng = f"{start_cell}:{end_cell}"
+
+        # 注意：公式要用「範圍左上角那列」來參照，openpyxl 會自動相對套用
+        row_ref = first_data_row
+
+        # 高空綠/紅
+        ws.conditional_formatting.add(
+            rng,
+            FormulaRule(
+                formula=[f'=AND($A{row_ref}="高空",$G{row_ref}>={high_threshold})'],
+                fill=fill_green,
+            ),
+        )
+        ws.conditional_formatting.add(
+            rng,
+            FormulaRule(
+                formula=[f'=AND($A{row_ref}="高空",$G{row_ref}<{high_threshold})'],
+                fill=fill_red,
+            ),
+        )
+        # 低空綠/紅
+        ws.conditional_formatting.add(
+            rng,
+            FormulaRule(
+                formula=[f'=AND($A{row_ref}="低空",$G{row_ref}>={low_threshold})'],
+                fill=fill_green,
+            ),
+        )
+        ws.conditional_formatting.add(
+            rng,
+            FormulaRule(
+                formula=[f'=AND($A{row_ref}="低空",$G{row_ref}<{low_threshold})'],
+                fill=fill_red,
+            ),
+        )
+
+    # 決定欄數（以 morning 的欄位為主；若 morning 空則用 afternoon）
+    base_df = morning_df if (morning_df is not None and not morning_df.empty) else afternoon_df
+    max_col = max(1, len(base_df.columns)) if base_df is not None else 1
+
+    # Title row (row 1)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_col)
+    c = ws.cell(row=1, column=1, value=title)
+    c.font = title_font
+    c.alignment = align_center
+    c.border = border
+
+    # Stage 1 row (row 2)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max_col)
+    c = ws.cell(row=2, column=1, value="第一階段（上午）")
+    c.font = stage_font
+    c.alignment = align_center
+    c.border = border
+
+    # Morning table starts at row 3 (header)
     header_row_1 = 3
-    write_header(header_row_1)
-    data_start_1 = header_row_1 + 1
+    first_data_1, last_data_1 = write_table(header_row_1, morning_df)
+    if morning_df is not None and not morning_df.empty:
+        add_conditional_format(first_data_1, last_data_1, max_col)
 
-    mdf = morning_df.copy() if morning_df is not None else pd.DataFrame()
-    if not mdf.empty:
-        for c in cols:
-            if c not in mdf.columns:
-                mdf[c] = ""
-        mdf = mdf[cols]
-
-    last_row_1 = write_df(data_start_1, mdf)
-
-    eff_col = cols.index("效率") + 1
-    reg_col = cols.index("區域") + 1
-    if not mdf.empty:
-        paint_rows(data_start_1, last_row_1, eff_col, reg_col)
-
-    # ===== Stage2 / Afternoon =====
+    # Gap + Stage 2
     gap = 2
-    stage_row_2 = (last_row_1 if last_row_1 >= data_start_1 else (data_start_1 - 1)) + gap + 1
-    merge_row(stage_row_2, "第二階段", stage_font)
+    stage_row_2 = last_data_1 + gap + 1 if (morning_df is not None and not morning_df.empty) else (header_row_1 + 2)
+    ws.merge_cells(start_row=stage_row_2, start_column=1, end_row=stage_row_2, end_column=max_col)
+    c = ws.cell(row=stage_row_2, column=1, value="第二階段（下午）")
+    c.font = stage_font
+    c.alignment = align_center
+    c.border = border
 
     header_row_2 = stage_row_2 + 1
-    write_header(header_row_2)
-    data_start_2 = header_row_2 + 1
+    first_data_2, last_data_2 = write_table(header_row_2, afternoon_df)
+    if afternoon_df is not None and not afternoon_df.empty:
+        add_conditional_format(first_data_2, last_data_2, max_col)
 
-    adf = afternoon_df.copy() if afternoon_df is not None else pd.DataFrame()
-    if not adf.empty:
-        for c in cols:
-            if c not in adf.columns:
-                adf[c] = ""
-        adf = adf[cols]
+    # Row heights (讓標題更像你原版)
+    ws.row_dimensions[1].height = 28
+    ws.row_dimensions[2].height = 24
+    ws.row_dimensions[stage_row_2].height = 24
 
-    last_row_2 = write_df(data_start_2, adf)
-    if not adf.empty:
-        paint_rows(data_start_2, last_row_2, eff_col, reg_col)
+    # 欄寬
+    set_col_width(base_df)
 
-    # Column widths（照你之前合併版習慣）
-    widths = {"A": 8, "B": 22, "C": 14, "D": 6, "E": 20, "F": 10, "G": 10, "H": 10, "I": 30, "J": 35}
-    for col_letter, w in widths.items():
-        ws.column_dimensions[col_letter].width = w
-
-    ws.freeze_panes = "A4"
-
-    out = io.BytesIO()
-    wb.save(out)
-    return out.getvalue()
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
 
 
-def _adapt_exclude_windows_to_skip_rules(exclude_windows):
-    """
-    把 common_ui.sidebar_controls() 的 exclude_windows：
-      [{"start":"HH:MM","end":"HH:MM","data_entry":""}, ...]
-    轉成這頁使用的 skip_rules：
-      [{"start": time, "end": time}, ...]
-    """
-    rules = []
-    for w in exclude_windows or []:
-        try:
-            s = pd.to_datetime(w.get("start", "")).time()
-            e = pd.to_datetime(w.get("end", "")).time()
-        except Exception:
-            continue
-        rules.append({"start": s, "end": e})
-    return rules
-
-
-def _apply_skip_rules(df: pd.DataFrame, skip_rules: list[dict]) -> pd.DataFrame:
-    """
-    排除區間：把落在排除時段內的資料剔除（依時間）
-    """
-    if df is None or df.empty or not skip_rules:
-        return df
-
-    if "揀貨完成時間" not in df.columns:
-        return df
-
-    out = df.copy()
-    out["揀貨完成時間"] = parse_tw_datetime(out["揀貨完成時間"])
-    out = out.dropna(subset=["揀貨完成時間"])
-
-    mask_keep = pd.Series(True, index=out.index)
-    for r in skip_rules:
-        stt = r.get("start")
-        edt = r.get("end")
-        if stt is None or edt is None:
-            continue
-        t = out["揀貨完成時間"].dt.time
-        mask_keep &= ~((t >= stt) & (t <= edt))
-
-    return out.loc[mask_keep].copy()
-
-
-def _read_uploads(uploaded_files: list[st.runtime.uploaded_file_manager.UploadedFile]) -> pd.DataFrame:
+# =========================================================
+# Streamlit UI
+# =========================================================
+def _load_uploaded_files(files: List) -> pd.DataFrame:
     dfs = []
-    for uf in uploaded_files:
-        name = (uf.name or "").lower()
-        b = uf.getvalue()
-        bio = io.BytesIO(b)
-
+    for f in files:
+        name = (f.name or "").lower()
         if name.endswith(".csv"):
-            df = pd.read_csv(bio)
+            df = pd.read_csv(f)
         else:
-            df = pd.read_excel(bio, dtype={"揀貨完成時間": str} if "揀貨完成時間" else None)
-
-        df["__source_file__"] = uf.name
+            df = pd.read_excel(f)
         dfs.append(df)
-
     if not dfs:
         return pd.DataFrame()
     return pd.concat(dfs, ignore_index=True)
 
 
-# =========================================================
-# Streamlit Page
-# =========================================================
+def _init_mapping_state():
+    if "pick_map" not in st.session_state:
+        # 以 preset 為基底，但允許 UI 編輯（姓名可輸入中文）
+        st.session_state.pick_map = {k: dict(v) for k, v in preset_picker_info.items()}
+
+
+def _mapping_editor():
+    """
+    ✅ 姓名可輸入中文（text）
+    ✅ 不改計算邏輯：只是更新 mapping 供 _get_name/_get_start_time_str/_get_region 使用
+    """
+    _init_mapping_state()
+    with st.sidebar:
+        st.subheader("🧑‍🤝‍🧑 揀貨人資料（可編輯）")
+        st.caption("姓名可直接輸入中文；未填區域視為低空。")
+
+        # 轉成 DataFrame 供編輯
+        rows = []
+        for emp_id, info in st.session_state.pick_map.items():
+            rows.append(
+                {
+                    "員編": emp_id,
+                    "姓名": info.get("姓名", ""),
+                    "起始時間": info.get("起始時間", default_start_time_str),
+                    "區域": info.get("區域", "低空") or "低空",
+                }
+            )
+        edit_df = pd.DataFrame(rows)
+
+        edited = st.data_editor(
+            edit_df,
+            use_container_width=True,
+            num_rows="dynamic",
+            hide_index=True,
+            column_config={
+                "員編": st.column_config.TextColumn("員編"),
+                "姓名": st.column_config.TextColumn("姓名（中文可輸入）"),
+                "起始時間": st.column_config.TextColumn("起始時間（HH:MM:SS）"),
+                "區域": st.column_config.TextColumn("區域（低空/高空）"),
+            },
+            key="pick_map_editor",
+        )
+
+        # 回寫 session mapping
+        new_map: Dict[str, Dict[str, str]] = {}
+        for _, r in edited.iterrows():
+            emp = str(r.get("員編", "")).strip()
+            if not emp:
+                continue
+            new_map[emp] = {
+                "姓名": str(r.get("姓名", "")).strip(),
+                "起始時間": str(r.get("起始時間", default_start_time_str)).strip() or default_start_time_str,
+                "區域": (str(r.get("區域", "低空")).strip() or "低空"),
+            }
+        st.session_state.pick_map = new_map
+
+
 def main():
     inject_logistics_theme()
-    set_page("總揀達標（上午/下午分段）", icon="🧺", subtitle="同頁上下分段｜達標紅綠底色｜匯出按鈕不清畫面")
+    set_page("總揀達標（上午＋下午）", icon="🧾", subtitle="同一張報表 Sheet 上下分段｜達標紅綠底色｜姓名可中文輸入")
 
-    # Sidebar controls（沿用你統一 UI：手動輸入排除區間，不下拉）
-    controls = sidebar_controls(default_top_n=30, enable_exclude_windows=True, state_key_prefix="pick")
-    top_n = int(controls["top_n"])
-    skip_rules = _adapt_exclude_windows_to_skip_rules(controls.get("exclude_windows", []))
-
+    # sidebar controls
+    _mapping_editor()
     with st.sidebar:
-        st.markdown("---")
-        low_target = st.number_input("低空達標門檻（效率 ≥）", min_value=1, max_value=999, value=int(LOW_TARGET_DEFAULT), step=1)
-        high_target = st.number_input("高空達標門檻（效率 ≥）", min_value=1, max_value=999, value=int(HIGH_TARGET_DEFAULT), step=1)
-        report_title = st.text_input("報表標題（可留空）", value="總揀達標獎金計算報表（合併版）")
-        st.caption("提示：匯出為同一個 Sheet1，上下分段（第一階段=上午，第二階段=下午）")
+        st.divider()
+        st.subheader("⚙️ 報表設定")
+        report_title = st.text_input("報表標題", value="總揀達標獎金計算報表（合併版）")
+        st.caption("達標門檻（沿用你原本條件）：高空 20、低空 48")
+        high_threshold = st.number_input("高空達標（效率）", min_value=0.0, max_value=9999.0, value=20.0, step=1.0)
+        low_threshold = st.number_input("低空達標（效率）", min_value=0.0, max_value=9999.0, value=48.0, step=1.0)
 
-    # Upload
-    card_open("📤 上傳作業原始資料（總揀）")
-    uploaded_files = st.file_uploader(
-        "上傳 Excel / CSV（需包含：揀貨人、揀貨完成時間）",
-        type=["xlsx", "xls", "xlsm", "csv"],
+    # upload
+    card_open("📤 上傳原始資料（可多檔合併）")
+    files = st.file_uploader(
+        "上傳 Excel / CSV",
+        type=["xlsx", "xls", "csv"],
         accept_multiple_files=True,
         label_visibility="collapsed",
     )
-    run = st.button("🚀 產出 KPI", type="primary", disabled=not uploaded_files)
+    run = st.button("🚀 產出報表", type="primary", disabled=not files)
     card_close()
 
-    # 第一次進來：不跑
-    if not run and "pick_result" not in st.session_state:
-        st.info("請先上傳資料後，點『產出 KPI』")
-        return
+    if "picking_result" not in st.session_state:
+        st.session_state.picking_result = None
 
-    # 只有按下產出才重新計算（確保匯出按鈕不會清掉畫面）
     if run:
+        # 計算一次後存 session，避免你按匯出導致 KPI 畫面消失
         with st.spinner("計算中，請稍候..."):
-            raw_df = _read_uploads(uploaded_files)
-            raw_df = _apply_skip_rules(raw_df, skip_rules)
+            raw_df = _load_uploaded_files(files)
+            if raw_df.empty:
+                st.error("未讀到任何資料，請確認檔案內容。")
+                return
 
-            morning_stats = _calc_shift_stats(raw_df, "morning", low_target=low_target, high_target=high_target)
-            afternoon_stats = _calc_shift_stats(raw_df, "afternoon", low_target=low_target, high_target=high_target)
+            # 合併版邏輯：去成箱 + 合併列 + 解析時間
+            df = remove_boxed_rows(raw_df)
+            full_df = combine_rows(df)
+            full_df = ensure_datetime(full_df).dropna(subset=["揀貨完成時間"])
 
-            # 存到 session_state，讓按匯出時畫面不消失
-            st.session_state.pick_result = {
-                "raw_rows": int(len(raw_df)) if raw_df is not None else 0,
+            # 篩上午/下午 + 計算
+            morning_df = filter_morning_period(full_df)
+            afternoon_df = filter_afternoon_period(full_df)
+
+            mapping = st.session_state.pick_map
+
+            morning_stats = calculate_statistics_morning(morning_df, full_df, mapping)
+            afternoon_stats = calculate_statistics_afternoon(afternoon_df, full_df, mapping)
+
+            # 產出 xlsx bytes（同一張 Sheet 上下分段）
+            xlsx_bytes = build_export_xlsx_bytes(
+                title=report_title.strip() or "總揀達標獎金計算報表（合併版）",
+                morning_df=morning_stats,
+                afternoon_df=afternoon_stats,
+                low_threshold=float(low_threshold),
+                high_threshold=float(high_threshold),
+            )
+
+            st.session_state.picking_result = {
+                "report_title": report_title.strip() or "總揀達標獎金計算報表（合併版）",
                 "morning_stats": morning_stats,
                 "afternoon_stats": afternoon_stats,
-                "low_target": float(low_target),
-                "high_target": float(high_target),
-                "title": report_title.strip() or "總揀達標獎金計算報表（合併版）",
-                "top_n": int(top_n),
+                "xlsx_bytes": xlsx_bytes,
             }
 
-    # 從 session_state 取結果
-    res = st.session_state.get("pick_result", {})
-    morning_stats: pd.DataFrame = res.get("morning_stats", pd.DataFrame())
-    afternoon_stats: pd.DataFrame = res.get("afternoon_stats", pd.DataFrame())
-    low_target = float(res.get("low_target", LOW_TARGET_DEFAULT))
-    high_target = float(res.get("high_target", HIGH_TARGET_DEFAULT))
-    title = str(res.get("title", "總揀達標獎金計算報表（合併版）"))
-    top_n = int(res.get("top_n", 30))
+    # render result (persist)
+    result = st.session_state.picking_result
+    if not result:
+        st.info("請先上傳檔案並點「產出報表」。")
+        return
 
-    # KPI blocks
-    st.divider()
-    col_l, col_r = st.columns(2)
+    morning_stats = result["morning_stats"]
+    afternoon_stats = result["afternoon_stats"]
 
-    def _render_shift_block(label: str, sdf: pd.DataFrame, region_target_low: float, region_target_high: float):
-        card_open(f"{label} KPI")
-        if sdf is None or sdf.empty:
-            st.info("本區段無資料")
-            card_close()
-            return
-
-        # 混合門檻的達標率：逐列依區域判斷
-        def _row_ok(r):
-            th = region_target_high if str(r.get("區域", "")).strip() == "高空" else region_target_low
-            try:
-                return float(r.get("效率", 0)) >= float(th)
-            except Exception:
-                return False
-
-        ok_rate = float(sdf.apply(_row_ok, axis=1).mean()) if len(sdf) else 0.0
-
-        render_kpis(
-            [
-                KPI("人數", f"{len(sdf):,}"),
-                KPI("總筆數", f"{int(sdf['筆數'].sum()) if '筆數' in sdf.columns else 0:,}"),
-                KPI("總分鐘", f"{float(sdf['總分鐘'].sum()) if '總分鐘' in sdf.columns else 0:.2f}"),
-                KPI("平均效率", f"{float(sdf['效率'].mean()) if '效率' in sdf.columns and len(sdf) else 0:.2f}"),
-                KPI("達標率", f"{ok_rate:.0%}"),
-            ]
-        )
-        card_close()
-
-        card_open(f"{label} 效率排行（Top {top_n}）")
-        # 這裡用 common_ui.bar_topN 的 target 只能一條線，
-        # 我用低空門檻當參考線（高空另用底色在 Excel）
-        ref_target = float(region_target_low)
-        bar_topN(
-            sdf,
-            x_col="姓名" if "姓名" in sdf.columns else "揀貨人",
-            y_col="效率",
-            hover_cols=["區域", "筆數", "總分鐘", "工作區間"],
-            top_n=top_n,
-            target=ref_target,
-            title=f"參考線=低空達標 {int(region_target_low)}（高空達標 {int(region_target_high)} 於 Excel 以底色判斷）",
-        )
-        card_close()
-
-        # 明細表（你要低於門檻紅色：在頁面上用 dataframe style）
-        def _style_rows(row):
-            th = region_target_high if str(row.get("區域", "")).strip() == "高空" else region_target_low
-            try:
-                ok = float(row.get("效率", 0)) >= float(th)
-            except Exception:
-                ok = False
-            # 這裡只做背景提示，真正輸出 Excel 會整列紅/綠
-            return ["background-color: rgba(220,38,38,0.18)" if not ok else "" for _ in row.index]
-
-        card_open(f"{label} 明細（未達標紅底）")
-        try:
-            st.dataframe(sdf.style.apply(_style_rows, axis=1), use_container_width=True, hide_index=True)
-        except Exception:
-            st.dataframe(sdf, use_container_width=True, hide_index=True)
-        card_close()
-
-    with col_l:
-        _render_shift_block("☀️ 上午（第一階段）", morning_stats, low_target, high_target)
-
-    with col_r:
-        _render_shift_block("🌙 下午（第二階段）", afternoon_stats, low_target, high_target)
-
-    # Export (按鈕，不清畫面)
-    st.divider()
-    card_open("⬇️ 匯出報表（按鈕）")
-    xlsx_bytes = build_export_xlsx_bytes_single_sheet(
-        title=title,
-        morning_df=morning_stats,
-        afternoon_df=afternoon_stats,
-        low_target=low_target,
-        high_target=high_target,
-    )
-    download_excel(xlsx_bytes, filename=f"{title}.xlsx")
+    # KPI畫面：上午/下午上下顯示（你也可以改成左右 columns）
+    card_open("📊 第一階段（上午）")
+    if morning_stats is None or morning_stats.empty:
+        st.info("上午無資料")
+    else:
+        st.dataframe(morning_stats, use_container_width=True, hide_index=True)
     card_close()
+
+    card_open("📊 第二階段（下午）")
+    if afternoon_stats is None or afternoon_stats.empty:
+        st.info("下午無資料")
+    else:
+        st.dataframe(afternoon_stats, use_container_width=True, hide_index=True)
+    card_close()
+
+    # ✅ 匯出按鈕：直接是按鈕（不再用一個卡片標題分開）
+    st.download_button(
+        label="⬇️ 匯出報表（Excel）",
+        data=result["xlsx_bytes"],
+        file_name=f"{result['report_title']}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=False,
+    )
 
 
 if __name__ == "__main__":
