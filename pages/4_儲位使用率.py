@@ -17,7 +17,7 @@ from common_ui import (
 # ========= 預設分類（可在 sidebar 調整） =========
 DEFAULT_CATEGORIES = {
     "輕型料架": ["001", "002", "003", "017", "016"],
-    "落地儲": ["014", "018", "019", "020", "010", "081", "401", "402", "403","015"],
+    "落地儲": ["014", "018", "019", "020", "010", "081", "401", "402", "403"],
     "重型低空": ["011", "012", "013", "031", "032", "033", "034", "035", "036", "037", "038"],
     "高空儲": [
         "021", "022", "023",
@@ -44,10 +44,10 @@ def sidebar_category_editor() -> dict:
     if "categories" not in st.session_state:
         st.session_state.categories = {k: v[:] for k, v in DEFAULT_CATEGORIES.items()}
 
+    st.sidebar.divider()
     st.sidebar.header("🧩 分類定義（可調整）")
     st.sidebar.caption("以逗號分隔，例如：001,002,003（會自動去空白）")
 
-    # 編輯區碼
     for cat in list(st.session_state.categories.keys()):
         zones = st.session_state.categories.get(cat, [])
         text = st.sidebar.text_area(
@@ -58,7 +58,6 @@ def sidebar_category_editor() -> dict:
         )
         st.session_state.categories[cat] = [z.strip() for z in (text or "").split(",") if z.strip()]
 
-    # 還原 / 新增
     c1, c2 = st.sidebar.columns(2)
     with c1:
         if st.sidebar.button("↩️ 還原預設分類"):
@@ -70,12 +69,15 @@ def sidebar_category_editor() -> dict:
             st.session_state.categories[new_name] = []
             st.rerun()
 
-    # 刪除類別（帶確認）
     st.sidebar.caption("勾選後可刪除類別（請小心）")
-    del_cat = st.sidebar.selectbox("選擇要刪除的類別", options=["（不刪除）"] + list(st.session_state.categories.keys()))
+    del_cat = st.sidebar.selectbox(
+        "選擇要刪除的類別",
+        options=["（不刪除）"] + list(st.session_state.categories.keys()),
+        key="del_cat_select",
+    )
     if del_cat != "（不刪除）":
         if st.sidebar.checkbox(f"確認刪除：{del_cat}", value=False, key="confirm_del_cat"):
-            if st.sidebar.button("🗑️ 刪除類別"):
+            if st.sidebar.button("🗑️ 刪除類別", key="btn_del_cat"):
                 st.session_state.categories.pop(del_cat, None)
                 st.rerun()
 
@@ -110,11 +112,10 @@ def compute(df: pd.DataFrame, col_zone: str, col_valid: str, col_used: str, cate
             }
         )
 
-    # 未分類區(溫層)
     all_defined = []
     for zlist in (categories or {}).values():
         all_defined.extend([str(z).strip() for z in (zlist or []) if str(z).strip() != ""])
-    all_defined = list(dict.fromkeys(all_defined))  # unique
+    all_defined = list(dict.fromkeys(all_defined))
 
     others = sorted(
         df.loc[~df[col_zone].isin(all_defined), col_zone]
@@ -129,16 +130,16 @@ def compute(df: pd.DataFrame, col_zone: str, col_valid: str, col_used: str, cate
     return res_df, others
 
 
-def _chart_usage_rate(res_df: pd.DataFrame, target: float | None = None):
+def _chart_usage_rate(res_df: pd.DataFrame, threshold: float):
     """
-    ✅ 依你的要求：使用率「大於門檻」的 bar 變紅
-    門檻：若 target 有值用 target，否則 90
+    ✅ 使用率 > threshold → bar 變紅
+    並顯示 threshold 虛線
     """
     if res_df is None or res_df.empty:
         st.info("無資料可視覺化")
         return
 
-    threshold = float(target) if target is not None else 90.0
+    threshold = float(threshold)
 
     try:
         import altair as alt  # type: ignore
@@ -154,8 +155,8 @@ def _chart_usage_rate(res_df: pd.DataFrame, target: float | None = None):
                 y=alt.Y("類別:N", sort="-x", title=""),
                 color=alt.condition(
                     alt.datum["超過門檻"] == True,
-                    alt.value("red"),          # ✅ 大於門檻：紅
-                    alt.value("steelblue"),    # ✅ 其他：藍
+                    alt.value("red"),
+                    alt.value("steelblue"),
                 ),
                 tooltip=["類別", "有效貨位", "已使用貨位", "未使用貨位", "使用率(%)"],
             )
@@ -170,7 +171,7 @@ def _chart_usage_rate(res_df: pd.DataFrame, target: float | None = None):
 
     except Exception:
         st.bar_chart(res_df.set_index("類別")["使用率(%)"])
-        st.caption(f"⚠️ 目前環境無法套用條件著色，已用簡易圖表替代。門檻：{threshold:.0f}%")
+        st.caption(f"⚠️ 無法套用條件著色（門檻：{threshold:.0f}%）")
 
 
 def _chart_valid_used(res_df: pd.DataFrame):
@@ -229,7 +230,7 @@ def _chart_unused(res_df: pd.DataFrame):
 
 def _render_category_card(item: dict, warn_threshold: float):
     """
-    類別卡片：使用率 < warn_threshold 就整塊紅底
+    卡片：使用率 < warn_threshold 整塊紅底，否則綠底
     """
     cat = str(item.get("類別", ""))
     valid = int(item.get("有效貨位", 0))
@@ -273,7 +274,7 @@ def _render_category_card(item: dict, warn_threshold: float):
 def main():
     st.set_page_config(page_title="儲位分類統計", page_icon="📦", layout="wide")
     inject_logistics_theme()
-    set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜分類可調整｜卡片低於門檻紅底｜圖表大於門檻紅柱")
+    set_page("儲位分類統計", icon="📦", subtitle="KPI + 圖表｜圖格在最上方｜門檻常駐顯示")
 
     # ======================
     # 上傳
@@ -300,7 +301,7 @@ def main():
     df.columns = df.columns.astype(str).str.strip()
 
     # ======================
-    # Sidebar：欄位設定 + 圖表門檻（同目標線）+ 卡片紅卡門檻
+    # Sidebar：這些區塊「永遠顯示」（不使用 expander）
     # ======================
     with st.sidebar:
         st.header("⚙️ 欄位設定")
@@ -309,21 +310,31 @@ def main():
         col_used = st.text_input("已使用貨位 欄位", value=DEFAULT_COL_USED)
 
         st.divider()
+
         st.header("🎯 圖表門檻（同目標線）")
-        use_target = st.checkbox("顯示使用率目標線", value=False)
-        target_rate = (
-            st.number_input("使用率門檻(%)", min_value=0.0, max_value=100.0, value=90.0, step=1.0)
-            if use_target
-            else None
+        show_target = st.checkbox("顯示使用率目標線", value=False)
+        chart_threshold = st.number_input(
+            "使用率門檻（%）",
+            min_value=0.0,
+            max_value=100.0,
+            value=90.0,
+            step=1.0,
         )
         st.caption("圖表：使用率 > 門檻 → 紅色 bar")
 
         st.divider()
+
         st.header("🔴 卡片紅卡門檻")
-        warn_threshold = st.number_input("紅卡門檻（使用率%）", min_value=0.0, max_value=100.0, value=90.0, step=1.0)
+        warn_threshold = st.number_input(
+            "紅卡門檻（使用率 %）",
+            min_value=0.0,
+            max_value=100.0,
+            value=90.0,
+            step=1.0,
+        )
         st.caption("卡片：使用率 < 紅卡門檻 → 整塊紅底")
 
-    # 分類可調
+    # 分類可調（Sidebar 下方常駐顯示）
     categories = sidebar_category_editor()
 
     # 欄位檢查
@@ -358,8 +369,8 @@ def main():
     )
     card_close()
 
-      # ======================
-    # 🧾 2x2 圖格總覽（低於門檻紅卡）
+    # ======================
+    # 🧾 圖格總覽（移到圖表最上方）
     # ======================
     card_open("🧾 依格式顯示（圖格總覽｜低於門檻紅卡）")
 
@@ -374,7 +385,6 @@ def main():
 
     card_close()
 
-
     # ======================
     # KPI 圖表
     # ======================
@@ -382,7 +392,8 @@ def main():
 
     with c1:
         card_open("📊 各類別使用率(%)（>門檻紅色）")
-        _chart_usage_rate(res_df, target=target_rate)
+        # 目標線是否顯示：由 show_target 控制，但門檻值永遠存在
+        _chart_usage_rate(res_df, threshold=float(chart_threshold))
         card_close()
 
     with c2:
