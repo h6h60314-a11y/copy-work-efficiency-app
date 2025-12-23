@@ -35,9 +35,9 @@ st.markdown(
         letter-spacing: 0.5px;
     }
 
-    /* 群組標題前加圖示（📦） */
+    /* 群組標題前加圖示（🚚） */
     section[data-testid="stSidebar"] h2::before{
-        content: "📦";
+        content: "🚚";
         font-size: 22px;
         margin-right: 4px;
     }
@@ -93,3 +93,4 @@ pg = st.navigation(
 )
 
 pg.run()
+
