@@ -9,7 +9,7 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 # ==================================================
 st.set_page_config(
     page_title="大豐物流 - 作業平台",
-    page_icon="🏭",
+    page_icon="assets/gf_logo.png",  # ✅ 瀏覽器 tab 用 logo
     layout="wide",
 )
 
@@ -17,7 +17,7 @@ inject_logistics_theme()
 
 
 # ==================================================
-# 同視窗切頁：讀取 query param 後 switch_page
+# 同視窗切頁（query param）
 # ==================================================
 def _goto_if_any():
     goto = st.query_params.get("goto")
@@ -27,51 +27,38 @@ def _goto_if_any():
 
 
 # ==================================================
-# Styles + JS（純文字條列、可點、不像連結）
+# Styles + JS（首頁條列專用）
 # ==================================================
 st.markdown(
     """
 <style>
-/* 條列排版（• + 標題 + 說明） */
 ._home_item{
   display: grid;
   grid-template-columns: 18px 1fr;
   column-gap: 10px;
   margin: 14px 0 18px 0;
 }
-
 ._home_bullet{
   font-size: 18px;
-  line-height: 18px;
   color: rgba(15,23,42,0.85);
   padding-top: 2px;
 }
-
 ._home_title{
   font-size: 15.5px;
-  line-height: 22px;
-  color: rgba(15,23,42,0.92);
   font-weight: 900;
-  margin: 0;
+  color: rgba(15,23,42,0.92);
 }
-
 ._home_desc{
   margin-top: 4px;
   font-size: 13px;
-  line-height: 18px;
   color: rgba(15,23,42,0.68);
   font-weight: 650;
 }
-
-/* 可點但不像連結（不藍、不底線、不變按鈕） */
 ._home_click{
   cursor: pointer;
-  display: inline-block;
-  color: inherit;
-  text-decoration: none;
 }
 ._home_click:hover{
-  opacity: 0.86;
+  opacity: 0.85;
 }
 </style>
 
@@ -79,7 +66,7 @@ st.markdown(
 function homeGoto(pagePath){
   const url = new URL(window.location.href);
   url.searchParams.set("goto", pagePath);
-  window.location.assign(url.toString()); // same window
+  window.location.assign(url.toString());
 }
 </script>
 """,
@@ -87,9 +74,6 @@ function homeGoto(pagePath){
 )
 
 
-# ==================================================
-# Render helpers
-# ==================================================
 def _item(title: str, desc: str, page_path: str):
     st.markdown(
         f"""
@@ -113,51 +97,51 @@ def _item(title: str, desc: str, page_path: str):
 def main():
     _goto_if_any()
 
-    # ===== Header with GF Logo =====
+    # ===== 自訂 Header（Logo + Title）=====
     logo_path = Path("assets/gf_logo.png")
 
-    col_logo, col_title = st.columns([1.2, 8.8], vertical_alignment="center")
+    col_logo, col_title = st.columns([1.1, 8.9], vertical_alignment="center")
 
     with col_logo:
         if logo_path.exists():
             st.image(str(logo_path), width=72)
 
     with col_title:
+        # ❌ 不用 emoji icon
         set_page(
             "大豐物流 - 作業平台",
-            icon="🏭",
             subtitle="作業 KPI｜班別分析（AM/PM）｜排除非作業區間",
         )
 
-    # ===== Module list =====
+    # ===== 模組導覽 =====
     card_open("📌 作業績效分析模組")
 
     _item(
-        "✅ 驗收作業效能（KPI）：",
+        "驗收作業效能（KPI）",
         "人時效率、達標率、班別（AM/PM）切分、支援排除非作業區間",
         "pages/1_驗收作業效能.py",
     )
 
     _item(
-        "📦 上架作業效能（Putaway KPI）：",
+        "上架作業效能（Putaway KPI）",
         "上架產能、人時效率、班別（AM/PM）切分、報表匯出",
         "pages/2_上架作業效能.py",
     )
 
     _item(
-        "🎯 總揀作業效能：",
+        "總揀作業效能",
         "上午 / 下午達標分析、低空 / 高空門檻、排除非作業區間、匯出報表",
         "pages/3_總揀作業效能.py",
     )
 
     _item(
-        "🧊 儲位使用率分析：",
+        "儲位使用率分析",
         "依區(溫層)分類統計、使用率門檻提示、分類可調整、報表匯出",
         "pages/4_儲位使用率.py",
     )
 
     _item(
-        "🔎 揀貨差異：",
+        "揀貨差異",
         "少揀差異展開、庫存儲位與棚別對應、國際條碼後五碼放大顯示",
         "pages/5_揀貨差異代庫存後五碼放大.py",
     )
