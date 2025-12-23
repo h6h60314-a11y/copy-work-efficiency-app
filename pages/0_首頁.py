@@ -2,30 +2,24 @@ import streamlit as st
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 st.set_page_config(
-    page_title="大豐物流 - 作業平台｜首頁",
+    page_title="進貨課效能平台｜首頁",
     page_icon="🏠",
     layout="wide",
 )
 
 inject_logistics_theme()
 
-# ✅ 純文字條列風格（• + 粗體標題 + 說明）
-# ✅ 標題可點，但不藍不底線、看起來就是文字
+# ✅ 同視窗切頁：用 query param 觸發 switch_page
+def _goto_if_any():
+    goto = st.query_params.get("goto")
+    if goto:
+        st.query_params.clear()
+        st.switch_page(goto)
+
 st.markdown(
     """
 <style>
-/* 取消連結藍色與底線（本頁限定） */
-._home a{
-  color: inherit !important;
-  text-decoration: none !important;
-  font-weight: 900;
-}
-._home a:hover{
-  opacity: 0.86;
-  text-decoration: none !important;
-}
-
-/* 條列排版，做成你原本那種一行一條 */
+/* 條列排版：• + 標題 + 說明（純文字樣式） */
 ._home_item{
   display: grid;
   grid-template-columns: 18px 1fr;
@@ -52,26 +46,40 @@ st.markdown(
   color: rgba(15,23,42,0.68);
   font-weight: 650;
 }
+
+/* ✅ 可點但不像連結：不藍、不底線、不變按鈕 */
+._home_click{
+  cursor: pointer;
+  display: inline-block;
+  color: inherit;
+  text-decoration: none;
+}
+._home_click:hover{
+  opacity: 0.86;
+}
 </style>
+
+<script>
+function homeGoto(pagePath){
+  // ✅ 同視窗：直接改目前頁面的 query param
+  const url = new URL(window.location.href);
+  url.searchParams.set("goto", pagePath);
+  window.location.assign(url.toString()); // same tab
+}
+</script>
 """,
     unsafe_allow_html=True,
 )
 
-# ✅ 同視窗切頁：用 query param 觸發 switch_page
-def _goto_if_any():
-    goto = st.query_params.get("goto")
-    if goto:
-        st.query_params.clear()
-        st.switch_page(goto)
-
 def _item(title: str, desc: str, page_path: str):
-    # 用 markdown link，但已被 CSS 改成「非藍色/無底線」的純文字
     st.markdown(
         f"""
-<div class="_home _home_item">
+<div class="_home_item">
   <div class="_home_bullet">•</div>
   <div>
-    <div class="_home_title"><a href="?goto={page_path}">{title}</a></div>
+    <div class="_home_title">
+      <span class="_home_click" onclick="homeGoto('{page_path}')">{title}</span>
+    </div>
     <div class="_home_desc">{desc}</div>
   </div>
 </div>
@@ -83,7 +91,7 @@ def main():
     _goto_if_any()
 
     set_page(
-        "大豐物流 - 作業平台",
+        "進貨課效能平台",
         icon="🏭",
         subtitle="作業 KPI｜班別分析（AM/PM）｜排除非作業區間",
     )
@@ -114,7 +122,7 @@ def main():
         "🔎 揀貨差異：",
         "少揀差異展開、庫存儲位與棚別對應、國際條碼後五碼放大顯示",
         "pages/5_揀貨差異代庫存後五碼放大.py",
-        )
+    )
 
     card_close()
 
