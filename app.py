@@ -11,65 +11,10 @@ st.set_page_config(
 
 inject_logistics_theme()
 
+
 # ==================================================
-# 讓「可點標題」看起來完全像純文字（不藍、不底線、不像按鈕）
-# 並做出你截圖那種「• + 標題 + 說明」的條列排版
+# 工具：掃 pages
 # ==================================================
-st.markdown(
-    """
-<style>
-/* 條列行容器：左 bullet + 右內容 */
-._gt_li{
-  display:flex;
-  gap:12px;
-  align-items:flex-start;
-  margin: 10px 0 16px 0;
-}
-._gt_bullet{
-  width: 14px;
-  flex: 0 0 14px;
-  font-size: 18px;
-  line-height: 22px;
-  color: rgba(15,23,42,0.85);
-  padding-top: 1px;
-}
-._gt_body{
-  flex: 1;
-}
-
-/* 把 Streamlit 的 button 變成純文字標題（完全不像按鈕） */
-._gt_title button{
-  all: unset;
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 900;
-  color: rgba(15,23,42,0.92);
-}
-._gt_title button:hover{
-  opacity: 0.86;           /* 只做微亮，不要底色、不要底線 */
-}
-
-/* 說明文字：小一點、灰一點 */
-._gt_desc{
-  margin-top: 4px;
-  font-size: 13px;
-  line-height: 18px;
-  font-weight: 600;
-  color: rgba(15,23,42,0.68);
-}
-
-/* 去掉按鈕前後多餘空白（不同版本 Streamlit 可能會有） */
-div[data-testid="stButton"]{
-  margin: 0 !important;
-  padding: 0 !important;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-
 def _list_pages():
     pages_dir = Path(__file__).parent / "pages"
     if not pages_dir.exists():
@@ -79,43 +24,126 @@ def _list_pages():
 
 def _find_page(pages, keywords):
     kws = [k for k in (keywords or []) if k]
-    # 嚴格：全部命中
     for p in pages:
         if all(k in p.name for k in kws):
             return p
-    # 放寬：任一命中
     for p in pages:
         if any(k in p.name for k in kws):
             return p
     return None
 
 
-def _switch_to(p: Path | None):
-    # ✅ 同視窗切換頁面（不會開新分頁/新視窗）
+def _page_path(p: Path | None) -> str | None:
     if not p:
-        st.warning("找不到對應頁面檔案（請確認 pages/ 檔名）")
-        return
-    st.switch_page(f"pages/{p.name}")
+        return None
+    return f"pages/{p.name}"
 
 
-def _bullet_item(title_btn_text: str, desc: str, page: Path | None, key: str):
+# ==================================================
+# 1) 先處理「點擊後的切頁」（同視窗）
+# ==================================================
+qp = st.query_params
+goto = qp.get("goto", None)
+if goto:
+    # 用完就清掉，避免每次 rerun 都跳
+    st.query_params.clear()
+    # 同視窗切頁
+    st.switch_page(goto)
+
+
+# ==================================================
+# 2) 注入 1:1 條列樣式 + clickable title（不是按鈕）
+# ==================================================
+st.markdown(
     """
-    產生：• +（可點的純文字標題）+ 說明文字
-    視覺 1:1 對齊你截圖的條列樣式
+<style>
+/* 讓導覽列看起來跟你原本那張一樣：bullet + 標題 + 說明 */
+._gt_list{ margin-top: 6px; }
+
+._gt_item{
+  display:flex;
+  gap: 14px;
+  align-items:flex-start;
+  margin: 12px 0 18px 0;
+}
+
+._gt_bullet{
+  width: 10px;
+  flex: 0 0 10px;
+  padding-top: 2px;
+  color: rgba(15,23,42,0.85);
+  font-size: 18px;
+  line-height: 18px;
+}
+
+._gt_body{ flex: 1; }
+
+._gt_title{
+  font-weight: 900;
+  font-size: 16px;
+  line-height: 22px;
+  color: rgba(15,23,42,0.92);
+  margin: 0;
+}
+
+._gt_desc{
+  margin-top: 4px;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 18px;
+  color: rgba(15,23,42,0.68);
+}
+
+/* 可點文字（看起來不是連結：不藍、不底線） */
+._gt_click{
+  cursor: pointer;
+  text-decoration: none !important;
+  color: inherit !important;
+}
+._gt_click:hover{
+  opacity: 0.86;
+  text-decoration: none !important;
+}
+</style>
+
+<script>
+function gtGoto(pagePath){
+  // 同視窗改 query param，讓 streamlit rerun -> switch_page
+  const url = new URL(window.location.href);
+  url.searchParams.set("goto", pagePath);
+  window.location.href = url.toString();
+}
+</script>
+""",
+    unsafe_allow_html=True,
+)
+
+
+def _render_item(title: str, desc: str, page_path: str | None):
     """
-    st.markdown('<div class="_gt_li">', unsafe_allow_html=True)
-    st.markdown('<div class="_gt_bullet">•</div>', unsafe_allow_html=True)
-    st.markdown('<div class="_gt_body">', unsafe_allow_html=True)
+    用 HTML 完整控制排版（才會跟你原本那張一模一樣）
+    """
+    if page_path:
+        title_html = f"""
+        <a class="_gt_click" href="javascript:gtGoto('{page_path}')">
+          {title}
+        </a>
+        """
+    else:
+        title_html = title
 
-    st.markdown('<div class="_gt_title">', unsafe_allow_html=True)
-    if st.button(title_btn_text, key=key):
-        _switch_to(page)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown(f'<div class="_gt_desc">{desc}</div>', unsafe_allow_html=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"""
+<div class="_gt_item">
+  <div class="_gt_bullet">•</div>
+  <div class="_gt_body">
+    <div class="_gt_title">{title_html}</div>
+    <div class="_gt_desc">{desc}</div>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 def main():
@@ -127,53 +155,52 @@ def main():
 
     pages = _list_pages()
 
-    # 依你的 pages 檔名（1~5）
     p_qc = _find_page(pages, ["1_", "驗收"])
     p_put = _find_page(pages, ["2_", "上架"])
     p_pick = _find_page(pages, ["3_", "總揀"])
     p_slot = _find_page(pages, ["4_", "儲位"])
     p_diff = _find_page(pages, ["5_", "揀貨"]) or _find_page(pages, ["揀貨", "差異"])
 
+    qc_path = _page_path(p_qc)
+    put_path = _page_path(p_put)
+    pick_path = _page_path(p_pick)
+    slot_path = _page_path(p_slot)
+    diff_path = _page_path(p_diff)
+
     card_open("📌 作業績效分析模組")
 
-    _bullet_item(
-        "✅ 驗收作業效能（KPI）",
+    st.markdown('<div class="_gt_list">', unsafe_allow_html=True)
+
+    _render_item(
+        "✅ 驗收作業效能（KPI）：",
         "人時效率、達標率、班別（AM/PM）切分、支援排除非作業區間",
-        p_qc,
-        key="nav_qc",
+        qc_path,
     )
-
-    _bullet_item(
-        "📦 上架作業效能（Putaway KPI）",
+    _render_item(
+        "📦 上架作業效能（Putaway KPI）：",
         "上架產能、人時效率、班別（AM/PM）切分、報表匯出",
-        p_put,
-        key="nav_put",
+        put_path,
     )
-
-    _bullet_item(
-        "🎯 總揀作業效能",
+    _render_item(
+        "🎯 總揀作業效能：",
         "上午 / 下午達標分析、低空 / 高空門檻、排除非作業區間、匯出報表",
-        p_pick,
-        key="nav_pick",
+        pick_path,
     )
-
-    _bullet_item(
-        "🧊 儲位使用率分析",
+    _render_item(
+        "🧊 儲位使用率分析：",
         "依區(溫層)分類統計、使用率門檻提示、分類可調整、報表匯出",
-        p_slot,
-        key="nav_slot",
+        slot_path,
     )
-
-    _bullet_item(
-        "🔎 揀貨差異",
+    _render_item(
+        "🔎 揀貨差異：",
         "少揀差異展開、庫存儲位與棚別對應、國際條碼後五碼放大顯示",
-        p_diff,
-        key="nav_diff",
+        diff_path,
     )
 
+    st.markdown("</div>", unsafe_allow_html=True)
     card_close()
 
-    # 找不到頁面：顯示 pages 清單方便你核對（可保留）
+    # 找不到頁面時提示
     missing = [name for name, p in [
         ("驗收", p_qc),
         ("上架", p_put),
@@ -181,7 +208,6 @@ def main():
         ("儲位", p_slot),
         ("揀貨差異", p_diff),
     ] if p is None]
-
     if missing:
         st.divider()
         st.warning(f"有模組找不到對應頁面檔案：{', '.join(missing)}")
