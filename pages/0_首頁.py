@@ -2,7 +2,7 @@ import streamlit as st
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 st.set_page_config(
-    page_title="進貨課效能平台｜首頁",
+    page_title="大豐物流-作業平台｜首頁",
     page_icon="🏠",
     layout="wide",
 )
@@ -79,7 +79,7 @@ div[data-testid="stButton"]{ margin:0; padding:0; }
 
 def main():
     set_page(
-        "進貨課效能平台",
+        "大豐物流-作業平台",
         icon="🏭",
         subtitle="作業 KPI｜班別分析（AM/PM）｜排除非作業區間",
     )
