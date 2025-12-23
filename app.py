@@ -3,61 +3,47 @@ from pathlib import Path
 
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
+# ==================================================
+# Page config
+# ==================================================
 st.set_page_config(
     page_title="進貨課效能平台",
     page_icon="🏭",
     layout="wide",
 )
 
+# ==================================================
+# Left navigation (✅ app -> 首頁)
+# ==================================================
+PAGES = {
+    "首頁": [
+        st.Page("app.py", title="首頁", icon="🏠"),
+    ],
+    "作業模組": [
+        st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅"),
+        st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦"),
+        st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯"),
+        st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊"),
+        st.Page("pages/5_揀貨差異代庫存後五碼放大.py", title="揀貨差異代庫存", icon="🔎"),
+    ],
+}
+
+pg = st.navigation(PAGES)
+# 如果目前不是首頁（app.py），直接交給 navigation 跑對應 page
+if pg.url_path != "app":
+    pg.run()
+    st.stop()
+
+
+# ==================================================
+# Theme + Home UI (1:1 條列樣式 + 同視窗切頁)
+# ==================================================
 inject_logistics_theme()
 
-
-# ==================================================
-# 工具：掃 pages
-# ==================================================
-def _list_pages():
-    pages_dir = Path(__file__).parent / "pages"
-    if not pages_dir.exists():
-        return []
-    return sorted(pages_dir.glob("*.py"))
-
-
-def _find_page(pages, keywords):
-    kws = [k for k in (keywords or []) if k]
-    for p in pages:
-        if all(k in p.name for k in kws):
-            return p
-    for p in pages:
-        if any(k in p.name for k in kws):
-            return p
-    return None
-
-
-def _page_path(p: Path | None) -> str | None:
-    if not p:
-        return None
-    return f"pages/{p.name}"
-
-
-# ==================================================
-# 1) 先處理「點擊後的切頁」（同視窗）
-# ==================================================
-qp = st.query_params
-goto = qp.get("goto", None)
-if goto:
-    # 用完就清掉，避免每次 rerun 都跳
-    st.query_params.clear()
-    # 同視窗切頁
-    st.switch_page(goto)
-
-
-# ==================================================
-# 2) 注入 1:1 條列樣式 + clickable title（不是按鈕）
-# ==================================================
 st.markdown(
     """
 <style>
-/* 讓導覽列看起來跟你原本那張一樣：bullet + 標題 + 說明 */
+/* 條列式：• + 標題 + 說明（完全像你原本那張） */
 ._gt_list{ margin-top: 6px; }
 
 ._gt_item{
@@ -120,9 +106,6 @@ function gtGoto(pagePath){
 
 
 def _render_item(title: str, desc: str, page_path: str | None):
-    """
-    用 HTML 完整控制排版（才會跟你原本那張一模一樣）
-    """
     if page_path:
         title_html = f"""
         <a class="_gt_click" href="javascript:gtGoto('{page_path}')">
@@ -147,25 +130,17 @@ def _render_item(title: str, desc: str, page_path: str | None):
 
 
 def main():
+    # ✅ 點條列後：同視窗切頁
+    goto = st.query_params.get("goto", None)
+    if goto:
+        st.query_params.clear()
+        st.switch_page(goto)
+
     set_page(
         "進貨課效能平台",
         icon="🏭",
         subtitle="作業 KPI｜班別分析（AM/PM）｜排除非作業區間",
     )
-
-    pages = _list_pages()
-
-    p_qc = _find_page(pages, ["1_", "驗收"])
-    p_put = _find_page(pages, ["2_", "上架"])
-    p_pick = _find_page(pages, ["3_", "總揀"])
-    p_slot = _find_page(pages, ["4_", "儲位"])
-    p_diff = _find_page(pages, ["5_", "揀貨"]) or _find_page(pages, ["揀貨", "差異"])
-
-    qc_path = _page_path(p_qc)
-    put_path = _page_path(p_put)
-    pick_path = _page_path(p_pick)
-    slot_path = _page_path(p_slot)
-    diff_path = _page_path(p_diff)
 
     card_open("📌 作業績效分析模組")
 
@@ -174,45 +149,31 @@ def main():
     _render_item(
         "✅ 驗收作業效能（KPI）：",
         "人時效率、達標率、班別（AM/PM）切分、支援排除非作業區間",
-        qc_path,
+        "pages/1_驗收作業效能.py",
     )
     _render_item(
         "📦 上架作業效能（Putaway KPI）：",
         "上架產能、人時效率、班別（AM/PM）切分、報表匯出",
-        put_path,
+        "pages/2_上架作業效能.py",
     )
     _render_item(
         "🎯 總揀作業效能：",
         "上午 / 下午達標分析、低空 / 高空門檻、排除非作業區間、匯出報表",
-        pick_path,
+        "pages/3_總揀作業效能.py",
     )
     _render_item(
         "🧊 儲位使用率分析：",
         "依區(溫層)分類統計、使用率門檻提示、分類可調整、報表匯出",
-        slot_path,
+        "pages/4_儲位使用率.py",
     )
     _render_item(
         "🔎 揀貨差異：",
         "少揀差異展開、庫存儲位與棚別對應、國際條碼後五碼放大顯示",
-        diff_path,
+        "pages/5_揀貨差異代庫存後五碼放大.py",
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
     card_close()
-
-    # 找不到頁面時提示
-    missing = [name for name, p in [
-        ("驗收", p_qc),
-        ("上架", p_put),
-        ("總揀", p_pick),
-        ("儲位", p_slot),
-        ("揀貨差異", p_diff),
-    ] if p is None]
-    if missing:
-        st.divider()
-        st.warning(f"有模組找不到對應頁面檔案：{', '.join(missing)}")
-        st.caption("目前 pages/ 檔案如下：")
-        st.code("\n".join([p.name for p in pages]) if pages else "pages/ 資料夾不存在或沒有 .py")
 
     st.divider()
     st.caption("提示：左側選單與本頁模組導覽皆可切換模組頁面；各頁設定互不影響。")
