@@ -85,7 +85,7 @@ def main():
     pick_path = _page_param_from_filename(p_pick) if p_pick else None
     slot_path = _page_param_from_filename(p_slot) if p_slot else None
 
-    card_open("📌 模組導覽")
+    card_open("📌 作業績效分析模組")
 
     st.markdown(
         f"""
@@ -110,3 +110,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
