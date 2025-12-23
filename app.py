@@ -1,67 +1,69 @@
 import streamlit as st
 
-# =========================================
-# App Config
-# =========================================
 st.set_page_config(
     page_title="大豐物流 - 作業平台",
-    page_icon="assets/gf_logo.png",  # 依你的專案調整路徑
+    page_icon="assets/gf_logo.png",  # 依你的專案路徑調整
     layout="wide",
 )
 
-# =========================================
-# Sidebar CSS（✅ 首頁最大字、✅ 進貨課次大字 + 🚚、✅ 不受 Streamlit DOM 變動影響）
-# =========================================
+# =========================
+# Sidebar CSS（修正版：不亂加圖示）
+# =========================
 st.markdown(
     """
 <style>
-/* ===== Sidebar 基本 ===== */
+/* Sidebar padding */
 section[data-testid="stSidebar"]{
   padding-top: 10px;
 }
 
-/* ===== 全部選單：預設字級 ===== */
+/* 先把 sidebar 裡所有文字統一回正常狀態（避免被其他 CSS 汙染） */
+section[data-testid="stSidebar"] nav a,
+section[data-testid="stSidebar"] nav button{
+  text-decoration: none !important;
+}
 section[data-testid="stSidebar"] nav a *,
 section[data-testid="stSidebar"] nav button *{
   font-size: 15px !important;
   font-weight: 650 !important;
   line-height: 1.25 !important;
-  text-decoration: none !important;
 }
 
-/* ✅ 首頁：Sidebar Nav 裡「第一個可點項目」→ 最大字
-   Streamlit 不同版本可能用 a / button / li 結構，所以多組 selector 疊加命中 */
+/* ✅ 首頁：sidebar 導覽第一個可點項目 → 最大字 */
 div[data-testid="stSidebarNav"] li:first-child a *,
-div[data-testid="stSidebarNav"] li:first-child button *,
-div[data-testid="stSidebarNav"] a:first-of-type *,
-div[data-testid="stSidebarNav"] button:first-of-type *{
+div[data-testid="stSidebarNav"] li:first-child button *{
   font-size: 26px !important;
   font-weight: 900 !important;
 }
 
-/* ✅ 群組標題（進貨課）：不是可點連結的那一行 → 次大字 */
-div[data-testid="stSidebarNav"] span:not(a span):not(button span),
-div[data-testid="stSidebarNav"] p:not(a p):not(button p),
-div[data-testid="stSidebarNav"] div:not(a div):not(button div){
+/* ✅ 進貨課：只鎖「群組標題」本身（Streamlit 會用 header/div 包一層）
+   這裡不使用 ::before 掃全局，改成只在該容器內加 icon */
+div[data-testid="stSidebarNav"] > div:has(> span),
+div[data-testid="stSidebarNav"] > div:has(> p){
+  margin-top: 6px;
+}
+
+/* 群組標題文字：次大字（只影響群組標題行） */
+div[data-testid="stSidebarNav"] > div:has(> span) > span,
+div[data-testid="stSidebarNav"] > div:has(> p) > p{
   font-size: 20px !important;
   font-weight: 850 !important;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  letter-spacing: 0.5px;
+  gap: 6px;
 }
 
-/* ✅ 群組標題前加 🚚（只作用在群組標題，不影響子頁項目） */
-div[data-testid="stSidebarNav"] span:not(a span):not(button span)::before,
-div[data-testid="stSidebarNav"] p:not(a p):not(button p)::before,
-div[data-testid="stSidebarNav"] div:not(a div):not(button div)::before{
-  content: "🚚 ";
-  font-size: 22px;
-  margin-right: 4px;
+/* ✅ 只在群組標題行前放一個 🚚（不會跑到其他行） */
+div[data-testid="stSidebarNav"] > div:has(> span) > span::before,
+div[data-testid="stSidebarNav"] > div:has(> p) > p::before{
+  content: "🚚";
+  font-size: 20px;
+  margin-right: 2px;
 }
 
-/* 保險：不要讓子頁 a/button 的文字被 ::before 汙染 */
-div[data-testid="stSidebarNav"] a *::before,
-div[data-testid="stSidebarNav"] button *::before{
+/* 保險：絕對不要讓 a/button 的子元素出現 ::before icon */
+div[data-testid="stSidebarNav"] li a *::before,
+div[data-testid="stSidebarNav"] li button *::before{
   content: "" !important;
 }
 </style>
@@ -69,9 +71,9 @@ div[data-testid="stSidebarNav"] button *::before{
     unsafe_allow_html=True,
 )
 
-# =========================================
-# Pages（依你目前的檔名）
-# =========================================
+# =========================
+# Pages（依你目前檔名）
+# =========================
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
@@ -80,11 +82,11 @@ pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能",
 slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
 diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
 
-# =========================================
+# =========================
 # Navigation
-# - ""：只放首頁 → 不顯示群組標題 → 不會有下拉
-# - 進貨課：預設收合 expanded=False（不點不展開）
-# =========================================
+# - 首頁：只有一個，不下拉
+# - 進貨課：預設收合（不點不展開）
+# =========================
 pg = st.navigation(
     {
         "": [home_page],
