@@ -48,7 +48,7 @@ slot_page = st.Page(
 )
 
 diff_page = st.Page(
-    "pages/5_揀貨差異代庫存後五碼放大.py",
+    "pages/5_揀貨差異代庫存.py",
     title="揀貨差異代庫存",
     icon="🔎",
 )
@@ -61,3 +61,4 @@ pg = st.navigation(
 )
 
 pg.run()
+
