@@ -4,7 +4,7 @@ import streamlit as st
 # App config
 # ==================================================
 st.set_page_config(
-    page_title="大豐物流-作業平台",
+    page_title="大豐物流 - 作業平台",
     page_icon="🏭",
     layout="wide",
 )
@@ -27,5 +27,6 @@ pages = {
 }
 
 st.navigation(pages).run()
+
 
 
