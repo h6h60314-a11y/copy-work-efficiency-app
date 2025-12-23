@@ -7,64 +7,65 @@ st.set_page_config(
 )
 
 # =========================
-# Sidebar CSS（修正版：不亂加圖示）
+# Sidebar CSS（穩定版：不加圖示，只放大指定文字）
 # =========================
 st.markdown(
     """
 <style>
-/* Sidebar padding */
+/* ---- Sidebar base ---- */
 section[data-testid="stSidebar"]{
   padding-top: 10px;
 }
 
-/* 先把 sidebar 裡所有文字統一回正常狀態（避免被其他 CSS 汙染） */
-section[data-testid="stSidebar"] nav a,
-section[data-testid="stSidebar"] nav button{
+/* 預設：所有 nav 項目字級 */
+div[data-testid="stSidebarNav"] a,
+div[data-testid="stSidebarNav"] button{
   text-decoration: none !important;
 }
-section[data-testid="stSidebar"] nav a *,
-section[data-testid="stSidebar"] nav button *{
+div[data-testid="stSidebarNav"] a *,
+div[data-testid="stSidebarNav"] button *{
   font-size: 15px !important;
   font-weight: 650 !important;
   line-height: 1.25 !important;
 }
 
-/* ✅ 首頁：sidebar 導覽第一個可點項目 → 最大字 */
+/* ✅ 首頁：最大字（鎖第一個 nav item） */
 div[data-testid="stSidebarNav"] li:first-child a *,
 div[data-testid="stSidebarNav"] li:first-child button *{
   font-size: 26px !important;
   font-weight: 900 !important;
 }
 
-/* ✅ 進貨課：只鎖「群組標題」本身（Streamlit 會用 header/div 包一層）
-   這裡不使用 ::before 掃全局，改成只在該容器內加 icon */
-div[data-testid="stSidebarNav"] > div:has(> span),
-div[data-testid="stSidebarNav"] > div:has(> p){
-  margin-top: 6px;
+/* ✅ 進貨課：次大字（鎖「群組標題」那一行）
+   Streamlit 群組標題通常不是 a/button，因此這裡只放大非 a/button 的直接文字容器 */
+div[data-testid="stSidebarNav"] :is(h1,h2,h3,h4,p,span,div){
+  /* 先全部還原，避免誤傷 */
+  font-size: inherit;
+  font-weight: inherit;
 }
 
-/* 群組標題文字：次大字（只影響群組標題行） */
-div[data-testid="stSidebarNav"] > div:has(> span) > span,
-div[data-testid="stSidebarNav"] > div:has(> p) > p{
+/* 只在 SidebarNav 區塊內，找「看起來像群組標題」的文字行：
+   - 通常會出現在 a/button 列表之前
+   - 且自身不是 a/button
+   這邊用：nav 區塊裡「不是 link/button 的文字行」放大 */
+div[data-testid="stSidebarNav"] > div > :is(p,span,div,h1,h2,h3,h4){
   font-size: 20px !important;
   font-weight: 850 !important;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  letter-spacing: .5px;
 }
 
-/* ✅ 只在群組標題行前放一個 🚚（不會跑到其他行） */
-div[data-testid="stSidebarNav"] > div:has(> span) > span::before,
-div[data-testid="stSidebarNav"] > div:has(> p) > p::before{
-  content: "🚚";
-  font-size: 20px;
-  margin-right: 2px;
+/* ✅ 保險：把子項目的字級固定回 15（避免被上面影響） */
+div[data-testid="stSidebarNav"] li a *,
+div[data-testid="stSidebarNav"] li button *{
+  font-size: 15px !important;
+  font-weight: 650 !important;
 }
 
-/* 保險：絕對不要讓 a/button 的子元素出現 ::before icon */
-div[data-testid="stSidebarNav"] li a *::before,
-div[data-testid="stSidebarNav"] li button *::before{
-  content: "" !important;
+/* ✅ 再保險：首頁最大字要覆蓋回來 */
+div[data-testid="stSidebarNav"] li:first-child a *,
+div[data-testid="stSidebarNav"] li:first-child button *{
+  font-size: 26px !important;
+  font-weight: 900 !important;
 }
 </style>
 """,
@@ -84,8 +85,8 @@ diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代�
 
 # =========================
 # Navigation
-# - 首頁：只有一個，不下拉
-# - 進貨課：預設收合（不點不展開）
+# - 首頁只有一個
+# - 進貨課預設收合（不點不展開）
 # =========================
 pg = st.navigation(
     {
