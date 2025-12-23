@@ -83,7 +83,7 @@ def main():
     _goto_if_any()
 
     set_page(
-        "進貨課效能平台",
+        "大豐物流 - 作業平台",
         icon="🏭",
         subtitle="作業 KPI｜班別分析（AM/PM）｜排除非作業區間",
     )
