@@ -68,7 +68,7 @@ putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效�
 pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯")
 slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
 diff_page = st.Page(
-    "pages/5_揀貨差異代庫存後五碼放大.py",
+    "pages/5_揀貨差異代庫存.py",
     title="揀貨差異代庫存",
     icon="🔎",
 )
@@ -87,3 +87,4 @@ pg = st.navigation(
 )
 
 pg.run()
+
