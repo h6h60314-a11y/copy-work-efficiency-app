@@ -11,56 +11,37 @@ st.markdown(
     r"""
 <style>
 /* Sidebar base */
-section[data-testid="stSidebar"]{
-  padding-top: 10px;
-}
+section[data-testid="stSidebar"]{ padding-top: 10px; }
 
-/* ===== 子項：所有頁面連結（固定正常大小） ===== */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a{
-  text-decoration: none !important;
-}
+/* ===== 子項：連結固定大小 ===== */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a{ text-decoration: none !important; }
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a *{
-  font-size: 16px !important;
-  font-weight: 700 !important;
-  line-height: 1.35 !important;
+  font-size: 16px !important; font-weight: 700 !important; line-height: 1.35 !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
-  padding-top: 8px !important;
-  padding-bottom: 8px !important;
+  padding-top: 8px !important; padding-bottom: 8px !important;
 }
 
-/* ===== ✅ 首頁最大：靠左 + 放大 ===== */
+/* ===== 首頁最大 ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a{
-  display: flex !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  gap: 6px !important;
-  padding: 10px 12px !important;
-  min-height: 48px !important;
+  display: flex !important; align-items: center !important; justify-content: flex-start !important;
+  gap: 6px !important; padding: 10px 12px !important; min-height: 48px !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a *{
-  font-size: 30px !important;
-  font-weight: 950 !important;
-  line-height: 1.15 !important;
-  white-space: nowrap !important;
-  text-align: left !important;
+  font-size: 30px !important; font-weight: 950 !important; line-height: 1.15 !important;
+  white-space: nowrap !important; text-align: left !important;
 }
 
-/* ===== ✅ 群組標題次大（li 底下有 ul 的父節點） ===== */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul){
-  margin-top: 6px !important;
-}
+/* ===== 群組標題次大（li 底下有 ul）===== */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul){ margin-top: 6px !important; }
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul) *{
-  font-size: 22px !important;
-  font-weight: 900 !important;
-  line-height: 1.2 !important;
+  font-size: 22px !important; font-weight: 900 !important; line-height: 1.2 !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul){
-  padding-top: 10px !important;
-  padding-bottom: 10px !important;
+  padding-top: 10px !important; padding-bottom: 10px !important;
 }
 
-/* ✅ 子選單（ul 內）一定回到正常大小（避免被群組標題樣式吃到） */
+/* ✅ 子選單一定回到正常大小 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) ul a *{
   font-size: 16px !important;
   font-weight: 700 !important;
@@ -71,13 +52,10 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
     unsafe_allow_html=True,
 )
 
-# =========================
-# ✅ Pages
-# =========================
+# ✅ 首頁
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
-# ✅ 出貨課項目（⚠️ 路徑請用你 repo 真正存在的檔案）
-# 你目前 repo 截圖是 pages/1_撥貨差異.py
+# ✅ 出貨課項目
 transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
 
 # ✅ 進貨課項目
@@ -87,9 +65,6 @@ pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能",
 slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
 diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
 
-# =========================
-# ✅ Sidebar Navigation
-# =========================
 pg = st.navigation(
     {
         "": [home_page],
