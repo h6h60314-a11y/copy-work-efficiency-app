@@ -7,7 +7,7 @@ st.set_page_config(
 )
 
 # =========================
-# Sidebar CSS（穩定版：不加圖示，只放大指定文字）
+# Sidebar CSS（精準命中 + 不互相覆蓋）
 # =========================
 st.markdown(
     """
@@ -17,55 +17,55 @@ section[data-testid="stSidebar"]{
   padding-top: 10px;
 }
 
-/* 預設：所有 nav 項目字級 */
-div[data-testid="stSidebarNav"] a,
-div[data-testid="stSidebarNav"] button{
+/* 所有導覽項目：正常大小 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button{
   text-decoration: none !important;
 }
-div[data-testid="stSidebarNav"] a *,
-div[data-testid="stSidebarNav"] button *{
+
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a *,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button *{
   font-size: 15px !important;
   font-weight: 650 !important;
-  line-height: 1.25 !important;
+  line-height: 1.35 !important;
 }
 
-/* ✅ 首頁：最大字（鎖第一個 nav item） */
-div[data-testid="stSidebarNav"] li:first-child a *,
-div[data-testid="stSidebarNav"] li:first-child button *{
+/* ✅ 首頁：只鎖「第一個 item 的文字容器」放大 + 修正高度，避免重疊 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child a,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child button{
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child a *,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child button *{
   font-size: 26px !important;
   font-weight: 900 !important;
+  line-height: 1.15 !important;   /* ✅ 防止字擠壓 */
 }
 
-/* ✅ 進貨課：次大字（鎖「群組標題」那一行）
-   Streamlit 群組標題通常不是 a/button，因此這裡只放大非 a/button 的直接文字容器 */
-div[data-testid="stSidebarNav"] :is(h1,h2,h3,h4,p,span,div){
-  /* 先全部還原，避免誤傷 */
-  font-size: inherit;
-  font-weight: inherit;
+/* ✅ 首頁 icon 的尺寸也一起放大，並置中 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child svg{
+  width: 22px !important;
+  height: 22px !important;
+  transform: translateY(2px);
 }
 
-/* 只在 SidebarNav 區塊內，找「看起來像群組標題」的文字行：
-   - 通常會出現在 a/button 列表之前
-   - 且自身不是 a/button
-   這邊用：nav 區塊裡「不是 link/button 的文字行」放大 */
-div[data-testid="stSidebarNav"] > div > :is(p,span,div,h1,h2,h3,h4){
+/* ✅ 進貨課：只鎖「群組標題」那一行
+   Streamlit 群組標題通常是：nav 內部的 section header（不是 a/button）
+   這個 selector 會抓到 sidebar nav 中，出現在 li 列表之前的那個標題文字 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > div:has(> ul) > div:first-child *{
   font-size: 20px !important;
   font-weight: 850 !important;
-  letter-spacing: .5px;
+  line-height: 1.2 !important;
 }
 
-/* ✅ 保險：把子項目的字級固定回 15（避免被上面影響） */
-div[data-testid="stSidebarNav"] li a *,
-div[data-testid="stSidebarNav"] li button *{
-  font-size: 15px !important;
-  font-weight: 650 !important;
-}
-
-/* ✅ 再保險：首頁最大字要覆蓋回來 */
-div[data-testid="stSidebarNav"] li:first-child a *,
-div[data-testid="stSidebarNav"] li:first-child button *{
-  font-size: 26px !important;
-  font-weight: 900 !important;
+/* ✅ 如果你的版本群組標題不是上面那種結構，再加一個 fallback：
+   抓 sidebar nav 裡「不是連結的純文字行」(p/span) 並放大 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] p,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] span{
+  font-size: 20px;
+  font-weight: 850;
 }
 </style>
 """,
@@ -83,17 +83,12 @@ pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能",
 slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
 diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
 
-# =========================
-# Navigation
-# - 首頁只有一個
-# - 進貨課預設收合（不點不展開）
-# =========================
 pg = st.navigation(
     {
         "": [home_page],
         "進貨課": [qc_page, putaway_page, pick_page, slot_page, diff_page],
     },
-    expanded=False,
+    expanded=False,  # ✅ 不點不展開
 )
 
 pg.run()
