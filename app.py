@@ -75,7 +75,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] span{
 # =========================
 # Pages（依你目前檔名）
 # =========================
-home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
+home_page = st.Page("pages/0_首頁.py", title="  首頁", icon="🏠", default=True)
 
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
 putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
@@ -92,3 +92,4 @@ pg = st.navigation(
 )
 
 pg.run()
+
