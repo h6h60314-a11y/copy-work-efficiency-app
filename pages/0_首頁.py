@@ -11,40 +11,52 @@ inject_logistics_theme()
 
 
 def _home_css():
-    # 一定要在 set_page + card_open 後面注入，避免被 common_ui 後續樣式蓋回去
     st.markdown(
         r"""
 <style>
-/* =========================
-   Home list = match screenshot
-   • + icon + (clickable bold title) + inline description
-   ========================= */
+/* 讓首頁清單更緊湊（不留大空格） */
+.home-list{ margin-top: 6px; }
+.home-row{
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;                 /* ✅ 三者間距 */
+  margin: 10px 0;           /* ✅ 每列間距 */
+}
 
-.home-row{ margin: 10px 0; }
+/* 左側 bullet + icon：固定很小寬度 */
+.home-left{
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 42px;          /* ✅ 控制左側佔位，越小越緊 */
+}
+
+/* bullet / icon */
 .home-bullet{
   color: rgba(15, 23, 42, 0.55);
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
   margin-top: 2px;
 }
 .home-ico{
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1;
-  margin-top: 3px;
+  margin-top: 1px;
 }
 
-.home-item{ line-height: 1.6; }
+/* 右側文字區 */
+.home-right{
+  flex: 1 1 auto;
+  line-height: 1.55;
+}
 
-/* ✅ page_link 外層容器改成 inline，才能跟描述同一行 */
-.home-item [data-testid="stPageLink"]{
-  display: inline-block !important;
-  vertical-align: top !important;
+/* page_link 變成 inline（避免自帶空白） */
+.home-right [data-testid="stPageLink"]{
+  display: inline !important;
   margin: 0 !important;
   padding: 0 !important;
 }
-
-/* ✅ 把 page_link 渲染出來的 a 變成「粗體文字可點」，移除膠囊感 */
-.home-item [data-testid="stPageLink"] a{
+.home-right [data-testid="stPageLink"] a{
   display: inline !important;
   background: transparent !important;
   border: 0 !important;
@@ -59,24 +71,23 @@ def _home_css():
   font-size: 16px !important;
   line-height: 1.45 !important;
 }
-.home-item [data-testid="stPageLink"] a:hover{
+.home-right [data-testid="stPageLink"] a:hover{
   opacity: 0.86 !important;
 }
 
-/* ✅ 冒號後面描述（同一行） */
-.home-desc-inline{
-  display: inline !important;
-  margin-left: 6px !important;
+/* 同行描述 */
+.home-desc{
+  display: inline;
+  margin-left: 6px;
   color: rgba(15, 23, 42, 0.72);
   font-weight: 650;
   font-size: 14px;
   line-height: 1.45;
 }
 
-/* Streamlit columns 內距縮小 */
-div[data-testid="column"]{
-  padding-top: 0 !important;
-  padding-bottom: 0 !important;
+/* 把 Streamlit block 預設空白壓到最小 */
+div[data-testid="stMarkdown"], div[data-testid="stPageLink"]{
+  margin: 0 !important;
 }
 </style>
 """,
@@ -85,28 +96,23 @@ div[data-testid="column"]{
 
 
 def nav_item(icon: str, title: str, page: str, desc: str):
-    """
-    目標：跟截圖一模一樣（同一行）
-    •  [icon]  可點標題：描述
-    """
-    c1, c2, c3 = st.columns([0.02, 0.05, 0.93], vertical_alignment="top")
+    # 用 HTML 做「• + icon」左側，再用 page_link 當可點標題
+    st.markdown(
+        f"""
+<div class="home-row">
+  <div class="home-left">
+    <div class="home-bullet">•</div>
+    <div class="home-ico">{icon}</div>
+  </div>
+  <div class="home-right">
+""",
+        unsafe_allow_html=True,
+    )
 
-    with c1:
-        st.markdown('<div class="home-bullet">•</div>', unsafe_allow_html=True)
+    st.page_link(page, label=f"{title}：")
+    st.markdown(f'<span class="home-desc">{desc}</span>', unsafe_allow_html=True)
 
-    with c2:
-        st.markdown(f'<div class="home-ico">{icon}</div>', unsafe_allow_html=True)
-
-    with c3:
-        st.markdown('<div class="home-row"><div class="home-item">', unsafe_allow_html=True)
-
-        # ✅ 可點跳頁：同一視窗切換（streamlit 原生導覽）
-        st.page_link(page, label=f"{title}：")
-
-        # ✅ 同一行描述
-        st.markdown(f'<span class="home-desc-inline">{desc}</span>', unsafe_allow_html=True)
-
-        st.markdown("</div></div>", unsafe_allow_html=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
 
 def main():
@@ -118,8 +124,10 @@ def main():
 
     card_open("📌 作業績效分析模組")
 
-    # ✅ 重要：card_open 後再注入，避免 common_ui 再覆蓋
+    # ✅ card_open 後注入，避免 common_ui 後續再蓋掉
     _home_css()
+
+    st.markdown('<div class="home-list">', unsafe_allow_html=True)
 
     nav_item(
         "✅",
@@ -155,6 +163,8 @@ def main():
         "pages/5_揀貨差異代庫存.py",
         "少揀差異展開、庫存儲位/效期對應、國際條碼後五碼放大顯示",
     )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     card_close()
 
