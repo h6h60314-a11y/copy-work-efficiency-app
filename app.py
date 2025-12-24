@@ -28,47 +28,48 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
   padding-bottom: 8px !important;
 }
 
-/* ===== ✅ 首頁最大：徹底防重疊（固定 icon 欄位 + 清掉 p margin） ===== */
+/* ===== ✅ 首頁最大：不重疊 + 距離更緊 ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a{
   display: grid !important;
-  grid-template-columns: 34px 1fr !important; /* 左 icon 固定寬，右文字自適應 */
+  grid-template-columns: 22px 1fr !important; /* ✅ icon 欄位縮小 */
   align-items: center !important;
-  column-gap: 10px !important;
-  padding-top: 12px !important;
-  padding-bottom: 12px !important;
-  min-height: 56px !important;
+  column-gap: 6px !important;               /* ✅ 間距縮小 */
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+  min-height: 48px !important;              /* ✅ 高度縮小 */
 }
 
-/* 首頁那列：把 p / span 的 margin 清掉，避免放大後擠壓 */
+/* 清掉 p/span margin，避免字體放大又擠壓 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a p,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a span{
   margin: 0 !important;
   padding: 0 !important;
 }
 
-/* 首頁文字放大 */
+/* 首頁文字放大（可微調：28~30 你覺得太大再降） */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a *{
   font-size: 30px !important;
   font-weight: 950 !important;
-  line-height: 1.25 !important;
+  line-height: 1.15 !important;
+  white-space: nowrap !important;
 }
 
-/* 首頁 icon：同時支援 svg / emoji(span)，固定在 icon 欄位內置中 */
+/* icon：支援 svg/emoji，置中並縮一點 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a svg,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a span{
   justify-self: center !important;
   align-self: center !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a svg{
-  width: 24px !important;
-  height: 24px !important;
+  width: 20px !important;
+  height: 20px !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a span{
-  font-size: 24px !important;  /* emoji icon */
+  font-size: 20px !important;   /* emoji icon */
   line-height: 1 !important;
 }
 
-/* ===== ✅ 群組標題次大：鎖「有子選單的父節點」(進貨課) ===== */
+/* ===== ✅ 群組標題次大：進貨課 ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul){
   margin-top: 6px !important;
 }
