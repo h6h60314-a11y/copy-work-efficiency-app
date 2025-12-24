@@ -1,139 +1,149 @@
-# app.py
+# pages/0_首頁.py
 import streamlit as st
+from urllib.parse import quote, unquote
 
-st.set_page_config(
-    page_title="大豐物流 - 作業平台",
-    page_icon="assets/gf_logo.png",
-    layout="wide",
-)
+from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
-st.markdown(
-    r"""
+st.set_page_config(page_title="大豐物流 - 作業平台", page_icon="🚚", layout="wide")
+inject_logistics_theme()
+
+# ✅ 只允許導去這三個入口（避免 switch_page 找不到而整頁空白）
+ALLOW = {
+    "pages/7_出貨課首頁.py",
+    "pages/8_進貨課首頁.py",
+    "pages/9_大樹KPI首頁.py",
+}
+
+def _route_by_query():
+    qp = st.query_params
+    raw = qp.get("page", "")
+
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+
+    if not raw:
+        return
+
+    target = unquote(raw)
+    st.query_params.clear()
+
+    if target not in ALLOW:
+        # 不要讓錯誤路徑把首頁打掛
+        return
+
+    try:
+        st.switch_page(target)
+    except Exception:
+        return
+
+def _css_and_js():
+    st.markdown(
+        r"""
 <style>
-/* Sidebar base */
-section[data-testid="stSidebar"]{ padding-top: 10px; }
+/* 入口方框（並排） */
+.entry-grid{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+@media (max-width: 1100px){ .entry-grid{ grid-template-columns: repeat(2, minmax(220px, 1fr)); } }
+@media (max-width: 700px){ .entry-grid{ grid-template-columns: repeat(1, minmax(220px, 1fr)); } }
 
-/* ===== 子項：連結固定大小 ===== */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a{ text-decoration: none !important; }
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a *{
-  font-size: 16px !important; font-weight: 700 !important; line-height: 1.35 !important;
+.entry{
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid rgba(15,23,42,0.10);
+  background: rgba(255,255,255,0.92);
+  padding: 14px 14px 12px;
+  min-height: 96px;
+  box-shadow: 0 14px 26px rgba(2,6,23,0.06);
+  overflow: hidden;
+  transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease;
 }
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
-  padding-top: 8px !important; padding-bottom: 8px !important;
+.entry:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 18px 32px rgba(2,6,23,0.10);
+  border-color: rgba(15,23,42,0.18);
+}
+.entry-head{ display:flex; align-items:center; gap:10px; }
+.entry-ico{
+  width: 34px; height: 34px;
+  border-radius: 12px;
+  display:flex; align-items:center; justify-content:center;
+  font-size: 18px;
+  border: 1px solid rgba(15,23,42,0.10);
+  background: rgba(255,255,255,0.85);
+}
+.entry-name{ font-size:16px; font-weight:950; line-height:1.15; color: rgba(15,23,42,0.92); }
+.entry-desc{ margin-top:6px; font-size:12px; font-weight:850; color: rgba(15,23,42,0.62); line-height:1.35; }
+.entry-cta{
+  position:absolute; right: 12px; bottom: 10px;
+  font-size: 12px; font-weight: 950;
+  color: rgba(15,23,42,0.55);
 }
 
-/* ===== 首頁最大 ===== */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a{
-  display: flex !important; align-items: center !important; justify-content: flex-start !important;
-  gap: 6px !important; padding: 10px 12px !important; min-height: 48px !important;
-}
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a *{
-  font-size: 30px !important; font-weight: 950 !important; line-height: 1.15 !important;
-  white-space: nowrap !important; text-align: left !important;
-}
-
-/* ===== 群組標題次大（li 底下有 ul）===== */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul){ margin-top: 6px !important; }
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul) *{
-  font-size: 22px !important; font-weight: 900 !important; line-height: 1.2 !important;
-}
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul){
-  padding-top: 10px !important; padding-bottom: 10px !important;
-}
-
-/* ✅ 子選單固定回正常大小 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) ul a *{
-  font-size: 16px !important; font-weight: 700 !important; line-height: 1.35 !important;
-}
-
-/* =========================================================
-   ✅ 隱藏各群組的「首頁子項」(不顯示 出貨課首頁/進貨課首頁/大樹KPI首頁)
-   依 url_path 精準選取
-   ========================================================= */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="outbound-home"],
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="inbound-home"],
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="gt-kpi-home"]{
-  display: none !important;
-}
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="outbound-home"]),
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="inbound-home"]),
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="gt-kpi-home"]){
-  display: none !important;
-}
+a.entry-link{ text-decoration:none !important; color: inherit !important; display:block; }
+div[data-testid="stMarkdown"]{ margin: 0 !important; }
 </style>
 
 <script>
-/* =========================================================
-   ✅ 群組標題可點：點群組標題 -> 開啟該群組第一個子頁（群組首頁）
-   ========================================================= */
 (function () {
-  function bindGroupHeaderClick(){
-    const navRoot = document.querySelector('section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul');
-    if(!navRoot) return;
-
-    navRoot.querySelectorAll(':scope > li').forEach(li => {
-      const subUl = li.querySelector(':scope > ul');
-      if(!subUl) return;
-
-      const firstLink = subUl.querySelector('a');
-      if(!firstLink) return;
-
-      let header = null;
-      for (const child of Array.from(li.children)) {
-        if (child.tagName && child.tagName.toLowerCase() !== 'ul') { header = child; break; }
-      }
-      if(!header) return;
-
-      if (header.dataset.boundGroupClick === "1") return;
-      header.dataset.boundGroupClick = "1";
-
-      header.style.cursor = "pointer";
-      header.addEventListener("click", (e) => {
+  function bind() {
+    document.querySelectorAll('a.entry-link').forEach(a => {
+      if (a.dataset.bound === "1") return;
+      a.dataset.bound = "1";
+      a.addEventListener('click', (e) => {
         e.preventDefault();
-        e.stopPropagation();
-        firstLink.click();
+        window.location.assign(a.getAttribute('href'));
       }, { passive: false });
     });
   }
-
   const root = document.querySelector('#root') || document.body;
-  const obs = new MutationObserver(() => bindGroupHeaderClick());
+  const obs = new MutationObserver(() => bind());
   obs.observe(root, { childList: true, subtree: true });
-  bindGroupHeaderClick();
+  bind();
 })();
 </script>
 """,
-    unsafe_allow_html=True,
-)
+        unsafe_allow_html=True,
+    )
 
-# ✅ 首頁
-home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
+def _tile(icon: str, title: str, desc: str, page_path: str) -> str:
+    encoded = quote(page_path, safe="/_.-")
+    return (
+        f'<a class="entry-link" href="?page={encoded}" target="_self">'
+        f'  <div class="entry">'
+        f'    <div class="entry-head">'
+        f'      <div class="entry-ico">{icon}</div>'
+        f'      <div class="entry-name">{title}</div>'
+        f'    </div>'
+        f'    <div class="entry-desc">{desc}</div>'
+        f'    <div class="entry-cta">進入 →</div>'
+        f'  </div>'
+        f'</a>'
+    )
 
-# ✅ 出貨課（群組首頁：會被隱藏，但群組標題點下去會進這頁）
-outbound_home = st.Page("pages/7_出貨課首頁.py", title="出貨課首頁", icon="📦", url_path="outbound-home")
-transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
+def main():
+    _route_by_query()
 
-# ✅ 進貨課
-inbound_home = st.Page("pages/8_進貨課首頁.py", title="進貨課首頁", icon="🚚", url_path="inbound-home")
-qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
-putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
-pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯")
-slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
-diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
+    set_page(
+        "大豐物流 - 作業平台",
+        icon="🚚",
+        subtitle="作業KPI｜班別分析（AM/PM）｜排除非作業區間",
+    )
 
-# ✅ 大樹KPI（新增）
-gt_kpi_home = st.Page("pages/9_大樹KPI首頁.py", title="大樹KPI首頁", icon="📈", url_path="gt-kpi-home")
-# 之後你新增模組就在這裡加頁面，例如：
-# gt_kpi_daily = st.Page("pages/9_大樹KPI_日報.py", title="KPI日報", icon="📅")
+    card_open("📌 課別入口")
+    _css_and_js()
 
-pg = st.navigation(
-    {
-        "": [home_page],
-        "出貨課": [outbound_home, transfer_diff_page],
-        "進貨課": [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page],
-        "大樹KPI": [gt_kpi_home],  # 之後把新模組頁面加到這個 list 後面
-    },
-    expanded=False,
-)
+    tiles = [
+        _tile("📦", "出貨課", "撥貨差異｜出貨/包裝/異常（進入後以條列式顯示）", "pages/7_出貨課首頁.py"),
+        _tile("🚚", "進貨課", "驗收/上架/總揀/儲位/差異代庫存（進入後以條列式顯示）", "pages/8_進貨課首頁.py"),
+        _tile("📈", "大樹KPI", "KPI 模組入口｜匯總｜趨勢（進入後以條列式顯示）", "pages/9_大樹KPI首頁.py"),
+    ]
 
-pg.run()
+    st.markdown('<div class="entry-grid">' + "".join(tiles) + "</div>", unsafe_allow_html=True)
+    card_close()
+
+if __name__ == "__main__":
+    main()
