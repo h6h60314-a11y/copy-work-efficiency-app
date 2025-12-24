@@ -101,7 +101,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
 # ✅ 出貨課
-transfer_diff_page = st.Page("pages/1_撥貨差異.py", title="撥貨差異", icon="📦")
+transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
 
 # ✅ 進貨課
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
@@ -120,3 +120,4 @@ pg = st.navigation(
 )
 
 pg.run()
+
