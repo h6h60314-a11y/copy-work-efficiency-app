@@ -7,7 +7,7 @@ st.set_page_config(
 )
 
 # =========================
-# Sidebar CSS（穩定：用 href 鎖首頁，用 aria-expanded 鎖群組標題）
+# Sidebar CSS（首頁最大 + 群組標題次大：多重 selector 命中）
 # =========================
 st.markdown(
     r"""
@@ -17,14 +17,12 @@ section[data-testid="stSidebar"]{
   padding-top: 10px;
 }
 
-/* 讓導覽看起來更像條列 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul{
   margin-top: 6px !important;
 }
 
-/* 所有導覽項目：基準字體 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button{
+/* 導覽連結：基準字體（子項） */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a{
   text-decoration: none !important;
 }
 
@@ -34,7 +32,6 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a *{
   line-height: 1.35 !important;
 }
 
-/* 讓每一列更好點 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
   padding-top: 8px !important;
   padding-bottom: 8px !important;
@@ -42,26 +39,34 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
 
 /* ========== ✅ 群組標題：🚚 進貨課（字體次大） ========== */
 /*
-  Streamlit 群組標題通常會是「可展開/收合」的按鈕，會帶 aria-expanded 屬性
-  這樣可以精準鎖定，不會影響到一般連結
+  Streamlit 不同版本，群組標題可能是：
+  - button[aria-expanded]
+  - div[role="button"]
+  - details > summary
+  - 或 nav 內部的「標題容器」在 ul 前面（用 :has 結構抓）
+  這裡全部一起覆蓋，確保命中
 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button[aria-expanded] *{
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button[aria-expanded] *,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] div[role="button"] *,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] details > summary *,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] summary *,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > div:has(> ul) > div:first-child *,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > div:has(> div > ul) > div:first-child *{
   font-size: 22px !important;
   font-weight: 900 !important;
   line-height: 1.2 !important;
 }
 
-/* 群組標題上下留白，避免擠在一起 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button[aria-expanded]{
+/* 群組標題本體的 padding（同樣多重命中） */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button[aria-expanded],
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] div[role="button"],
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] details > summary,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] summary{
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
 
 /* ========== ✅ 首頁（字最大）：用 href 精準鎖 0_首頁 ========== */
-/*
-  Streamlit 多頁的連結 href 常見會帶 pages/0_首頁.py 或 URL encoded 的 0_%E9%A6%96%E9%A0%81
-  這裡兩個都寫，確保命中
-*/
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] *,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] *{
   font-size: 30px !important;
@@ -69,7 +74,6 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%
   line-height: 1.12 !important;
 }
 
-/* 首頁那列的 icon 也放大 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] svg,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] svg{
   width: 24px !important;
@@ -77,14 +81,13 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%
   transform: translateY(2px);
 }
 
-/* 首頁那列給更多留白，視覺更像主入口 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"],
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"]{
   padding-top: 12px !important;
   padding-bottom: 12px !important;
 }
 
-/* （可選）目前選中的頁面，稍微加強辨識 */
+/* （可選）目前頁面更好辨識 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"]{
   border-radius: 10px;
   font-weight: 900 !important;
@@ -110,7 +113,7 @@ pg = st.navigation(
         "": [home_page],
         "🚚 進貨課": [qc_page, putaway_page, pick_page, slot_page, diff_page],
     },
-    expanded=False,  # 不點不展開
+    expanded=False,
 )
 
 pg.run()
