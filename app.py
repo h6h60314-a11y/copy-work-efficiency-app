@@ -7,65 +7,87 @@ st.set_page_config(
 )
 
 # =========================
-# Sidebar CSS（精準命中 + 不互相覆蓋）
+# Sidebar CSS（穩定：用 href 鎖首頁，用 aria-expanded 鎖群組標題）
 # =========================
 st.markdown(
-    """
+    r"""
 <style>
-/* ---- Sidebar base ---- */
+/* ========== Sidebar base ========== */
 section[data-testid="stSidebar"]{
   padding-top: 10px;
 }
 
-/* 所有導覽項目：正常大小 */
+/* 讓導覽看起來更像條列 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul{
+  margin-top: 6px !important;
+}
+
+/* 所有導覽項目：基準字體 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button{
   text-decoration: none !important;
 }
 
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a *,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button *{
-  font-size: 15px !important;
-  font-weight: 650 !important;
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a *{
+  font-size: 16px !important;
+  font-weight: 700 !important;
   line-height: 1.35 !important;
 }
 
-/* ✅ 首頁：只鎖「第一個 item 的文字容器」放大 + 修正高度，避免重疊 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child a,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child button{
+/* 讓每一列更好點 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+}
+
+/* ========== ✅ 群組標題：🚚 進貨課（字體次大） ========== */
+/*
+  Streamlit 群組標題通常會是「可展開/收合」的按鈕，會帶 aria-expanded 屬性
+  這樣可以精準鎖定，不會影響到一般連結
+*/
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button[aria-expanded] *{
+  font-size: 22px !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+}
+
+/* 群組標題上下留白，避免擠在一起 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button[aria-expanded]{
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
 
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child a *,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child button *{
-  font-size: 26px !important;
-  font-weight: 900 !important;
-  line-height: 1.15 !important;   /* ✅ 防止字擠壓 */
+/* ========== ✅ 首頁（字最大）：用 href 精準鎖 0_首頁 ========== */
+/*
+  Streamlit 多頁的連結 href 常見會帶 pages/0_首頁.py 或 URL encoded 的 0_%E9%A6%96%E9%A0%81
+  這裡兩個都寫，確保命中
+*/
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] *,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] *{
+  font-size: 30px !important;
+  font-weight: 950 !important;
+  line-height: 1.12 !important;
 }
 
-/* ✅ 首頁 icon 的尺寸也一起放大，並置中 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child svg{
-  width: 22px !important;
-  height: 22px !important;
+/* 首頁那列的 icon 也放大 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] svg,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] svg{
+  width: 24px !important;
+  height: 24px !important;
   transform: translateY(2px);
 }
 
-/* ✅ 進貨課：只鎖「群組標題」那一行
-   Streamlit 群組標題通常是：nav 內部的 section header（不是 a/button）
-   這個 selector 會抓到 sidebar nav 中，出現在 li 列表之前的那個標題文字 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > div:has(> ul) > div:first-child *{
-  font-size: 20px !important;
-  font-weight: 850 !important;
-  line-height: 1.2 !important;
+/* 首頁那列給更多留白，視覺更像主入口 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"],
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"]{
+  padding-top: 12px !important;
+  padding-bottom: 12px !important;
 }
 
-/* ✅ 如果你的版本群組標題不是上面那種結構，再加一個 fallback：
-   抓 sidebar nav 裡「不是連結的純文字行」(p/span) 並放大 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] p,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] span{
-  font-size: 20px;
-  font-weight: 850;
+/* （可選）目前選中的頁面，稍微加強辨識 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"]{
+  border-radius: 10px;
+  font-weight: 900 !important;
 }
 </style>
 """,
@@ -75,7 +97,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] span{
 # =========================
 # Pages（依你目前檔名）
 # =========================
-home_page = st.Page("pages/0_首頁.py", title="  首頁", icon="🏠", default=True)
+home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
 putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
@@ -86,10 +108,9 @@ diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代�
 pg = st.navigation(
     {
         "": [home_page],
-        "進貨課": [qc_page, putaway_page, pick_page, slot_page, diff_page],
+        "🚚 進貨課": [qc_page, putaway_page, pick_page, slot_page, diff_page],
     },
-    expanded=False,  # ✅ 不點不展開
+    expanded=False,  # 不點不展開
 )
 
 pg.run()
-
