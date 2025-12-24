@@ -1,238 +1,139 @@
-# pages/0_首頁.py
+# app.py
 import streamlit as st
-from urllib.parse import quote, unquote
 
-from common_ui import inject_logistics_theme, set_page, card_open, card_close
+st.set_page_config(
+    page_title="大豐物流 - 作業平台",
+    page_icon="assets/gf_logo.png",
+    layout="wide",
+)
 
-st.set_page_config(page_title="大豐物流 - 作業平台", page_icon="🚚", layout="wide")
-inject_logistics_theme()
-
-# ✅ 只允許跳到「app.py 有註冊的頁面」
-ALLOW_PAGES = {
-    "pages/7_出貨課首頁.py",
-    "pages/8_進貨課首頁.py",
-    "pages/6_撥貨差異.py",
-    "pages/1_驗收作業效能.py",
-    "pages/2_上架作業效能.py",
-    "pages/3_總揀作業效能.py",
-    "pages/4_儲位使用率.py",
-    "pages/5_揀貨差異代庫存.py",
-}
-
-
-def _route_by_query():
-    qp = st.query_params
-    raw = qp.get("page", "")
-
-    if isinstance(raw, list):
-        raw = raw[0] if raw else ""
-
-    if not raw:
-        return
-
-    target = unquote(raw)
-    st.query_params.clear()
-
-    if target not in ALLOW_PAGES:
-        return
-
-    try:
-        st.switch_page(target)
-    except Exception:
-        return
-
-
-def _home_css_and_js():
-    st.markdown(
-        r"""
+st.markdown(
+    r"""
 <style>
-/* ✅ 取消連結藍底/藍框 */
-section[data-testid="stAppViewContainer"] a,
-section[data-testid="stAppViewContainer"] a:visited{
-  color: rgba(15, 23, 42, 0.92) !important;
-  text-decoration: none !important;
+/* Sidebar base */
+section[data-testid="stSidebar"]{ padding-top: 10px; }
+
+/* ===== 子項：連結固定大小 ===== */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a{ text-decoration: none !important; }
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a *{
+  font-size: 16px !important; font-weight: 700 !important; line-height: 1.35 !important;
 }
-section[data-testid="stAppViewContainer"] a,
-section[data-testid="stAppViewContainer"] button{
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  outline: none !important;
-}
-section[data-testid="stAppViewContainer"] a:focus,
-section[data-testid="stAppViewContainer"] a:focus-visible,
-section[data-testid="stAppViewContainer"] button:focus,
-section[data-testid="stAppViewContainer"] button:focus-visible{
-  outline: none !important;
-  box-shadow: none !important;
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
+  padding-top: 8px !important; padding-bottom: 8px !important;
 }
 
-div[data-testid="stVerticalBlockBorderWrapper"]{
-  background: rgba(255,255,255,0.98) !important;
-  border-color: rgba(15, 23, 42, 0.12) !important;
-  box-shadow: none !important;
+/* ===== 首頁最大 ===== */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a{
+  display: flex !important; align-items: center !important; justify-content: flex-start !important;
+  gap: 6px !important; padding: 10px 12px !important; min-height: 48px !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a *{
+  font-size: 30px !important; font-weight: 950 !important; line-height: 1.15 !important;
+  white-space: nowrap !important; text-align: left !important;
 }
 
-/* ✅ 方框入口卡 */
-.entry-grid{
-  display: grid;
-  grid-template-columns: repeat(5, minmax(190px, 1fr));
-  gap: 14px;
-  align-items: stretch;
-  justify-content: start;
-  margin-top: 8px;
+/* ===== 群組標題次大（li 底下有 ul）===== */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul){ margin-top: 6px !important; }
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul) *{
+  font-size: 22px !important; font-weight: 900 !important; line-height: 1.2 !important;
 }
-@media (max-width: 1280px){
-  .entry-grid{ grid-template-columns: repeat(3, minmax(190px, 1fr)); }
-}
-@media (max-width: 900px){
-  .entry-grid{ grid-template-columns: repeat(2, minmax(190px, 1fr)); }
-}
-@media (max-width: 640px){
-  .entry-grid{ grid-template-columns: repeat(1, minmax(190px, 1fr)); }
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul){
+  padding-top: 10px !important; padding-bottom: 10px !important;
 }
 
-.dept-tile{
-  position: relative;
-  border-radius: 16px;
-  border: 1px solid rgba(15,23,42,0.10);
-  background: rgba(255,255,255,0.92);
-  min-height: 110px;
-  padding: 14px 14px 12px;
-  overflow: hidden;
-  box-shadow: 0 14px 26px rgba(2,6,23,0.06);
-  transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease;
-}
-.dept-tile:hover{
-  transform: translateY(-1px);
-  box-shadow: 0 18px 32px rgba(2,6,23,0.10);
-  border-color: rgba(15,23,42,0.18);
+/* ✅ 子選單固定回正常大小 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) ul a *{
+  font-size: 16px !important; font-weight: 700 !important; line-height: 1.35 !important;
 }
 
-.tile-head{
-  display:flex; align-items:center; gap:10px;
+/* =========================================================
+   ✅ 隱藏各群組的「首頁子項」(不顯示 出貨課首頁/進貨課首頁/大樹KPI首頁)
+   依 url_path 精準選取
+   ========================================================= */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="outbound-home"],
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="inbound-home"],
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="gt-kpi-home"]{
+  display: none !important;
 }
-.tile-icon{
-  width: 36px; height: 36px;
-  border-radius: 12px;
-  display:flex; align-items:center; justify-content:center;
-  font-size: 18px;
-  border: 1px solid rgba(15,23,42,0.10);
-  background: rgba(255,255,255,0.85);
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="outbound-home"]),
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="inbound-home"]),
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="gt-kpi-home"]){
+  display: none !important;
 }
-.tile-name{
-  font-size: 16px; font-weight: 950; line-height: 1.15;
-  color: rgba(15,23,42,0.92);
-}
-.tile-desc{
-  margin-top: 8px;
-  font-size: 12px; font-weight: 850;
-  color: rgba(15,23,42,0.62);
-  line-height: 1.35;
-}
-.tile-foot{
-  position:absolute;
-  right: 12px;
-  bottom: 10px;
-  font-size: 12px;
-  font-weight: 950;
-  color: rgba(15,23,42,0.55);
-}
-
-.illu{
-  position:absolute;
-  right:-18px;
-  top:-22px;
-  width: 140px;
-  height: 140px;
-  border-radius: 30px;
-  transform: rotate(10deg);
-  opacity: 0.92;
-  pointer-events:none;
-}
-.illu-out{
-  background: linear-gradient(135deg, rgba(59,130,246,0.22), rgba(37,99,235,0.10));
-}
-.illu-in{
-  background: linear-gradient(135deg, rgba(34,197,94,0.18), rgba(16,185,129,0.10));
-}
-.illu:before,.illu:after{
-  content:"";
-  position:absolute;
-  border-radius: 10px;
-  border: 1px solid rgba(15,23,42,0.10);
-  background: rgba(255,255,255,0.75);
-  box-shadow: 0 12px 20px rgba(2,6,23,0.06);
-}
-.illu:before{ width: 64px; height: 46px; left: 26px; top: 48px; }
-.illu:after { width: 48px; height: 36px; left: 72px; top: 80px; }
-
-div[data-testid="stMarkdown"]{ margin: 0 !important; }
 </style>
 
 <script>
-/* ✅ 同一視窗導頁 */
+/* =========================================================
+   ✅ 群組標題可點：點群組標題 -> 開啟該群組第一個子頁（群組首頁）
+   ========================================================= */
 (function () {
-  function bind() {
-    document.querySelectorAll('a[data-entry="1"]').forEach(a => {
-      a.addEventListener('click', (e) => {
+  function bindGroupHeaderClick(){
+    const navRoot = document.querySelector('section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul');
+    if(!navRoot) return;
+
+    navRoot.querySelectorAll(':scope > li').forEach(li => {
+      const subUl = li.querySelector(':scope > ul');
+      if(!subUl) return;
+
+      const firstLink = subUl.querySelector('a');
+      if(!firstLink) return;
+
+      let header = null;
+      for (const child of Array.from(li.children)) {
+        if (child.tagName && child.tagName.toLowerCase() !== 'ul') { header = child; break; }
+      }
+      if(!header) return;
+
+      if (header.dataset.boundGroupClick === "1") return;
+      header.dataset.boundGroupClick = "1";
+
+      header.style.cursor = "pointer";
+      header.addEventListener("click", (e) => {
         e.preventDefault();
-        window.location.assign(a.getAttribute('href'));
+        e.stopPropagation();
+        firstLink.click();
       }, { passive: false });
     });
   }
+
   const root = document.querySelector('#root') || document.body;
-  const obs = new MutationObserver(() => bind());
+  const obs = new MutationObserver(() => bindGroupHeaderClick());
   obs.observe(root, { childList: true, subtree: true });
-  bind();
+  bindGroupHeaderClick();
 })();
 </script>
 """,
-        unsafe_allow_html=True,
-    )
+    unsafe_allow_html=True,
+)
 
+# ✅ 首頁
+home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
-def _tile_html(icon: str, title: str, desc: str, page_path: str, illu_class: str) -> str:
-    """
-    ⚠️ 這裡「完全不使用三引號」+「不插入換行/縮排」
-    目的：避免 Streamlit/Markdown 把它判成 code block
-    """
-    encoded = quote(page_path, safe="/_.-")
-    return (
-        f'<a data-entry="1" class="dept-tile" href="?page={encoded}" target="_self">'
-        f'<div class="tile-head">'
-        f'<div class="tile-icon">{icon}</div>'
-        f'<div class="tile-name">{title}</div>'
-        f'</div>'
-        f'<div class="tile-desc">{desc}</div>'
-        f'<div class="illu {illu_class}"></div>'
-        f'<div class="tile-foot">進入 →</div>'
-        f'</a>'
-    )
+# ✅ 出貨課（群組首頁：會被隱藏，但群組標題點下去會進這頁）
+outbound_home = st.Page("pages/7_出貨課首頁.py", title="出貨課首頁", icon="📦", url_path="outbound-home")
+transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
 
+# ✅ 進貨課
+inbound_home = st.Page("pages/8_進貨課首頁.py", title="進貨課首頁", icon="🚚", url_path="inbound-home")
+qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
+putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
+pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯")
+slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
+diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
 
-def main():
-    _route_by_query()
+# ✅ 大樹KPI（新增）
+gt_kpi_home = st.Page("pages/9_大樹KPI首頁.py", title="大樹KPI首頁", icon="📈", url_path="gt-kpi-home")
+# 之後你新增模組就在這裡加頁面，例如：
+# gt_kpi_daily = st.Page("pages/9_大樹KPI_日報.py", title="KPI日報", icon="📅")
 
-    set_page(
-        "大豐物流 - 作業平台",
-        icon="🚚",
-        subtitle="作業KPI｜班別分析（AM/PM）｜排除非作業區間",
-    )
+pg = st.navigation(
+    {
+        "": [home_page],
+        "出貨課": [outbound_home, transfer_diff_page],
+        "進貨課": [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page],
+        "大樹KPI": [gt_kpi_home],  # 之後把新模組頁面加到這個 list 後面
+    },
+    expanded=False,
+)
 
-    card_open("📌 課別入口")
-    _home_css_and_js()
-
-    tiles = [
-        _tile_html("📦", "出貨課", "撥貨差異、出貨/包裝/異常（進入後以條列式顯示模組）", "pages/7_出貨課首頁.py", "illu-out"),
-        _tile_html("🚚", "進貨課", "驗收/上架/總揀/儲位/差異代庫存（進入後以條列式顯示模組）", "pages/8_進貨課首頁.py", "illu-in"),
-    ]
-
-    grid_html = '<div class="entry-grid">' + "".join(tiles) + "</div>"
-    st.markdown(grid_html, unsafe_allow_html=True)
-
-    card_close()
-
-
-if __name__ == "__main__":
-    main()
+pg.run()
