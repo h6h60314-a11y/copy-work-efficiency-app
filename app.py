@@ -47,50 +47,43 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 }
 
 /* =========================================================
-   ✅ 精準隱藏：把「課別首頁」那一列藏掉（不顯示出貨課首頁/進貨課首頁）
-   依 url_path 來選最穩
+   ✅ 隱藏各群組的「首頁子項」(不顯示 出貨課首頁/進貨課首頁/大樹KPI首頁)
+   依 url_path 精準選取
    ========================================================= */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="outbound-home"],
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="inbound-home"]{
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="inbound-home"],
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="gt-kpi-home"]{
   display: none !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="outbound-home"]),
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="inbound-home"]){
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="inbound-home"]),
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="gt-kpi-home"]){
   display: none !important;
 }
 </style>
 
 <script>
 /* =========================================================
-   ✅ 群組標題可點：點「出貨課/進貨課」-> 導到該群組第一個子頁(課別首頁)
-   這版做得更穩：不猜 DOM 結構，直接找「同一個 li 底下的第一個 a」
+   ✅ 群組標題可點：點群組標題 -> 開啟該群組第一個子頁（群組首頁）
    ========================================================= */
 (function () {
   function bindGroupHeaderClick(){
     const navRoot = document.querySelector('section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul');
     if(!navRoot) return;
 
-    const topLis = navRoot.querySelectorAll(':scope > li');
-
-    topLis.forEach(li => {
+    navRoot.querySelectorAll(':scope > li').forEach(li => {
       const subUl = li.querySelector(':scope > ul');
       if(!subUl) return;
 
-      // 子頁第一個連結（就是課別首頁 outbound-home / inbound-home）
       const firstLink = subUl.querySelector('a');
       if(!firstLink) return;
 
-      // 群組標題區：li 中除了 ul 以外的那一塊（可能是 div / span / button-like）
       let header = null;
       for (const child of Array.from(li.children)) {
-        if (child.tagName && child.tagName.toLowerCase() !== 'ul') {
-          header = child;
-          break;
-        }
+        if (child.tagName && child.tagName.toLowerCase() !== 'ul') { header = child; break; }
       }
       if(!header) return;
 
-      // 避免重複綁定
       if (header.dataset.boundGroupClick === "1") return;
       header.dataset.boundGroupClick = "1";
 
@@ -98,7 +91,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="in
       header.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        firstLink.click();  // ✅ 直接點課別首頁
+        firstLink.click();
       }, { passive: false });
     });
   }
@@ -106,7 +99,6 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="in
   const root = document.querySelector('#root') || document.body;
   const obs = new MutationObserver(() => bindGroupHeaderClick());
   obs.observe(root, { childList: true, subtree: true });
-
   bindGroupHeaderClick();
 })();
 </script>
@@ -117,33 +109,29 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="in
 # ✅ 首頁
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
-# ✅ 出貨課：第一個子頁是「出貨課首頁」（但會被 CSS 隱藏不顯示）
-outbound_home = st.Page(
-    "pages/7_出貨課首頁.py",
-    title="出貨課首頁",
-    icon="📦",
-    url_path="outbound-home",
-)
+# ✅ 出貨課（群組首頁：會被隱藏，但群組標題點下去會進這頁）
+outbound_home = st.Page("pages/7_出貨課首頁.py", title="出貨課首頁", icon="📦", url_path="outbound-home")
 transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
 
-# ✅ 進貨課：第一個子頁是「進貨課首頁」（但會被 CSS 隱藏不顯示）
-inbound_home = st.Page(
-    "pages/8_進貨課首頁.py",
-    title="進貨課首頁",
-    icon="🚚",
-    url_path="inbound-home",
-)
+# ✅ 進貨課
+inbound_home = st.Page("pages/8_進貨課首頁.py", title="進貨課首頁", icon="🚚", url_path="inbound-home")
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
 putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
 pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯")
 slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
 diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
 
+# ✅ 大樹KPI（新增）
+gt_kpi_home = st.Page("pages/9_大樹KPI首頁.py", title="大樹KPI首頁", icon="📈", url_path="gt-kpi-home")
+# 之後你新增模組就在這裡加頁面，例如：
+# gt_kpi_daily = st.Page("pages/9_大樹KPI_日報.py", title="KPI日報", icon="📅")
+
 pg = st.navigation(
     {
         "": [home_page],
         "出貨課": [outbound_home, transfer_diff_page],
         "進貨課": [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page],
+        "大樹KPI": [gt_kpi_home],  # 之後把新模組頁面加到這個 list 後面
     },
     expanded=False,
 )
