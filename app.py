@@ -49,27 +49,40 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 
 <script>
 /* =========================================================
-   ✅ 1) 隱藏「群組首頁子項」：用文字判斷，避免誤傷其他頁
-      - 出貨課首頁 / 進貨課首頁 / 大樹KPI首頁
-   ✅ 2) 群組標題可點：點群組標題 -> 打開該群組第一個子頁（通常是群組首頁）
+   ✅ 隱藏「群組首頁子項」：出貨課首頁 / 進貨課首頁 / 大樹KPI首頁
+      - 優先用 url_path 精準比對（最穩）
+      - 再用文字比對當備援
+   ✅ 群組標題可點：點群組標題 -> 開啟該群組第一個子頁
    ========================================================= */
 (function () {
 
+  // 你在 st.Page(..., url_path="xxx") 設的值
+  const HIDE_URLPATHS = ["outbound-home", "inbound-home", "gt-kpi-home"];
+
+  // 備援：萬一 href 抓不到，就用文字隱藏
   const HIDE_TITLES = ["出貨課首頁", "進貨課首頁", "大樹KPI首頁"];
 
-  function hideHomeItemsByText(){
+  function shouldHideLink(a){
+    const href = (a.getAttribute("href") || "");
+    // 精準：包含 /outbound-home 或 ?outbound-home 這類
+    if (HIDE_URLPATHS.some(p => href.includes("/" + p) || href.includes(p))) return true;
+
+    const txt = (a.textContent || "").replace(/\s+/g, "").trim();
+    if (txt && HIDE_TITLES.some(t => txt.includes(t))) return true;
+
+    return false;
+  }
+
+  function hideHomeItems(){
     const nav = document.querySelector('section[data-testid="stSidebar"] [data-testid="stSidebarNav"]');
     if(!nav) return;
 
     nav.querySelectorAll("a").forEach(a => {
-      const txt = (a.textContent || "").replace(/\s+/g, "").trim();
-      if(!txt) return;
+      if (!shouldHideLink(a)) return;
 
-      if (HIDE_TITLES.some(t => txt.includes(t))) {
-        const li = a.closest("li");
-        if (li) li.style.display = "none";
-        else a.style.display = "none";
-      }
+      const li = a.closest("li");
+      if (li) li.style.display = "none";
+      else a.style.display = "none";
     });
   }
 
@@ -81,11 +94,11 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
       const subUl = li.querySelector(':scope > ul');
       if(!subUl) return;
 
-      // 找到群組內的第一個 a（就算它是 display:none，click 仍可導頁）
+      // 群組內第一個子頁（即使被隱藏，click 仍能導頁）
       const firstLink = subUl.querySelector('a');
       if(!firstLink) return;
 
-      // 群組標題通常是 li 的第一個非 ul 子節點
+      // 群組標題：li 的第一個非 ul 子節點
       let header = null;
       for (const child of Array.from(li.children)) {
         if (child.tagName && child.tagName.toLowerCase() !== 'ul') { header = child; break; }
@@ -105,7 +118,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
   }
 
   function bindAll(){
-    hideHomeItemsByText();
+    hideHomeItems();
     bindGroupHeaderClick();
   }
 
