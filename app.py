@@ -71,7 +71,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-ch
 
 /* ===== ✅ 群組標題次大：進貨課 ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul){
-  margin-top: 6px !important;
+  margin-top: 10px !important;
 }
 
 /* 群組標題那一行（ul 以外的區塊）放大 */
@@ -116,3 +116,4 @@ pg = st.navigation(
 )
 
 pg.run()
+
