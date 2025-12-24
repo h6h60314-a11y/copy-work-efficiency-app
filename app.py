@@ -45,29 +45,34 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) ul a *{
   font-size: 16px !important; font-weight: 700 !important; line-height: 1.35 !important;
 }
-
-/* =========================================================
-   ✅ 隱藏各群組的「首頁子項」
-   (不顯示 出貨課首頁/進貨課首頁/大樹KPI首頁)
-   依 url_path 精準選取
-   ========================================================= */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="outbound-home"],
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="inbound-home"],
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="gt-kpi-home"]{
-  display: none !important;
-}
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="outbound-home"]),
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="inbound-home"]),
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="gt-kpi-home"]){
-  display: none !important;
-}
 </style>
 
 <script>
 /* =========================================================
-   ✅ 群組標題可點：點群組標題 -> 開啟該群組第一個子頁（群組首頁）
+   ✅ 1) 隱藏「群組首頁子項」：用文字判斷，避免誤傷其他頁
+      - 出貨課首頁 / 進貨課首頁 / 大樹KPI首頁
+   ✅ 2) 群組標題可點：點群組標題 -> 打開該群組第一個子頁（通常是群組首頁）
    ========================================================= */
 (function () {
+
+  const HIDE_TITLES = ["出貨課首頁", "進貨課首頁", "大樹KPI首頁"];
+
+  function hideHomeItemsByText(){
+    const nav = document.querySelector('section[data-testid="stSidebar"] [data-testid="stSidebarNav"]');
+    if(!nav) return;
+
+    nav.querySelectorAll("a").forEach(a => {
+      const txt = (a.textContent || "").replace(/\s+/g, "").trim();
+      if(!txt) return;
+
+      if (HIDE_TITLES.some(t => txt.includes(t))) {
+        const li = a.closest("li");
+        if (li) li.style.display = "none";
+        else a.style.display = "none";
+      }
+    });
+  }
+
   function bindGroupHeaderClick(){
     const navRoot = document.querySelector('section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul');
     if(!navRoot) return;
@@ -76,9 +81,11 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="gt
       const subUl = li.querySelector(':scope > ul');
       if(!subUl) return;
 
+      // 找到群組內的第一個 a（就算它是 display:none，click 仍可導頁）
       const firstLink = subUl.querySelector('a');
       if(!firstLink) return;
 
+      // 群組標題通常是 li 的第一個非 ul 子節點
       let header = null;
       for (const child of Array.from(li.children)) {
         if (child.tagName && child.tagName.toLowerCase() !== 'ul') { header = child; break; }
@@ -97,10 +104,16 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="gt
     });
   }
 
+  function bindAll(){
+    hideHomeItemsByText();
+    bindGroupHeaderClick();
+  }
+
   const root = document.querySelector('#root') || document.body;
-  const obs = new MutationObserver(() => bindGroupHeaderClick());
+  const obs = new MutationObserver(() => bindAll());
   obs.observe(root, { childList: true, subtree: true });
-  bindGroupHeaderClick();
+  bindAll();
+
 })();
 </script>
 """,
@@ -114,7 +127,7 @@ home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=Tr
 outbound_home = st.Page("pages/7_出貨課首頁.py", title="出貨課首頁", icon="📦", url_path="outbound-home")
 transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
 
-# ✅ 進貨課
+# ✅ 進貨課（群組首頁：會被隱藏，但群組標題點下去會進這頁）
 inbound_home = st.Page("pages/8_進貨課首頁.py", title="進貨課首頁", icon="🚚", url_path="inbound-home")
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
 putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
