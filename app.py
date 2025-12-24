@@ -73,7 +73,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-ch
   line-height: 1 !important;
 }
 
-/* ===== ✅ 群組標題次大：進貨課（li 底下有 ul 的父節點） ===== */
+/* ===== ✅ 群組標題次大：任何「li 底下有 ul」的父節點 ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul){
   margin-top: 6px !important;
 }
@@ -100,6 +100,10 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 # Pages
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
+# ✅ 出貨課
+transfer_diff_page = st.Page("pages/1_撥貨差異.py", title="撥貨差異", icon="📦")
+
+# ✅ 進貨課
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
 putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
 pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯")
@@ -109,6 +113,7 @@ diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代�
 pg = st.navigation(
     {
         "": [home_page],
+        "📦 出貨課": [transfer_diff_page],  # ✅ 放在出貨課下
         "🚚 進貨課": [qc_page, putaway_page, pick_page, slot_page, diff_page],
     },
     expanded=False,
