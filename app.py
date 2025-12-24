@@ -6,15 +6,18 @@ st.set_page_config(
     layout="wide",
 )
 
+# =========================
+# Sidebar CSS（首頁最大、群組次大、子項正常）
+# =========================
 st.markdown(
     r"""
 <style>
-/* ========== Sidebar base ========== */
+/* Sidebar base */
 section[data-testid="stSidebar"]{
   padding-top: 10px;
 }
 
-/* 子項（一般頁面連結）基準字體 */
+/* ===== 子項：所有頁面連結（基準） ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a{
   text-decoration: none !important;
 }
@@ -28,40 +31,51 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
   padding-bottom: 8px !important;
 }
 
-/* ========== ✅ 群組標題（🚚 進貨課）= 有子選單的那一列：li 裡面會包含 ul ========== */
-/* 命中群組標題文字（只影響群組那一行，不影響子項） */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(ul) > div:first-child *{
+/* ===== ✅ 群組標題：有子選單的父節點（例如：🚚 進貨課） ===== */
+/*
+  重點：li:has(ul) 表示這個 li 下面還有一個 ul（子選單）
+  我們只放大「ul 以外」的那一段（也就是群組標題那行），避免子項跟著變大
+*/
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(ul){
+  margin-top: 6px !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(ul) > :not(ul) *{
   font-size: 22px !important;
   font-weight: 900 !important;
   line-height: 1.2 !important;
 }
 
-/* 群組標題那一列增加留白 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(ul) > div:first-child{
+/* 群組標題那行的留白 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(ul) > :not(ul){
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
 
-/* 群組標題的 icon/caret 也放大（避免看起來還是很小） */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(ul) > div:first-child svg{
-  width: 20px !important;
-  height: 20px !important;
-  transform: translateY(2px);
+/* ✅ 把子選單（ul 內）強制回到子項大小，避免被父層 selector 影響 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(ul) ul a *{
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  line-height: 1.35 !important;
 }
 
-/* ========== ✅ 首頁（字最大）：仍用 href 精準鎖 0_首頁 ========== */
+/* ===== ✅ 首頁：用 href 精準鎖 0_首頁（字最大） ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] *,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] *{
   font-size: 30px !important;
   font-weight: 950 !important;
   line-height: 1.12 !important;
 }
+
+/* 首頁 icon 也放大 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] svg,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] svg{
   width: 24px !important;
   height: 24px !important;
   transform: translateY(2px);
 }
+
+/* 首頁那列留白 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"],
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"]{
   padding-top: 12px !important;
