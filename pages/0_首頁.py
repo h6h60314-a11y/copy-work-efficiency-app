@@ -11,11 +11,15 @@ inject_logistics_theme()
 
 
 def _home_css():
-    # ⚠️ 一定要在 set_page / card_open 後注入，權重才壓得過 common_ui
+    # ✅ 一定要在 set_page + card_open 後注入，才不會被 common_ui 後續覆蓋
     st.markdown(
         r"""
 <style>
-/* ===== 左側：• + icon 緊湊 ===== */
+/* =========================
+   Home list (tight + inline)
+   ========================= */
+
+/* 左側：• + icon 緊湊 */
 .home-left{
   display: inline-flex;
   align-items: center;
@@ -32,24 +36,33 @@ def _home_css():
   line-height: 1;
 }
 
-/* ===== 右側：標題可點 + 描述同一行 ===== */
-/* 只針對「後面緊接著 .home-desc-inline 的那顆 button」做 inline 化，避免影響其它頁 */
-div[data-testid="stButton"]:has(+ div .home-desc-inline){
+/* 每列間距（你要更緊：12px→8px） */
+.home-row-space{
+  height: 12px;
+}
+
+/* =========================
+   🔥 核心：用 marker 精準抓「下一顆 stButton」並解除膠囊
+   DOM 會是：
+   [stMarkdown(marker)] + [stButton] + [stMarkdown(desc)] + [stMarkdown(spacer)]
+   ========================= */
+
+/* marker 那個 stMarkdown 容器直接隱藏（不佔空間，但仍可用來做 selector） */
+div[data-testid="stMarkdown"]:has(.nav-marker){
+  display: none !important;
+}
+
+/* marker 後面的那顆 stButton：改成 inline，避免換行 */
+div[data-testid="stMarkdown"]:has(.nav-marker) + div[data-testid="stButton"]{
   display: inline-block !important;
   margin: 0 !important;
   padding: 0 !important;
   vertical-align: top !important;
 }
-div[data-testid="stButton"]:has(+ div .home-desc-inline) + div{
-  display: inline-block !important; /* 描述那個 markdown 容器也 inline */
-  margin: 0 !important;
-  padding: 0 !important;
-  vertical-align: top !important;
-}
 
-/* ✅ 把按鈕徹底重置成純文字（壓過 common_ui 的膠囊樣式） */
-div[data-testid="stButton"]:has(+ div .home-desc-inline) button{
-  all: unset !important;             /* 直接清空所有預設/主題樣式 */
+/* ✅ 把 common_ui 的膠囊樣式完全拔掉 */
+div[data-testid="stMarkdown"]:has(.nav-marker) + div[data-testid="stButton"] button{
+  all: unset !important;            /* 直接清空所有主題/預設 */
   display: inline !important;
   cursor: pointer !important;
 
@@ -58,11 +71,20 @@ div[data-testid="stButton"]:has(+ div .home-desc-inline) button{
   font-size: 16px !important;
   line-height: 1.45 !important;
 }
-div[data-testid="stButton"]:has(+ div .home-desc-inline) button:hover{
+div[data-testid="stMarkdown"]:has(.nav-marker) + div[data-testid="stButton"] button:hover{
   opacity: 0.86 !important;
 }
 
-/* 同行描述 */
+/* ✅ 描述那個 stMarkdown：強制 inline，貼在標題後面同一行 */
+div[data-testid="stMarkdown"]:has(.nav-marker)
+  + div[data-testid="stButton"]
+  + div[data-testid="stMarkdown"]{
+  display: inline-block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  vertical-align: top !important;
+}
+
 .home-desc-inline{
   display: inline !important;
   margin-left: 6px !important;
@@ -72,13 +94,8 @@ div[data-testid="stButton"]:has(+ div .home-desc-inline) button:hover{
   line-height: 1.45;
 }
 
-/* 列與列之間緊湊一點 */
-.home-row-space{
-  margin: 10px 0 !important;
-}
-
-/* 壓掉 Streamlit 元件容器的多餘空白（只在首頁注入，不影響其它檔案） */
-div[data-testid="stMarkdown"], div[data-testid="stButton"]{
+/* 壓掉 Streamlit 容器預設空白 */
+div[data-testid="stButton"], div[data-testid="stMarkdown"]{
   margin: 0 !important;
 }
 </style>
@@ -88,8 +105,8 @@ div[data-testid="stMarkdown"], div[data-testid="stButton"]{
 
 
 def nav_item(icon: str, title: str, page: str, desc: str, key: str):
-    # 兩欄：左(•+icon) / 右(可點標題+描述同行)
-    c1, c2 = st.columns([0.09, 0.91], vertical_alignment="top")
+    # 左(•+icon) / 右(可點標題 + 同行描述)
+    c1, c2 = st.columns([0.07, 0.93], vertical_alignment="top")
 
     with c1:
         st.markdown(
@@ -98,16 +115,18 @@ def nav_item(icon: str, title: str, page: str, desc: str, key: str):
         )
 
     with c2:
-        st.markdown('<div class="home-row-space">', unsafe_allow_html=True)
+        # ✅ marker：用來讓 CSS 精準鎖到「下一顆 stButton」
+        st.markdown(f'<span class="nav-marker" data-k="{key}"></span>', unsafe_allow_html=True)
 
-        # ✅ 可點跳頁（同一視窗）
+        # ✅ 可點標題：同視窗跳頁
         if st.button(f"{title}：", key=key, use_container_width=False):
             st.switch_page(page)
 
-        # ✅ 描述（會被 CSS 拉到同一行）
+        # ✅ 描述：會被 CSS 拉成同一行
         st.markdown(f'<span class="home-desc-inline">{desc}</span>', unsafe_allow_html=True)
 
-        st.markdown("</div>", unsafe_allow_html=True)
+        # ✅ 列與列之間的間距
+        st.markdown('<div class="home-row-space"></div>', unsafe_allow_html=True)
 
 
 def main():
@@ -119,6 +138,7 @@ def main():
 
     card_open("📌 作業績效分析模組")
 
+    # ✅ card_open 後注入，避免被 common_ui 蓋回去
     _home_css()
 
     nav_item(
