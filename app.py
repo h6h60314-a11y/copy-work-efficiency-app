@@ -47,8 +47,8 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 }
 
 /* =========================================================
-   ✅ 隱藏「出貨課首頁」這個子項（群組第一個子頁）
-   讓側欄不要再出現「出貨課首頁」
+   ✅ 隱藏「每個群組第一個子頁」（課別首頁）
+   這樣側欄只會看到群組標題，不會出現「出貨課首頁 / 進貨課首頁」
    ========================================================= */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) ul > li:first-child{
   display: none !important;
@@ -57,7 +57,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 
 <script>
 /* =========================================================
-   ✅ 讓群組標題可點：點「出貨課」標題 -> 開啟該群組第一個子頁（出貨課首頁）
+   ✅ 讓群組標題可點：點群組標題 -> 開啟該群組第一個子頁（課別首頁）
    ========================================================= */
 (function () {
   function bindGroupHeaderClick(){
@@ -82,7 +82,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
       header.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        firstLink.click();  // 開啟出貨課首頁
+        firstLink.click();
       }, { passive: false });
     });
   }
@@ -101,14 +101,23 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 # ✅ 首頁
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
-# ✅ 出貨課（第一個子頁 = 出貨課首頁，但側欄會被隱藏）
+# ✅ 出貨課（第一個子頁 = 出貨課首頁，側欄會隱藏）
 outbound_home = st.Page("pages/7_出貨課首頁.py", title="出貨課首頁", icon="📦")
 transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
+
+# ✅ 進貨課（第一個子頁 = 進貨課首頁，側欄會隱藏）
+inbound_home = st.Page("pages/8_進貨課首頁.py", title="進貨課首頁", icon="🚚")
+qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
+putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
+pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯")
+slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
+diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
 
 pg = st.navigation(
     {
         "": [home_page],
         "出貨課": [outbound_home, transfer_diff_page],
+        "進貨課": [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page],
     },
     expanded=False,
 )
