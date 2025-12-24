@@ -6,13 +6,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# =========================
-# Sidebar CSS（不靠 :has、不靠 aria-expanded）
-# 目標：
-# - 首頁最大
-# - 群組標題（🚚 進貨課）次大
-# - 子項維持正常
-# =========================
 st.markdown(
     r"""
 <style>
@@ -21,7 +14,7 @@ section[data-testid="stSidebar"]{
   padding-top: 10px;
 }
 
-/* ===== 子項：所有連結（驗收/上架/總揀/儲位/揀貨差異...） ===== */
+/* ===== 子項：所有連結（基準） ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a{
   text-decoration: none !important;
 }
@@ -35,8 +28,8 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
   padding-bottom: 8px !important;
 }
 
-/* ===== ✅ 群組標題：第一層清單裡「li 的 direct child 是 div」那一行 =====
-   在你的畫面中「進貨課」不像連結（不是 a），而是 div 容器的一列，所以用這個抓最穩 */
+/* ===== ✅ 群組標題：🚚 進貨課（次大）=====
+   你的版本「群組標題」看起來是第一層 ul 裡的 li > div 那行 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li > div *{
   font-size: 22px !important;
   font-weight: 900 !important;
@@ -47,35 +40,37 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li > div{
   padding-bottom: 10px !important;
 }
 
-/* ===== ✅ 首頁最大：優先用 href 命中；若 href 結構不同，fallback 用第一個 li 的 a ===== */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] *,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] *{
-  font-size: 30px !important;
-  font-weight: 950 !important;
-  line-height: 1.12 !important;
+/* ===== ✅ 首頁（字最大）— 重點：用 flex + 增高 + icon 不縮，避免重疊 ===== */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a{
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding-top: 12px !important;
+  padding-bottom: 12px !important;
+  min-height: 52px !important;   /* ✅ 增高：避免大字擠壓 */
 }
 
-/* fallback：如果 href 抓不到，就把第一個 li 的 a 當成首頁放大 */
+/* 首頁文字放大 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a *{
   font-size: 30px !important;
   font-weight: 950 !important;
-  line-height: 1.12 !important;
+  line-height: 1.25 !important; /* ✅ 拉開行高：避免上下壓到 */
+  white-space: nowrap !important; /* ✅ 單行顯示，避免換行造成擠壓 */
 }
 
-/* 首頁 icon 放大 */
+/* 首頁 icon 放大且不縮 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a svg{
   width: 24px !important;
   height: 24px !important;
-  transform: translateY(2px);
+  flex: 0 0 auto !important;    /* ✅ icon 不縮 */
+  transform: translateY(1px);
 }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# =========================
 # Pages
-# =========================
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
