@@ -47,10 +47,21 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 }
 
 /* =========================================================
-   ✅ 隱藏「每個群組第一個子頁」（課別首頁）
-   這樣側欄只會看到群組標題，不會出現「出貨課首頁 / 進貨課首頁」
+   ✅ 精準隱藏：把「課別首頁」那一列直接藏掉
+   依 href 內包含的 url_path 來選（最穩）
    ========================================================= */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) ul > li:first-child{
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="outbound-home"]{
+  display: none !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="inbound-home"]{
+  display: none !important;
+}
+
+/* 如果你的瀏覽器支援 :has（Chrome 支援），把整個 li 也移除（不留空白） */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="outbound-home"]){
+  display: none !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(a[href*="inbound-home"]){
   display: none !important;
 }
 </style>
@@ -71,7 +82,6 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
       const firstLink = subUl.querySelector('a');
       if(!firstLink) return;
 
-      // 群組標題容器：li 的第一個 child（不是 ul）
       let header = null;
       for (const child of li.children){
         if (child.tagName && child.tagName.toLowerCase() !== 'ul'){ header = child; break; }
@@ -101,12 +111,22 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 # ✅ 首頁
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
-# ✅ 出貨課（第一個子頁 = 出貨課首頁，側欄會隱藏）
-outbound_home = st.Page("pages/7_出貨課首頁.py", title="出貨課首頁", icon="📦")
+# ✅ 出貨課（課別首頁要給固定 url_path，CSS 才能精準隱藏）
+outbound_home = st.Page(
+    "pages/7_出貨課首頁.py",
+    title="出貨課首頁",
+    icon="📦",
+    url_path="outbound-home",
+)
 transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
 
-# ✅ 進貨課（第一個子頁 = 進貨課首頁，側欄會隱藏）
-inbound_home = st.Page("pages/8_進貨課首頁.py", title="進貨課首頁", icon="🚚")
+# ✅ 進貨課
+inbound_home = st.Page(
+    "pages/8_進貨課首頁.py",
+    title="進貨課首頁",
+    icon="🚚",
+    url_path="inbound-home",
+)
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
 putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
 pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯")
