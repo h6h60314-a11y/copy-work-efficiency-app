@@ -40,13 +40,6 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul){
   padding-top: 10px !important; padding-bottom: 10px !important;
 }
-
-/* ✅ 子選單一定回到正常大小 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) ul a *{
-  font-size: 16px !important;
-  font-weight: 700 !important;
-  line-height: 1.35 !important;
-}
 </style>
 """,
     unsafe_allow_html=True,
@@ -55,8 +48,14 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 # ✅ 首頁
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
+# ✅ 出貨課首頁（新增）
+outbound_home = st.Page("pages/7_出貨課首頁.py", title="出貨課首頁", icon="📦")
+
 # ✅ 出貨課項目
 transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
+
+# ✅ 進貨課首頁（新增）
+inbound_home = st.Page("pages/8_進貨課首頁.py", title="進貨課首頁", icon="🚚")
 
 # ✅ 進貨課項目
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
@@ -68,8 +67,8 @@ diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代�
 pg = st.navigation(
     {
         "": [home_page],
-        "出貨課": [transfer_diff_page],
-        "進貨課": [qc_page, putaway_page, pick_page, slot_page, diff_page],
+        "出貨課": [outbound_home, transfer_diff_page],
+        "進貨課": [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page],
     },
     expanded=False,
 )
