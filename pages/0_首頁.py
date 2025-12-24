@@ -1,177 +1,104 @@
 import streamlit as st
-from pathlib import Path
 
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
-
-# ==================================================
-# Page config
-# ==================================================
 st.set_page_config(
     page_title="大豐物流 - 作業平台",
-    page_icon="assets/gf_logo.png",  # ✅ 瀏覽器分頁 icon 用 logo（找不到也不會壞）
+    page_icon="assets/gf_logo.png",  # 依你的路徑調整
     layout="wide",
 )
 
 inject_logistics_theme()
 
-
-# ==================================================
-# 同視窗切頁：用 query param + st.switch_page
-# ==================================================
-def _goto_if_any():
-    goto = st.query_params.get("goto")
-    if goto:
-        # 清掉參數避免刷新又跳一次
-        st.query_params.clear()
-        st.switch_page(goto)
-
-
-# ==================================================
-# Styles：維持「條列式」外觀（不按鈕、不膠囊、不藍不底線）
-# ==================================================
+# 讓首頁的「標題按鈕」看起來像條列文字（不藍、不底線、不像按鈕）
 st.markdown(
     """
 <style>
-/* 讓可點標題看起來像一般文字，不藍、不底線 */
-._home_click {
+/* 模組條列：按鈕偽裝成文字 */
+._home_link .stButton>button{
+  all: unset;
   cursor: pointer;
-  color: inherit !important;
-  text-decoration: none !important;
+  display: inline-block;
   font-weight: 900;
+  font-size: 16px;
+  line-height: 1.4;
+  color: rgba(15,23,42,0.92);
+  padding: 2px 0;
 }
-._home_click:hover {
-  opacity: 0.86;
-  text-decoration: none !important;
+._home_link .stButton>button:hover{
+  opacity: 0.85;
 }
 
-/* 條列呈現：與你現在截圖一致的「• + 內容」 */
-._home_row{
-  display: grid;
-  grid-template-columns: 18px 1fr;
-  column-gap: 10px;
-  margin: 12px 0 14px 0;
-}
-._home_bullet{
-  font-size: 18px;
-  line-height: 18px;
-  padding-top: 2px;
-  opacity: .85;
-}
-._home_title{
-  font-size: 15px;
-  line-height: 22px;
-  font-weight: 900;
-  margin: 0;
-  color: rgba(15,23,42,0.92);
-}
+/* 每個條列的次行描述 */
 ._home_desc{
-  margin-top: 4px;
-  font-size: 13px;
-  line-height: 18px;
+  margin: 4px 0 10px 0;
+  color: rgba(15,23,42,0.70);
   font-weight: 650;
-  color: rgba(15,23,42,0.68);
+  font-size: 13px;
 }
 </style>
-
-<script>
-function homeGoto(pagePath){
-  const url = new URL(window.location.href);
-  url.searchParams.set("goto", pagePath);
-  window.location.assign(url.toString()); // ✅ same window
-}
-</script>
 """,
     unsafe_allow_html=True,
 )
 
-
-def _item(icon: str, title: str, desc: str, page_path: str):
-    """
-    以「• + 左側icon + 標題（可點） + 說明」方式呈現，
-    外觀維持你目前的條列樣式（不是按鈕/膠囊）。
-    """
-    st.markdown(
-        f"""
-<div class="_home_row">
-  <div class="_home_bullet">•</div>
-  <div>
-    <div class="_home_title">
-      {icon}
-      <span class="_home_click" onclick="homeGoto('{page_path}')">{title}</span>：
-    </div>
-    <div class="_home_desc">{desc}</div>
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+def nav_item(icon: str, title: str, page_path: str, desc: str):
+    """條列式：點標題就同視窗切換到 pages"""
+    st.markdown("- ", unsafe_allow_html=True)
+    cols = st.columns([0.06, 0.94])
+    with cols[0]:
+        st.write(icon)
+    with cols[1]:
+        st.markdown('<div class="_home_link">', unsafe_allow_html=True)
+        if st.button(f"{title}", key=f"go_{page_path}"):
+            st.switch_page(page_path)  # ✅ 同一視窗切換
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown(f'<div class="_home_desc">{desc}</div>', unsafe_allow_html=True)
 
 
 def main():
-    _goto_if_any()
+    set_page(
+        "大豐物流 - 作業平台",
+        icon="",
+        subtitle="作業KPI｜班別分析（AM/PM）｜排除非作業區間",
+    )
 
-    # ==================================================
-    # Header：Logo 取代 🏭（不改你下面條列樣式）
-    # ==================================================
-    logo_path = Path("assets/gf_logo.png")
+    card_open("📌 作業績效分析模組（首頁導覽）")
 
-    col_logo, col_title = st.columns([1.0, 9.0], vertical_alignment="center")
-    with col_logo:
-        if logo_path.exists():
-            st.image(str(logo_path), width=56)
-
-    with col_title:
-        # ✅ 不用 icon（避免 🏭）
-        set_page(
-            "大豐物流 - 作業平台",
-            subtitle="作業 KPI｜班別分析（AM/PM）｜排除非作業區間",
-        )
-
-    # ==================================================
-    # 主內容：維持你截圖那種條列式
-    # ==================================================
-    card_open("📌 作業績效分析模組")
-
-    _item(
+    nav_item(
         "✅",
         "驗收作業效能（KPI）",
-        "人時效率、達標率、班別（AM/PM）切分、支援排除非作業區間",
         "pages/1_驗收作業效能.py",
+        "人時效率、達標率、班別（AM/PM）切分、支援排除非作業區間",
     )
-
-    _item(
+    nav_item(
         "📦",
         "上架作業效能（Putaway KPI）",
-        "上架產能、人時效率、班別（AM/PM）切分、報表匯出",
         "pages/2_上架作業效能.py",
+        "上架產能、人時效率、班別（AM/PM）切分、報表匯出",
     )
-
-    _item(
+    nav_item(
         "🎯",
         "總揀作業效能",
-        "上午 / 下午達標分析、低空 / 高空門檻、排除非作業區間、匯出報表",
         "pages/3_總揀作業效能.py",
+        "上午/下午達標分析、門檻設定、排除非作業區間、匯出報表",
     )
-
-    _item(
+    nav_item(
         "🧊",
-        "儲位使用率分析",
-        "依區(溫層)分類統計、使用率門檻提示、分類可調整、報表匯出",
+        "儲位使用率",
         "pages/4_儲位使用率.py",
+        "依區(溫層)分類統計、門檻提示、分類可調整、KPI圖表呈現",
     )
-
-    _item(
+    nav_item(
         "🔎",
-        "揀貨差異",
-        "少揀差異展開、庫存儲位與棚別對應、國際條碼後五碼放大顯示",
-        "pages/5_揀貨差異代庫存後五碼放大.py",
+        "揀貨差異代庫存",
+        "pages/5_揀貨差異代庫存.py",
+        "少揀差異展開、庫存儲位/效期對應、國際條碼後五碼放大顯示",
     )
 
     card_close()
 
     st.divider()
-    st.caption("提示：左側選單與本頁模組導覽皆可切換模組頁面；各頁設定互不影響。")
+    st.caption("提示：點上方模組名稱會直接在同一個視窗切換到對應頁面。")
 
 
 if __name__ == "__main__":
