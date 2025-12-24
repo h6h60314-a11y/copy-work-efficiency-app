@@ -28,32 +28,47 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
   padding-bottom: 8px !important;
 }
 
-/* ===== ✅ 首頁最大：修重疊（flex + 增高 + icon不縮） ===== */
+/* ===== ✅ 首頁最大：徹底防重疊（固定 icon 欄位 + 清掉 p margin） ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a{
-  display: flex !important;
+  display: grid !important;
+  grid-template-columns: 34px 1fr !important; /* 左 icon 固定寬，右文字自適應 */
   align-items: center !important;
-  gap: 10px !important;
+  column-gap: 10px !important;
   padding-top: 12px !important;
   padding-bottom: 12px !important;
-  min-height: 52px !important;
+  min-height: 56px !important;
 }
+
+/* 首頁那列：把 p / span 的 margin 清掉，避免放大後擠壓 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a p,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a span{
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* 首頁文字放大 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a *{
   font-size: 30px !important;
   font-weight: 950 !important;
   line-height: 1.25 !important;
-  white-space: nowrap !important;
+}
+
+/* 首頁 icon：同時支援 svg / emoji(span)，固定在 icon 欄位內置中 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a svg,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a span{
+  justify-self: center !important;
+  align-self: center !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a svg{
   width: 24px !important;
   height: 24px !important;
-  flex: 0 0 auto !important;
-  transform: translateY(1px);
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a span{
+  font-size: 24px !important;  /* emoji icon */
+  line-height: 1 !important;
 }
 
-/* ===== ✅ 群組標題次大：鎖「有子選單的父節點」(進貨課) =====
-   li:has(ul) 代表這個 li 底下還有一個 ul（子選單）
-   我們只放大「ul 以外」的那一段（也就是群組標題那行），子項不受影響
-*/
+/* ===== ✅ 群組標題次大：鎖「有子選單的父節點」(進貨課) ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul){
   margin-top: 6px !important;
 }
@@ -65,20 +80,13 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
   line-height: 1.2 !important;
 }
 
-/* 群組標題那一行留白 */
+/* 群組標題留白 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul){
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
 
-/* 群組標題 icon/caret 同步放大 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul) svg{
-  width: 20px !important;
-  height: 20px !important;
-  transform: translateY(1px);
-}
-
-/* ✅ 子選單（ul 內）強制回到子項大小，避免被群組標題放大吃到 */
+/* 子選單（ul 內）強制回子項大小 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) ul a *{
   font-size: 16px !important;
   font-weight: 700 !important;
