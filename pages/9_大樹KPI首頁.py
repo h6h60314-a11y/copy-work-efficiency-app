@@ -7,8 +7,10 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 st.set_page_config(page_title="大樹KPI", page_icon="📈", layout="wide")
 inject_logistics_theme()
 
-# 之後你新增 KPI 模組頁面，把路徑加進來
+# ✅ 允許從 KPI 首頁導頁的模組清單（安全白名單）
 ALLOW_PAGES = {
+    "pages/10_進貨驗收量.py",
+    # 之後新增 KPI 模組就往下加：
     # "pages/9_大樹KPI_總覽.py",
 }
 
@@ -132,11 +134,13 @@ def main():
 
     st.markdown('<div class="kpi-list">', unsafe_allow_html=True)
 
-    # ✅ 先放「待新增」提示（你新增模組後，把下面改成真正頁面）
-    st.info("請把新的 KPI 模組頁面加入 pages/，並在 app.py 與此頁面新增入口。")
-
-    # 範例（你建立 pages/9_大樹KPI_總覽.py 後再打開）
-    # _nav_item("📊", "KPI總覽", "pages/9_大樹KPI_總覽.py", "達標率、人時效率、趨勢、門檻告警")
+    # ✅ 目前已上線模組
+    _nav_item(
+        "📥",
+        "進貨驗收量",
+        "pages/10_進貨驗收量.py",
+        "GPO / GXPO：供應商、採購單、品號、驗收數量合計",
+    )
 
     st.markdown("</div>", unsafe_allow_html=True)
     card_close()
