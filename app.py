@@ -2,13 +2,10 @@ import streamlit as st
 
 st.set_page_config(
     page_title="大豐物流 - 作業平台",
-    page_icon="assets/gf_logo.png",  # 依你的專案路徑調整
+    page_icon="assets/gf_logo.png",
     layout="wide",
 )
 
-# =========================
-# Sidebar CSS（首頁最大 + 群組標題次大：多重 selector 命中）
-# =========================
 st.markdown(
     r"""
 <style>
@@ -17,80 +14,58 @@ section[data-testid="stSidebar"]{
   padding-top: 10px;
 }
 
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul{
-  margin-top: 6px !important;
-}
-
-/* 導覽連結：基準字體（子項） */
+/* 子項（一般頁面連結）基準字體 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a{
   text-decoration: none !important;
 }
-
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a *{
   font-size: 16px !important;
   font-weight: 700 !important;
   line-height: 1.35 !important;
 }
-
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
   padding-top: 8px !important;
   padding-bottom: 8px !important;
 }
 
-/* ========== ✅ 群組標題：🚚 進貨課（字體次大） ========== */
-/*
-  Streamlit 不同版本，群組標題可能是：
-  - button[aria-expanded]
-  - div[role="button"]
-  - details > summary
-  - 或 nav 內部的「標題容器」在 ul 前面（用 :has 結構抓）
-  這裡全部一起覆蓋，確保命中
-*/
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button[aria-expanded] *,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] div[role="button"] *,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] details > summary *,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] summary *,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > div:has(> ul) > div:first-child *,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > div:has(> div > ul) > div:first-child *{
+/* ========== ✅ 群組標題（🚚 進貨課）= 有子選單的那一列：li 裡面會包含 ul ========== */
+/* 命中群組標題文字（只影響群組那一行，不影響子項） */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(ul) > div:first-child *{
   font-size: 22px !important;
   font-weight: 900 !important;
   line-height: 1.2 !important;
 }
 
-/* 群組標題本體的 padding（同樣多重命中） */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button[aria-expanded],
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] div[role="button"],
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] details > summary,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] summary{
+/* 群組標題那一列增加留白 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(ul) > div:first-child{
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
 
-/* ========== ✅ 首頁（字最大）：用 href 精準鎖 0_首頁 ========== */
+/* 群組標題的 icon/caret 也放大（避免看起來還是很小） */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:has(ul) > div:first-child svg{
+  width: 20px !important;
+  height: 20px !important;
+  transform: translateY(2px);
+}
+
+/* ========== ✅ 首頁（字最大）：仍用 href 精準鎖 0_首頁 ========== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] *,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] *{
   font-size: 30px !important;
   font-weight: 950 !important;
   line-height: 1.12 !important;
 }
-
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] svg,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] svg{
   width: 24px !important;
   height: 24px !important;
   transform: translateY(2px);
 }
-
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"],
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"]{
   padding-top: 12px !important;
   padding-bottom: 12px !important;
-}
-
-/* （可選）目前頁面更好辨識 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"]{
-  border-radius: 10px;
-  font-weight: 900 !important;
 }
 </style>
 """,
@@ -98,7 +73,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="pa
 )
 
 # =========================
-# Pages（依你目前檔名）
+# Pages
 # =========================
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
