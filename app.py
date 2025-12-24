@@ -106,7 +106,7 @@ home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=Tr
 
 # 出貨課
 out_home_page = st.Page("pages/7_出貨課首頁.py", title="出貨課首頁", icon="📦")
-transfer_diff_page = st.Page("pages/1_撥貨差異.py", title="撥貨差異", icon="📦")
+transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
 
 # 進貨課
 in_home_page = st.Page("pages/8_進貨課首頁.py", title="進貨課首頁", icon="🚚")
@@ -129,3 +129,4 @@ pg = st.navigation(
 )
 
 pg.run()
+
