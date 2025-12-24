@@ -66,7 +66,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-ch
   line-height: 1 !important;
 }
 
-/* ===== ✅ 群組標題次大：任何「li 底下有 ul」的父節點 ===== */
+/* ===== ✅ 群組標題次大 ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul){
   margin-top: 6px !important;
 }
@@ -95,12 +95,10 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 # =========================
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
-# ✅ 出貨課：用「出貨課」取代「出貨課首頁」（內容仍是 pages/7_出貨課首頁.py）
-out_entry_page = st.Page("pages/7_出貨課首頁.py", title="出貨課", icon="📦")
-transfer_diff_page = st.Page("pages/1_撥貨差異.py", title="撥貨差異", icon="📦")
+# ✅ 出貨課項目（只顯示項目，不顯示出貨課/出貨課首頁）
+transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
 
-# ✅ 進貨課：用「進貨課」取代「進貨課首頁」（內容仍是 pages/8_進貨課首頁.py）
-in_entry_page = st.Page("pages/8_進貨課首頁.py", title="進貨課", icon="🚚")
+# ✅ 進貨課項目（只顯示項目，不顯示進貨課/進貨課首頁）
 qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
 putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
 pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯")
@@ -108,13 +106,13 @@ slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon=
 diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
 
 # =========================
-# Navigation（左側：群組 + 項目都顯示）
+# Navigation（左側只保留群組標題 + 項目）
 # =========================
 pg = st.navigation(
     {
         "": [home_page],
-        "📦 出貨課": [out_entry_page, transfer_diff_page],
-        "🚚 進貨課": [in_entry_page, qc_page, putaway_page, pick_page, slot_page, diff_page],
+        "出貨課": [transfer_diff_page],
+        "進貨課": [qc_page, putaway_page, pick_page, slot_page, diff_page],
     },
     expanded=False,
 )
