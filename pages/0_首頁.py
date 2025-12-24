@@ -64,6 +64,22 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
    首頁清單：緊湊版（• + icon + 可點標題 + 同行描述）
    ========================= */
 .home-list{ margin-top: 6px; }
+
+.home-section{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 6px;
+  font-size: 18px;
+  font-weight: 950;
+  color: rgba(15, 23, 42, 0.92);
+}
+.home-section small{
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.55);
+}
+
 .home-row{
   display: flex;
   align-items: flex-start;
@@ -120,17 +136,13 @@ div[data-testid="stMarkdown"]{ margin: 0 !important; }
       a.addEventListener('click', (e) => {
         e.preventDefault();
         const href = a.getAttribute('href');
-        // 同一視窗跳轉
         window.location.assign(href);
       }, { passive: false });
     });
   }
-
-  // 初次與每次 Streamlit 重新渲染後都再綁一次
   const root = document.querySelector('#root') || document.body;
   const obs = new MutationObserver(() => bind());
   obs.observe(root, { childList: true, subtree: true });
-
   bind();
 })();
 </script>
@@ -149,7 +161,6 @@ def _nav_item(icon: str, title: str, page_path: str, desc: str):
     <span class="home-ico">{icon}</span>
   </div>
   <div class="home-right">
-    <!-- ✅ target=_self 強制同分頁（再加 JS 保險） -->
     <a class="home-link" href="?page={encoded}" target="_self">{title}：</a>
     <span class="home-desc">{desc}</span>
   </div>
@@ -157,6 +168,11 @@ def _nav_item(icon: str, title: str, page_path: str, desc: str):
 """,
         unsafe_allow_html=True,
     )
+
+
+def _section(title: str, tag: str = ""):
+    tag_html = f"<small>{tag}</small>" if tag else ""
+    st.markdown(f'<div class="home-section">{title}{tag_html}</div>', unsafe_allow_html=True)
 
 
 def main():
@@ -173,6 +189,17 @@ def main():
 
     st.markdown('<div class="home-list">', unsafe_allow_html=True)
 
+    # ✅ 出貨課
+    _section("📦 出貨課", "Outbound")
+    _nav_item(
+        "📦",
+        "撥貨差異",
+        "pages/1_撥貨差異.py",  # 若你雲端已改英文檔名，這裡也要同步改
+        "AllDIF/ALLACT 篩選 → 明細套巨集邏輯 → 儲位比對棚別 → 輸出差異明細",
+    )
+
+    # ✅ 進貨課
+    _section("🚚 進貨課", "Inbound")
     _nav_item(
         "✅",
         "驗收作業效能（KPI）",
