@@ -2,66 +2,52 @@ import streamlit as st
 
 st.set_page_config(
     page_title="大豐物流 - 作業平台",
-    page_icon="assets/gf_logo.png",  # 依你的專案路徑調整
+    page_icon="assets/gf_logo.png",
     layout="wide",
 )
 
 # =========================
-# Sidebar CSS（穩定：用 href 鎖首頁，用 aria-expanded 鎖群組標題）
+# Sidebar CSS（不靠 :has、不靠 aria-expanded）
+# 目標：
+# - 首頁最大
+# - 群組標題（🚚 進貨課）次大
+# - 子項維持正常
 # =========================
 st.markdown(
     r"""
 <style>
-/* ========== Sidebar base ========== */
+/* Sidebar base */
 section[data-testid="stSidebar"]{
   padding-top: 10px;
 }
 
-/* 讓導覽看起來更像條列 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul{
-  margin-top: 6px !important;
-}
-
-/* 所有導覽項目：基準字體 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button{
+/* ===== 子項：所有連結（驗收/上架/總揀/儲位/揀貨差異...） ===== */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a{
   text-decoration: none !important;
 }
-
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a *{
   font-size: 16px !important;
   font-weight: 700 !important;
   line-height: 1.35 !important;
 }
-
-/* 讓每一列更好點 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
   padding-top: 8px !important;
   padding-bottom: 8px !important;
 }
 
-/* ========== ✅ 群組標題：🚚 進貨課（字體次大） ========== */
-/*
-  Streamlit 群組標題通常會是「可展開/收合」的按鈕，會帶 aria-expanded 屬性
-  這樣可以精準鎖定，不會影響到一般連結
-*/
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button[aria-expanded] *{
+/* ===== ✅ 群組標題：第一層清單裡「li 的 direct child 是 div」那一行 =====
+   在你的畫面中「進貨課」不像連結（不是 a），而是 div 容器的一列，所以用這個抓最穩 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li > div *{
   font-size: 22px !important;
   font-weight: 900 !important;
   line-height: 1.2 !important;
 }
-
-/* 群組標題上下留白，避免擠在一起 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] button[aria-expanded]{
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li > div{
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
 
-/* ========== ✅ 首頁（字最大）：用 href 精準鎖 0_首頁 ========== */
-/*
-  Streamlit 多頁的連結 href 常見會帶 pages/0_首頁.py 或 URL encoded 的 0_%E9%A6%96%E9%A0%81
-  這裡兩個都寫，確保命中
-*/
+/* ===== ✅ 首頁最大：優先用 href 命中；若 href 結構不同，fallback 用第一個 li 的 a ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] *,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] *{
   font-size: 30px !important;
@@ -69,25 +55,18 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%
   line-height: 1.12 !important;
 }
 
-/* 首頁那列的 icon 也放大 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"] svg,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"] svg{
+/* fallback：如果 href 抓不到，就把第一個 li 的 a 當成首頁放大 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a *{
+  font-size: 30px !important;
+  font-weight: 950 !important;
+  line-height: 1.12 !important;
+}
+
+/* 首頁 icon 放大 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a svg{
   width: 24px !important;
   height: 24px !important;
   transform: translateY(2px);
-}
-
-/* 首頁那列給更多留白，視覺更像主入口 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="pages/0_首頁.py"],
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="0_%E9%A6%96%E9%A0%81"]{
-  padding-top: 12px !important;
-  padding-bottom: 12px !important;
-}
-
-/* （可選）目前選中的頁面，稍微加強辨識 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"]{
-  border-radius: 10px;
-  font-weight: 900 !important;
 }
 </style>
 """,
@@ -95,7 +74,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="pa
 )
 
 # =========================
-# Pages（依你目前檔名）
+# Pages
 # =========================
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
@@ -110,7 +89,7 @@ pg = st.navigation(
         "": [home_page],
         "🚚 進貨課": [qc_page, putaway_page, pick_page, slot_page, diff_page],
     },
-    expanded=False,  # 不點不展開
+    expanded=False,
 )
 
 pg.run()
