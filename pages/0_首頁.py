@@ -9,7 +9,6 @@ inject_logistics_theme()
 
 
 def _route_by_query():
-    """同一視窗切頁：?page=pages/xxx.py -> st.switch_page()"""
     qp = st.query_params
     raw = qp.get("page", "")
 
@@ -27,7 +26,7 @@ def _home_css_and_js():
     st.markdown(
         r"""
 <style>
-/* ✅ 移除連結藍底/藍框 */
+/* ✅ 取消連結藍底/藍框 */
 section[data-testid="stAppViewContainer"] a,
 section[data-testid="stAppViewContainer"] a:visited{
   color: rgba(15, 23, 42, 0.92) !important;
@@ -48,7 +47,7 @@ section[data-testid="stAppViewContainer"] button:focus-visible{
   box-shadow: none !important;
 }
 
-/* ✅ 卡片外框不要強制藍色 */
+/* ✅ 卡片外框不要藍色 */
 div[data-testid="stVerticalBlockBorderWrapper"]{
   background: rgba(255,255,255,0.98) !important;
   border-color: rgba(15, 23, 42, 0.12) !important;
@@ -56,23 +55,24 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
 }
 
 /* =========================
-   ✅ 入口方框卡片（像你參考圖）
+   ✅ 入口卡：方框並排（像你參考圖）
    ========================= */
 .entry-grid{
   display: grid;
-  grid-template-columns: repeat(4, minmax(210px, 1fr));
+  grid-template-columns: repeat(5, minmax(190px, 1fr));
   gap: 14px;
   align-items: stretch;
   justify-content: start;
-  margin-top: 6px;
+  margin-top: 8px;
 }
-
-/* 視窗縮小：自動換行（不要變整條橫幅） */
-@media (max-width: 1200px){
-  .entry-grid{ grid-template-columns: repeat(2, minmax(210px, 1fr)); }
+@media (max-width: 1280px){
+  .entry-grid{ grid-template-columns: repeat(3, minmax(190px, 1fr)); }
 }
-@media (max-width: 720px){
-  .entry-grid{ grid-template-columns: repeat(1, minmax(210px, 1fr)); }
+@media (max-width: 900px){
+  .entry-grid{ grid-template-columns: repeat(2, minmax(190px, 1fr)); }
+}
+@media (max-width: 640px){
+  .entry-grid{ grid-template-columns: repeat(1, minmax(190px, 1fr)); }
 }
 
 .entry-tile{
@@ -80,7 +80,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
   border-radius: 16px;
   border: 1px solid rgba(15,23,42,0.10);
   background: rgba(255,255,255,0.92);
-  min-height: 96px;              /* ✅ 像參考圖的方框高度 */
+  min-height: 92px;                 /* ✅ 方框高度 */
   padding: 14px 14px 12px;
   overflow: hidden;
   box-shadow: 0 14px 26px rgba(2,6,23,0.06);
@@ -92,7 +92,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
   border-color: rgba(15,23,42,0.18);
 }
 
-/* 左上 icon + 標題 */
+/* icon + title */
 .entry-title{
   display:flex;
   align-items:center;
@@ -120,9 +120,10 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
   font-size: 12px;
   font-weight: 850;
   color: rgba(15,23,42,0.62);
+  line-height: 1.35;
 }
 
-/* 右側插圖感（用 CSS 畫出倉儲方塊） */
+/* 右側插圖感（CSS 畫箱子） */
 .illu{
   position:absolute;
   right:-18px;
@@ -190,24 +191,21 @@ div[data-testid="stMarkdown"]{ margin: 0 !important; }
     )
 
 
-def _entry_tile(icon: str, title: str, sub: str, page_path: str, illu_class: str):
+def _tile_html(icon: str, title: str, sub: str, page_path: str, illu_class: str) -> str:
     encoded = quote(page_path, safe="/_.-")
-    st.markdown(
-        f"""
-<a data-entry="1" href="?page={encoded}" target="_self">
-  <div class="entry-tile">
-    <div class="entry-title">
-      <div class="entry-ico">{icon}</div>
-      <div class="entry-name">{title}</div>
-    </div>
-    <div class="entry-sub">{sub}</div>
-
-    <div class="illu {illu_class}"></div>
-    <div class="entry-cta">進入 →</div>
-  </div>
-</a>
-""",
-        unsafe_allow_html=True,
+    # ⚠️ 這裡刻意不做任何行首縮排，避免被 Markdown 當 code block
+    return (
+        f'<a data-entry="1" href="?page={encoded}" target="_self">'
+        f'  <div class="entry-tile">'
+        f'    <div class="entry-title">'
+        f'      <div class="entry-ico">{icon}</div>'
+        f'      <div class="entry-name">{title}</div>'
+        f'    </div>'
+        f'    <div class="entry-sub">{sub}</div>'
+        f'    <div class="illu {illu_class}"></div>'
+        f'    <div class="entry-cta">進入 →</div>'
+        f'  </div>'
+        f'</a>'
     )
 
 
@@ -223,17 +221,16 @@ def main():
     card_open("📌 課別入口")
     _home_css_and_js()
 
-    st.markdown('<div class="entry-grid">', unsafe_allow_html=True)
+    tiles = [
+        _tile_html("📦", "出貨課", "撥貨差異｜出貨/包裝/異常", "pages/7_出貨課首頁.py", "illu-out"),
+        _tile_html("🚚", "進貨課", "驗收/上架/總揀/儲位/差異代庫存", "pages/8_進貨課首頁.py", "illu-in"),
+        # 之後要加更多入口就加在這：
+        # _tile_html("🧾", "盤點中心", "盤點排程｜差異彙整｜復盤", "pages/xx_盤點中心.py", "illu-out"),
+    ]
 
-    # ✅ 方框入口（像參考圖的卡片）
-    _entry_tile("📦", "出貨課", "撥貨差異｜出貨/包裝/異常", "pages/7_出貨課首頁.py", "illu-out")
-    _entry_tile("🚚", "進貨課", "驗收/上架/總揀/儲位/差異代庫存", "pages/8_進貨課首頁.py", "illu-in")
+    grid_html = '<div class="entry-grid">' + "".join(tiles) + "</div>"
+    st.markdown(grid_html, unsafe_allow_html=True)
 
-    # 你之後要加更多入口，就照這樣加：
-    # _entry_tile("🧾", "盤點中心", "盤點排程｜差異彙整｜復盤", "pages/xx_盤點中心.py", "illu-out")
-    # _entry_tile("🕵️", "稽核中心", "營運稽核｜復盤中心", "pages/9_總檢討中心.py", "illu-in")
-
-    st.markdown("</div>", unsafe_allow_html=True)
     card_close()
 
 
