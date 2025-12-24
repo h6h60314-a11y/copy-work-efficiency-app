@@ -105,7 +105,7 @@ outbound_home = st.Page(
     icon="📦",
     url_path="outbound-home",
 )
-transfer_diff_page = st.Page("pages/1_撥貨差異.py", title="撥貨差異", icon="📦")
+transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
 
 # ✅ 進貨課：第一個放「進貨課首頁」（會被隱藏）
 inbound_home = st.Page(
@@ -140,3 +140,4 @@ pg = st.navigation(
 )
 
 pg.run()
+
