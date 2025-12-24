@@ -2,179 +2,229 @@
 import streamlit as st
 from urllib.parse import quote, unquote
 
-# ✅ 直接對到你現有的 pages（不用新增課別首頁也能先跑）
-ROUTES = {
-    "出貨課": "pages/6_撥貨差異.py",
-    "進貨課": "pages/1_驗收作業效能.py",
-}
+from common_ui import inject_logistics_theme, set_page, card_open, card_close
+
+st.set_page_config(page_title="大豐物流 - 作業平台", page_icon="🚚", layout="wide")
+inject_logistics_theme()
+
 
 def _route_by_query():
-    """同一視窗切頁：?page=pages/xxx.py -> st.switch_page(xxx)"""
+    """
+    用 query param 在同一視窗切頁：
+    點入口卡片 -> ?page=pages/6_出貨課首頁.py
+    然後首頁收到參數後 st.switch_page() 轉頁
+    """
     qp = st.query_params
     raw = qp.get("page", "")
+
     if isinstance(raw, list):
         raw = raw[0] if raw else ""
+
     if not raw:
         return
+
     st.query_params.clear()
-    st.switch_page(unquote(raw))
+    target = unquote(raw)
+    st.switch_page(target)
 
-def _link(page_path: str) -> str:
-    return f"?page={quote(page_path)}"
 
-def _css():
+def _home_css_and_js():
     st.markdown(
         r"""
 <style>
-/* ===== Page background / remove blue focus ===== */
-:root{
-  --bg: #F5F8FC;
-  --card: #FFFFFF;
-  --text: #0F172A;
-  --muted: #64748B;
-  --border: rgba(15, 23, 42, 0.10);
-  --shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-  --shadow2: 0 6px 14px rgba(15, 23, 42, 0.05);
-  --radius: 18px;
+/* =========================
+   ✅ 去除藍色底 / 藍色框（首頁覆蓋）
+   ========================= */
+section[data-testid="stAppViewContainer"] a,
+section[data-testid="stAppViewContainer"] a:visited{
+  color: rgba(15, 23, 42, 0.92) !important;
+  text-decoration: none !important;
+}
+section[data-testid="stAppViewContainer"] a,
+section[data-testid="stAppViewContainer"] button{
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+section[data-testid="stAppViewContainer"] a:focus,
+section[data-testid="stAppViewContainer"] a:focus-visible,
+section[data-testid="stAppViewContainer"] button:focus,
+section[data-testid="stAppViewContainer"] button:focus-visible{
+  outline: none !important;
+  box-shadow: none !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]{
+  background: rgba(255,255,255,0.98) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  box-shadow: none !important;
 }
 
-section[data-testid="stAppViewContainer"]{ background: var(--bg) !important; }
-.block-container{ padding-top: 18px !important; }
-
-*:focus{ outline:none !important; box-shadow:none !important; }
-button:focus{ outline:none !important; box-shadow:none !important; }
-
-/* ===== Header area (match your screenshot vibe) ===== */
-.gt-header{
-  background: linear-gradient(180deg, rgba(59,130,246,0.10), rgba(255,255,255,0));
-  border: 1px solid var(--border);
-  border-radius: 22px;
-  padding: 18px 20px;
-  box-shadow: var(--shadow2);
+/* =========================
+   ✅ 課別入口：方框卡片（不要整個橫幅）
+   ========================= */
+.entry-grid{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 360px));
+  gap: 14px;
+  align-items: stretch;
+  justify-content: start;
+  margin-top: 6px;
 }
-.gt-title{
-  display:flex; align-items:center; gap:10px;
-  font-size: 26px; font-weight: 900; color: var(--text);
+@media (max-width: 860px){
+  .entry-grid{ grid-template-columns: repeat(1, minmax(260px, 1fr)); }
+}
+
+.entry-card{
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255,255,255,0.96);
+  border-radius: 14px;
+  padding: 16px 16px 14px;
+  min-height: 150px;
+  box-shadow: 0 10px 24px rgba(2,6,23,0.06);
+  transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease;
+  position: relative;
+  overflow: hidden;
+}
+.entry-card:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(2,6,23,0.10);
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+.entry-top{
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.entry-icon{
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: rgba(59,130,246,0.10);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  font-size: 20px;
+}
+.entry-title{
+  font-size: 18px;
+  font-weight: 950;
+  line-height: 1.2;
+  color: rgba(15, 23, 42, 0.92);
+  margin: 2px 0 4px;
+}
+.entry-sub{
+  font-size: 12px;
+  font-weight: 850;
+  color: rgba(15, 23, 42, 0.55);
   margin: 0;
 }
-.gt-sub{
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 13.5px;
-}
 
-/* ===== Section card ===== */
-.gt-section{
-  margin-top: 14px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 14px 16px;
-}
-.gt-section-title{
-  display:flex; align-items:center; gap:10px;
-  font-size: 16px; font-weight: 900; color: var(--text);
-  margin: 0 0 8px 0;
-}
-
-/* ===== Department rows (clickable) ===== */
-.dept-row{
-  display:flex;
-  align-items:center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 12px 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(15,23,42,0.08);
-  background: #fff;
-  text-decoration: none !important;
-  color: var(--text) !important;
+.entry-desc{
   margin-top: 10px;
-}
-.dept-row:hover{
-  background: rgba(59,130,246,0.05);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow2);
-}
-.dept-left{ display:flex; gap: 12px; align-items:flex-start; }
-
-.dept-icon{
-  width: 36px; height: 36px;
-  border-radius: 12px;
-  display:flex; align-items:center; justify-content:center;
-  border: 1px solid rgba(15,23,42,0.08);
-  background: rgba(59,130,246,0.06);
-  font-size: 18px;
-}
-
-.dept-name{ font-size: 15px; font-weight: 900; margin: 0; }
-.dept-desc{
-  margin-top: 4px;
   font-size: 13px;
-  color: var(--muted);
-  line-height: 1.55;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.72);
+  line-height: 1.45;
 }
 
-.dept-arrow{
+.entry-cta{
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  font-size: 13px;
   font-weight: 900;
-  color: rgba(15,23,42,0.55);
-  white-space: nowrap;
+  color: rgba(15, 23, 42, 0.70);
+}
+.entry-cta span{ opacity: 0.8; }
+
+a.entry-link{
+  display: block;
 }
 
-/* ===== Make markdown top margins smaller ===== */
-h1,h2,h3{ margin-bottom: 0.2rem !important; }
+/* markdown margin reset */
+div[data-testid="stMarkdown"]{ margin: 0 !important; }
 </style>
+
+<script>
+/* ✅ 強制同一視窗導頁：攔截 .entry-link click */
+(function () {
+  function bind() {
+    document.querySelectorAll('a.entry-link').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.location.assign(a.getAttribute('href'));
+      }, { passive: false });
+    });
+  }
+  const root = document.querySelector('#root') || document.body;
+  const obs = new MutationObserver(() => bind());
+  obs.observe(root, { childList: true, subtree: true });
+  bind();
+})();
+</script>
 """,
         unsafe_allow_html=True,
     )
 
-# -----------------------------
-# Main
-# -----------------------------
-_route_by_query()
-_css()
 
-# Header (你截圖上面那一條的感覺)
-st.markdown(
-    """
-<div class="gt-header">
-  <div class="gt-title">🚚 大豐物流・作業平台</div>
-  <div class="gt-sub">作業KPI｜班別分析（AM/PM）｜排除非作業區間</div>
-</div>
+def _entry_card(icon: str, title: str, sub: str, desc: str, page_path: str):
+    encoded = quote(page_path, safe="/_.-")
+    st.markdown(
+        f"""
+<a class="entry-link" href="?page={encoded}" target="_self">
+  <div class="entry-card">
+    <div class="entry-top">
+      <div class="entry-icon">{icon}</div>
+      <div>
+        <div class="entry-title">{title}</div>
+        <div class="entry-sub">{sub}</div>
+      </div>
+    </div>
+    <div class="entry-desc">{desc}</div>
+    <div class="entry-cta">進入 <span>→</span></div>
+  </div>
+</a>
 """,
-    unsafe_allow_html=True,
-)
+        unsafe_allow_html=True,
+    )
 
-# Section: 課別入口
-st.markdown(
-    """
-<div class="gt-section">
-  <div class="gt-section-title">📌 課別入口</div>
 
-  <a class="dept-row" href="{out}">
-    <div class="dept-left">
-      <div class="dept-icon">📦</div>
-      <div>
-        <div class="dept-name">出貨課：Outbound</div>
-        <div class="dept-desc">撥貨差異・出貨/包裝/異常（由課別首頁統一入口）</div>
-      </div>
-    </div>
-    <div class="dept-arrow">進入 →</div>
-  </a>
+def main():
+    _route_by_query()
 
-  <a class="dept-row" href="{inb}">
-    <div class="dept-left">
-      <div class="dept-icon">🚚</div>
-      <div>
-        <div class="dept-name">進貨課：Inbound</div>
-        <div class="dept-desc">驗收/上架/總揀/儲位/差異代庫存（由課別首頁統一入口）</div>
-      </div>
-    </div>
-    <div class="dept-arrow">進入 →</div>
-  </a>
+    set_page(
+        "大豐物流 - 作業平台",
+        icon="🚚",
+        subtitle="作業KPI｜班別分析（AM/PM）｜排除非作業區間",
+    )
 
-</div>
-""".format(out=_link(ROUTES["出貨課"]), inb=_link(ROUTES["進貨課"])),
-    unsafe_allow_html=True,
-)
+    card_open("📌 課別入口")
+    _home_css_and_js()
+
+    st.markdown('<div class="entry-grid">', unsafe_allow_html=True)
+
+    _entry_card(
+        "📦",
+        "出貨課",
+        "Outbound",
+        "撥貨差異、出貨/包裝/異常（由出貨課首頁統一入口）",
+        "pages/7_出貨課首頁.py",
+    )
+
+    _entry_card(
+        "🚚",
+        "進貨課",
+        "Inbound",
+        "驗收/上架/總揀/儲位/差異代庫存（由進貨課首頁統一入口）",
+        "pages/8_進貨課首頁.py",
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+    card_close()
+
+
+if __name__ == "__main__":
+    main()
