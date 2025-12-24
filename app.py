@@ -28,25 +28,33 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a{
   padding-bottom: 8px !important;
 }
 
-/* ===== ✅ 首頁最大：不重疊 + 距離更緊 ===== */
+/* ===== ✅ 首頁最大：強制靠左排列（解決「文字置中導致距離很大」） ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a{
-  display: grid !important;
-  grid-template-columns: 22px 1fr !important; /* ✅ icon 欄位縮小 */
+  display: flex !important;
   align-items: center !important;
-  column-gap: 6px !important;               /* ✅ 間距縮小 */
-  padding-top: 10px !important;
-  padding-bottom: 10px !important;
-  min-height: 48px !important;              /* ✅ 高度縮小 */
+  justify-content: flex-start !important;  /* ✅ 靠左 */
+  gap: 6px !important;                    /* ✅ icon-文字距離 */
+  padding: 10px 12px !important;          /* ✅ 左右內距 */
+  min-height: 48px !important;
 }
 
-/* 清掉 p/span margin，避免字體放大又擠壓 */
+/* 把首頁內部所有「可能在撐寬/置中」的容器重置掉 */
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a > *{
+  flex: 0 0 auto !important;
+  margin-left: 0 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a *{
+  text-align: left !important;
+}
+
+/* 清掉 p/span 預設 margin，避免擠壓 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a p,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a span{
   margin: 0 !important;
   padding: 0 !important;
 }
 
-/* 首頁文字放大（可微調：28~30 你覺得太大再降） */
+/* 首頁文字放大 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a *{
   font-size: 30px !important;
   font-weight: 950 !important;
@@ -54,40 +62,31 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-ch
   white-space: nowrap !important;
 }
 
-/* icon：支援 svg/emoji，置中並縮一點 */
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a svg,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a span{
-  justify-self: center !important;
-  align-self: center !important;
-}
+/* 首頁 icon：支援 svg / emoji(span) */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a svg{
   width: 20px !important;
   height: 20px !important;
+  flex: 0 0 auto !important;
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:first-child a span{
-  font-size: 20px !important;   /* emoji icon */
+  font-size: 20px !important;
   line-height: 1 !important;
 }
 
-/* ===== ✅ 群組標題次大：進貨課 ===== */
+/* ===== ✅ 群組標題次大：進貨課（li 底下有 ul 的父節點） ===== */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul){
-  margin-top: 10px !important;
+  margin-top: 6px !important;
 }
-
-/* 群組標題那一行（ul 以外的區塊）放大 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul) *{
   font-size: 22px !important;
   font-weight: 900 !important;
   line-height: 1.2 !important;
 }
-
-/* 群組標題留白 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) > :not(ul){
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
-
-/* 子選單（ul 內）強制回子項大小 */
+/* 子選單（ul 內）回到正常大小 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) ul a *{
   font-size: 16px !important;
   font-weight: 700 !important;
@@ -116,4 +115,3 @@ pg = st.navigation(
 )
 
 pg.run()
-
