@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 
 st.set_page_config(
@@ -86,6 +87,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
+
 /* 子選單（ul 內）回到正常大小 */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) ul a *{
   font-size: 16px !important;
@@ -97,27 +99,27 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
     unsafe_allow_html=True,
 )
 
+# =========================
 # Pages
+# =========================
 home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
 
-# ✅ 出貨課
-transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
+# ✅ 出貨課：先只放「出貨課首頁」（其餘模組從首頁進入）
+out_home_page = st.Page("pages/7_出貨課首頁.py", title="出貨課首頁", icon="📦")
 
-# ✅ 進貨課
-qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
-putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
-pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯")
-slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
-diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
+# ✅ 進貨課：先只放「進貨課首頁」（其餘模組從首頁進入）
+in_home_page = st.Page("pages/8_進貨課首頁.py", title="進貨課首頁", icon="🚚")
 
+# =========================
+# Navigation（左側欄只保留課別入口）
+# =========================
 pg = st.navigation(
     {
         "": [home_page],
-        "📦 出貨課": [transfer_diff_page],  # ✅ 放在出貨課下
-        "🚚 進貨課": [qc_page, putaway_page, pick_page, slot_page, diff_page],
+        "📦 出貨課": [out_home_page],
+        "🚚 進貨課": [in_home_page],
     },
     expanded=False,
 )
 
 pg.run()
-
