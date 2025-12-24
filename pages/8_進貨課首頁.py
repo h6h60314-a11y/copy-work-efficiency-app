@@ -26,45 +26,37 @@ def _home_css_and_js():
     st.markdown(
         r"""
 <style>
-/* =========================
-   ✅ 去除藍色底 / 藍色框（課別首頁覆蓋）
-   ========================= */
-section[data-testid="stAppViewContainer"] a,
-section[data-testid="stAppViewContainer"] a:visited{
+/* =========================================================
+   ✅ 只作用在本頁（避免影響其它頁面）
+   ========================================================= */
+.dept-home a,
+.dept-home a:visited{
   color: rgba(15, 23, 42, 0.92) !important;
   text-decoration: none !important;
 }
-section[data-testid="stAppViewContainer"] a,
-section[data-testid="stAppViewContainer"] button{
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
+
+/* ✅ 去除藍色 focus / 藍框（僅本區塊） */
+.dept-home a:focus,
+.dept-home a:focus-visible{
   outline: none !important;
-}
-section[data-testid="stAppViewContainer"] a:focus,
-section[data-testid="stAppViewContainer"] a:focus-visible,
-section[data-testid="stAppViewContainer"] button:focus,
-section[data-testid="stAppViewContainer"] button:focus-visible{
-  outline: none !important;
-  box-shadow: none !important;
-}
-div[data-testid="stVerticalBlockBorderWrapper"]{
-  background: rgba(255,255,255,0.98) !important;
-  border-color: rgba(15, 23, 42, 0.12) !important;
   box-shadow: none !important;
 }
 
 /* =========================
-   清單：緊湊版（• + icon + 可點標題 + 同行描述）
+   ✅ 清單：緊湊版（• + icon + 可點標題 + 同行描述）
    ========================= */
-.home-list{ margin-top: 6px; }
-.home-row{
+.dept-home{ margin-top: 2px; }
+
+.dept-home .home-list{ margin-top: 6px; }
+
+.dept-home .home-row{
   display: flex;
   align-items: flex-start;
   gap: 10px;
   margin: 10px 0;
 }
-.home-left{
+
+.dept-home .home-left{
   display: inline-flex;
   align-items: flex-start;
   gap: 8px;
@@ -72,20 +64,24 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
   flex: 0 0 34px;
   margin-top: 2px;
 }
-.home-bullet{
+
+.dept-home .home-bullet{
   color: rgba(15, 23, 42, 0.55);
   font-size: 16px;
   line-height: 1;
 }
-.home-ico{
+
+.dept-home .home-ico{
   font-size: 16px;
   line-height: 1;
 }
-.home-right{
+
+.dept-home .home-right{
   flex: 1 1 auto;
   line-height: 1.55;
 }
-.home-link{
+
+.dept-home .home-link{
   display: inline;
   color: rgba(15, 23, 42, 0.92) !important;
   font-weight: 900;
@@ -94,8 +90,10 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
   text-decoration: none !important;
   cursor: pointer;
 }
-.home-link:hover{ opacity: 0.86; }
-.home-desc{
+
+.dept-home .home-link:hover{ opacity: 0.86; }
+
+.dept-home .home-desc{
   display: inline;
   margin-left: 6px;
   color: rgba(15, 23, 42, 0.72);
@@ -103,24 +101,29 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
   font-size: 14px;
   line-height: 1.45;
 }
-div[data-testid="stMarkdown"]{ margin: 0 !important; }
+
+/* ✅ 把 markdown 預設上下空白縮小（只本區塊） */
+.dept-home div[data-testid="stMarkdown"]{ margin: 0 !important; }
 </style>
 
 <script>
-/* ✅ 同一視窗導頁：攔截 .home-link，改用 location.assign */
+/* ✅ 同一視窗導頁（且避免重複綁定） */
 (function () {
-  function bind() {
-    document.querySelectorAll('a.home-link').forEach(a => {
+  function bindOnce() {
+    document.querySelectorAll('.dept-home a.home-link').forEach(a => {
+      if (a.dataset.bound === "1") return;
+      a.dataset.bound = "1";
       a.addEventListener('click', (e) => {
         e.preventDefault();
         window.location.assign(a.getAttribute('href'));
       }, { passive: false });
     });
   }
+
   const root = document.querySelector('#root') || document.body;
-  const obs = new MutationObserver(() => bind());
+  const obs = new MutationObserver(() => bindOnce());
   obs.observe(root, { childList: true, subtree: true });
-  bind();
+  bindOnce();
 })();
 </script>
 """,
@@ -153,6 +156,9 @@ def main():
     set_page("進貨課", icon="🚚", subtitle="Inbound｜進貨相關模組入口")
 
     card_open("🚚 進貨課模組")
+
+    # ✅ 用一個 wrapper scope，讓 CSS/JS 只影響本頁內容
+    st.markdown('<div class="dept-home">', unsafe_allow_html=True)
     _home_css_and_js()
 
     st.markdown('<div class="home-list">', unsafe_allow_html=True)
@@ -188,7 +194,9 @@ def main():
         "少揀差異展開、庫存儲位/效期對應、國際條碼後五碼放大顯示",
     )
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)  # .home-list
+    st.markdown("</div>", unsafe_allow_html=True)  # .dept-home
+
     card_close()
 
 
