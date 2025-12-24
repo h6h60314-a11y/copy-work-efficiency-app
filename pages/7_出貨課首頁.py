@@ -1,35 +1,76 @@
 # pages/7_出貨課首頁.py
 import streamlit as st
+from urllib.parse import quote, unquote
+
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 st.set_page_config(page_title="出貨課", page_icon="📦", layout="wide")
 inject_logistics_theme()
 
+ALLOW_PAGES = {
+    "pages/6_撥貨差異.py",
+}
 
-def _list_css():
+
+def _route_by_query():
+    qp = st.query_params
+    raw = qp.get("page", "")
+
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+
+    if not raw:
+        return
+
+    target = unquote(raw)
+    st.query_params.clear()
+
+    if target not in ALLOW_PAGES:
+        return
+
+    try:
+        st.switch_page(target)
+    except Exception:
+        return
+
+
+def _css_and_js():
     st.markdown(
         r"""
 <style>
-.dept-list{ margin-top: 4px; }
+/* 條列式（跟你原本那種一致） */
+.dept-list{ margin-top: 6px; }
 .dept-row{
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
   margin: 12px 0;
 }
-.dept-ico{
-  width: 26px;
-  flex: 0 0 26px;
-  text-align: center;
-  font-size: 16px;
-  line-height: 1;
+.dept-left{
+  width: 34px;
+  flex: 0 0 34px;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
   margin-top: 2px;
 }
-.dept-right{ flex: 1 1 auto; line-height: 1.55; }
+.dept-bullet{
+  color: rgba(15, 23, 42, 0.55);
+  font-size: 16px;
+  line-height: 1;
+}
+.dept-ico{
+  font-size: 16px;
+  line-height: 1;
+}
+.dept-right{
+  flex: 1 1 auto;
+  line-height: 1.55;
+}
 .dept-link{
   display: inline;
   color: rgba(15, 23, 42, 0.92) !important;
-  font-weight: 950;
+  font-weight: 900;
   font-size: 16px;
   line-height: 1.45;
   text-decoration: none !important;
@@ -46,45 +87,65 @@ def _list_css():
 }
 div[data-testid="stMarkdown"]{ margin: 0 !important; }
 </style>
+
+<script>
+/* 同一視窗導頁 */
+(function () {
+  function bind() {
+    document.querySelectorAll('a.dept-link').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.location.assign(a.getAttribute('href'));
+      }, { passive: false });
+    });
+  }
+  const root = document.querySelector('#root') || document.body;
+  const obs = new MutationObserver(() => bind());
+  obs.observe(root, { childList: true, subtree: true });
+  bind();
+})();
+</script>
 """,
         unsafe_allow_html=True,
     )
 
 
-def _item(icon: str, title: str, page_path: str, desc: str):
-    if st.button(f"{icon} {title}", key=f"btn_{page_path}", use_container_width=True):
-        st.switch_page(page_path)
-
+def _nav_item(icon: str, title: str, page_path: str, desc: str):
+    encoded = quote(page_path, safe="/_.-")
     st.markdown(
-        f"""
-<div class="dept-row">
-  <div class="dept-ico">{icon}</div>
-  <div class="dept-right">
-    <a class="dept-link" onclick="void(0)">{title}</a>
-    <span class="dept-desc">{desc}</span>
-  </div>
-</div>
-""",
+        (
+            f'<div class="dept-row">'
+            f'  <div class="dept-left">'
+            f'    <span class="dept-bullet">•</span>'
+            f'    <span class="dept-ico">{icon}</span>'
+            f'  </div>'
+            f'  <div class="dept-right">'
+            f'    <a class="dept-link" href="?page={encoded}" target="_self">{title}：</a>'
+            f'    <span class="dept-desc">{desc}</span>'
+            f'  </div>'
+            f'</div>'
+        ),
         unsafe_allow_html=True,
     )
 
 
 def main():
+    _route_by_query()
+
     set_page("出貨課", icon="📦", subtitle="Outbound｜出貨相關模組入口")
 
     card_open("📦 出貨課模組")
-    _list_css()
+    _css_and_js()
 
     st.markdown('<div class="dept-list">', unsafe_allow_html=True)
-
-    _item(
+    _nav_item(
         "📦",
         "撥貨差異",
         "pages/6_撥貨差異.py",
         "AllDIF/ALLACT 篩選、明細匯整、儲位比對棚別、輸出差異明細",
     )
-
     st.markdown("</div>", unsafe_allow_html=True)
+
     card_close()
 
 
