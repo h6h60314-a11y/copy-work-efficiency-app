@@ -47,7 +47,8 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] > ul > li:has(ul) 
 }
 
 /* =========================================================
-   ✅ 隱藏各群組的「首頁子項」(不顯示 出貨課首頁/進貨課首頁/大樹KPI首頁)
+   ✅ 隱藏各群組的「首頁子項」
+   (不顯示 出貨課首頁/進貨課首頁/大樹KPI首頁)
    依 url_path 精準選取
    ========================================================= */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="outbound-home"],
@@ -121,17 +122,16 @@ pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能",
 slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
 diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
 
-# ✅ 大樹KPI（新增）
+# ✅ 大樹KPI（群組首頁：會被隱藏，但群組標題點下去會進這頁）
 gt_kpi_home = st.Page("pages/9_大樹KPI首頁.py", title="大樹KPI首頁", icon="📈", url_path="gt-kpi-home")
-# 之後你新增模組就在這裡加頁面，例如：
-# gt_kpi_daily = st.Page("pages/9_大樹KPI_日報.py", title="KPI日報", icon="📅")
+gt_inbound_receipt = st.Page("pages/10_進貨驗收量.py", title="進貨驗收量", icon="📥")
 
 pg = st.navigation(
     {
         "": [home_page],
         "出貨課": [outbound_home, transfer_diff_page],
         "進貨課": [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page],
-        "大樹KPI": [gt_kpi_home],  # 之後把新模組頁面加到這個 list 後面
+        "大樹KPI": [gt_kpi_home, gt_inbound_receipt],
     },
     expanded=False,
 )
