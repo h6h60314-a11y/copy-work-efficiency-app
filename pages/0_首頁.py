@@ -4,53 +4,42 @@ from urllib.parse import quote, unquote
 
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
-st.set_page_config(
-    page_title="大豐物流 - 作業平台",
-    page_icon="🚚",
-    layout="wide",
-)
-
+st.set_page_config(page_title="大豐物流 - 作業平台", page_icon="🚚", layout="wide")
 inject_logistics_theme()
 
 
 def _route_by_query():
     """
-    用 query param 在同一視窗切頁（不走 st.button / st.page_link），避免被 common_ui 做成藍色膠囊。
-    點標題會變成：?page=pages/1_驗收作業效能.py
+    用 query param 在同一視窗切頁：
+    點標題 -> ?page=pages/1_驗收作業效能.py
+    然後首頁收到參數後 st.switch_page() 轉頁
     """
     qp = st.query_params
     raw = qp.get("page", "")
 
-    # st.query_params 可能回傳 list[str] 或 str
     if isinstance(raw, list):
         raw = raw[0] if raw else ""
 
     if not raw:
         return
 
-    # 清掉參數，避免回到首頁又重複跳轉
     st.query_params.clear()
-
     target = unquote(raw)
     st.switch_page(target)
 
 
-def _home_css():
+def _home_css_and_js():
     st.markdown(
         r"""
 <style>
 /* =========================
-   ✅ 去除藍色底 / 藍色框（全域覆蓋在首頁）
+   ✅ 去除藍色底 / 藍色框（首頁覆蓋）
    ========================= */
-
-/* 連結不要預設藍色 */
 section[data-testid="stAppViewContainer"] a,
 section[data-testid="stAppViewContainer"] a:visited{
   color: rgba(15, 23, 42, 0.92) !important;
   text-decoration: none !important;
 }
-
-/* 任何 button/link 類型外觀：透明底、無框、無陰影（避免藍色膠囊/藍框） */
 section[data-testid="stAppViewContainer"] a,
 section[data-testid="stAppViewContainer"] button{
   background: transparent !important;
@@ -58,8 +47,6 @@ section[data-testid="stAppViewContainer"] button{
   box-shadow: none !important;
   outline: none !important;
 }
-
-/* 點擊焦點不要藍框 */
 section[data-testid="stAppViewContainer"] a:focus,
 section[data-testid="stAppViewContainer"] a:focus-visible,
 section[data-testid="stAppViewContainer"] button:focus,
@@ -67,8 +54,6 @@ section[data-testid="stAppViewContainer"] button:focus-visible{
   outline: none !important;
   box-shadow: none !important;
 }
-
-/* 若 common_ui 對卡片/容器有藍框藍底，這裡強制改成白底+淺灰框 */
 div[data-testid="stVerticalBlockBorderWrapper"]{
   background: rgba(255,255,255,0.98) !important;
   border-color: rgba(15, 23, 42, 0.12) !important;
@@ -78,27 +63,21 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
 /* =========================
    首頁清單：緊湊版（• + icon + 可點標題 + 同行描述）
    ========================= */
-
 .home-list{ margin-top: 6px; }
-
-/* 一列 */
 .home-row{
   display: flex;
   align-items: flex-start;
   gap: 10px;
   margin: 10px 0;
 }
-
-/* 左側（• + icon）佔位縮小，避免空格太大 */
 .home-left{
   display: inline-flex;
   align-items: flex-start;
   gap: 8px;
-  width: 34px;             /* ✅ 想更緊：改 28px */
+  width: 34px;
   flex: 0 0 34px;
   margin-top: 2px;
 }
-
 .home-bullet{
   color: rgba(15, 23, 42, 0.55);
   font-size: 16px;
@@ -108,14 +87,10 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
   font-size: 16px;
   line-height: 1;
 }
-
-/* 右側文字區 */
 .home-right{
   flex: 1 1 auto;
   line-height: 1.55;
 }
-
-/* 可點標題：純文字連結（不是膠囊） */
 .home-link{
   display: inline;
   color: rgba(15, 23, 42, 0.92) !important;
@@ -125,11 +100,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
   text-decoration: none !important;
   cursor: pointer;
 }
-.home-link:hover{
-  opacity: 0.86;
-}
-
-/* 同行描述 */
+.home-link:hover{ opacity: 0.86; }
 .home-desc{
   display: inline;
   margin-left: 6px;
@@ -138,19 +109,37 @@ div[data-testid="stVerticalBlockBorderWrapper"]{
   font-size: 14px;
   line-height: 1.45;
 }
-
-/* 壓掉 markdown 容器預設外距 */
-div[data-testid="stMarkdown"]{
-  margin: 0 !important;
-}
+div[data-testid="stMarkdown"]{ margin: 0 !important; }
 </style>
+
+<script>
+/* ✅ 強制「同一視窗」導頁：攔截 .home-link 點擊，用 location.assign */
+(function () {
+  function bind() {
+    document.querySelectorAll('a.home-link').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        const href = a.getAttribute('href');
+        // 同一視窗跳轉
+        window.location.assign(href);
+      }, { passive: false });
+    });
+  }
+
+  // 初次與每次 Streamlit 重新渲染後都再綁一次
+  const root = document.querySelector('#root') || document.body;
+  const obs = new MutationObserver(() => bind());
+  obs.observe(root, { childList: true, subtree: true });
+
+  bind();
+})();
+</script>
 """,
         unsafe_allow_html=True,
     )
 
 
 def _nav_item(icon: str, title: str, page_path: str, desc: str):
-    # query param 要 encoding（檔名含中文更穩）
     encoded = quote(page_path, safe="/_.-")
     st.markdown(
         f"""
@@ -160,7 +149,8 @@ def _nav_item(icon: str, title: str, page_path: str, desc: str):
     <span class="home-ico">{icon}</span>
   </div>
   <div class="home-right">
-    <a class="home-link" href="?page={encoded}">{title}：</a>
+    <!-- ✅ target=_self 強制同分頁（再加 JS 保險） -->
+    <a class="home-link" href="?page={encoded}" target="_self">{title}：</a>
     <span class="home-desc">{desc}</span>
   </div>
 </div>
@@ -170,7 +160,6 @@ def _nav_item(icon: str, title: str, page_path: str, desc: str):
 
 
 def main():
-    # ✅ 先處理跳頁（點標題後同視窗切換）
     _route_by_query()
 
     set_page(
@@ -180,7 +169,7 @@ def main():
     )
 
     card_open("📌 作業績效分析模組")
-    _home_css()
+    _home_css_and_js()
 
     st.markdown('<div class="home-list">', unsafe_allow_html=True)
 
@@ -216,7 +205,6 @@ def main():
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
-
     card_close()
 
 
