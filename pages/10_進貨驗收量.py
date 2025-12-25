@@ -1,5 +1,6 @@
 # pages/10_進貨驗收量.py
 import io
+import re
 import pandas as pd
 import streamlit as st
 
@@ -9,12 +10,84 @@ st.set_page_config(page_title="進貨驗收量｜大樹KPI", page_icon="📥", l
 inject_logistics_theme()
 
 SHEET_DEFAULT = "採購單驗收量明細"
+
+# ✅ 統一用「標準欄位名」做運算（先把報表欄位自動對照到這些名稱）
 REQ_COLS = ["入庫類型", "驗收入庫數量", "供應商代號", "DC採購單號", "商品品號"]
+
+# ✅ 你的檔案實際會出現的同義欄位（可再加）
+COL_ALIASES = {
+    "入庫類型": ["入庫類型", "入庫型態", "入庫类型"],
+    "驗收入庫數量": ["驗收入庫數量", "驗收入庫量", "驗收入庫", "驗收入庫量", "驗收入庫數量"],
+    "供應商代號": ["供應商代號", "廠商代號", "供應商編號", "廠商編號"],
+    "DC採購單號": ["DC採購單號", "DC採購單号", "DC採購單", "採購單號(DC)"],
+    # ⚠️ 若真的沒有 DC採購單號，才退回採購單號
+    "__FALLBACK_DC_ORDER__": ["採購單號"],
+    "商品品號": ["商品品號", "商品代號", "商品料號", "品號", "料號"],
+}
+
+
+def _norm_key(s: str) -> str:
+    # 去空白、全形空白、常見符號
+    s = str(s)
+    s = s.replace("\u3000", " ")
+    s = re.sub(r"\s+", "", s)
+    return s.strip()
 
 
 def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
+    df.columns = [str(c).strip().replace("\u3000", " ") for c in df.columns]
+    return df
+
+
+def _apply_column_aliases(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    把「報表欄位」自動對照成「標準欄位」(REQ_COLS)
+    - 只在標準欄位不存在時才會做 rename
+    - DC採購單號：若沒有才用 採購單號 當 fallback
+    """
+    df = df.copy()
+    cols = list(df.columns)
+
+    # 建一個 normalized -> 原始欄位名 的 lookup
+    norm_map = {}
+    for c in cols:
+        nk = _norm_key(c)
+        if nk not in norm_map:
+            norm_map[nk] = c
+
+    def find_col(candidates):
+        for cand in candidates:
+            # 先直接命中
+            if cand in df.columns:
+                return cand
+            # 再用 normalized 命中
+            nk = _norm_key(cand)
+            if nk in norm_map:
+                return norm_map[nk]
+        return None
+
+    rename_map = {}
+
+    # 一般欄位
+    for target, candidates in COL_ALIASES.items():
+        if target.startswith("__"):
+            continue
+        if target in df.columns:
+            continue
+        hit = find_col(candidates)
+        if hit and hit != target:
+            rename_map[hit] = target
+
+    # DC採購單號 fallback（只有在真的沒有 DC採購單號 時才用「採購單號」）
+    if "DC採購單號" not in df.columns:
+        fb = find_col(COL_ALIASES["__FALLBACK_DC_ORDER__"])
+        if fb:
+            rename_map[fb] = "DC採購單號"
+
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
     return df
 
 
@@ -26,12 +99,6 @@ def _is_empty_row(vals) -> bool:
             continue
         return False
     return True
-
-
-def _coerce_str(v):
-    if v is None:
-        return ""
-    return str(v).strip()
 
 
 def _trim_trailing_nones(vals):
@@ -47,28 +114,22 @@ def _trim_trailing_nones(vals):
     return vals[: last + 1]
 
 
-def _find_header_row(rows, required_cols, scan_rows=200):
-    """
-    在前 scan_rows 行內，找出包含必要欄位的表頭列
-    """
+def _find_header_row(rows, required_cols, scan_rows=250):
     req = set([c.strip() for c in required_cols])
     for i, r in enumerate(rows[:scan_rows]):
-        cand = [_coerce_str(x) for x in r]
-        cand_set = set([x for x in cand if x])
-        # 完整命中最好；若檔案欄位多一點/順序不同也能抓到
+        cand = [str(x).strip() if x is not None else "" for x in r]
+        cand = [c for c in cand if c]
+        cand_set = set(cand)
         if req.issubset(cand_set):
             return i
     return None
 
 
 def _read_xlsb_with_pyxlsb(file_bytes: bytes, sheet_name: str) -> pd.DataFrame:
-    """
-    直接用 pyxlsb 解析 .xlsb，避免 pandas 對 pyxlsb 版本要求問題
-    """
     try:
         from pyxlsb import open_workbook
     except Exception as e:
-        raise ImportError("讀取 .xlsb 需要安裝 pyxlsb。請在 requirements.txt 加上：pyxlsb") from e
+        raise ImportError("讀取 .xlsb 需要安裝 pyxlsb（requirements.txt 加上 pyxlsb）。") from e
 
     bio = io.BytesIO(file_bytes)
     rows = []
@@ -86,10 +147,9 @@ def _read_xlsb_with_pyxlsb(file_bytes: bytes, sheet_name: str) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
 
-    # 找表頭列（優先找包含必要欄位的那一列）
-    header_idx = _find_header_row(rows, REQ_COLS, scan_rows=250)
+    # 先用「標準欄位」找表頭；找不到就退回第一個非空列
+    header_idx = _find_header_row(rows, list(set(sum([v for k, v in COL_ALIASES.items() if not k.startswith("__")], []))), scan_rows=250)
     if header_idx is None:
-        # 退而求其次：找第一個非空列當 header
         header_idx = next((i for i, r in enumerate(rows[:250]) if not _is_empty_row(r)), None)
 
     if header_idx is None:
@@ -100,11 +160,10 @@ def _read_xlsb_with_pyxlsb(file_bytes: bytes, sheet_name: str) -> pd.DataFrame:
 
     data_rows = rows[header_idx + 1 :]
 
-    # 去掉前面一堆空白列
+    # 去掉前面空白列
     while data_rows and _is_empty_row(data_rows[0]):
         data_rows = data_rows[1:]
 
-    # 停在連續空白列太多（避免整張表尾端空到爆）
     cleaned = []
     empty_run = 0
     for r in data_rows:
@@ -119,7 +178,6 @@ def _read_xlsb_with_pyxlsb(file_bytes: bytes, sheet_name: str) -> pd.DataFrame:
     if not cleaned:
         return pd.DataFrame(columns=header)
 
-    # 補齊欄位長度
     max_len = len(header)
     fixed = []
     for r in cleaned:
@@ -127,7 +185,9 @@ def _read_xlsb_with_pyxlsb(file_bytes: bytes, sheet_name: str) -> pd.DataFrame:
         fixed.append(rr)
 
     df = pd.DataFrame(fixed, columns=header)
-    return _normalize_cols(df)
+    df = _normalize_cols(df)
+    df = _apply_column_aliases(df)
+    return df
 
 
 def _get_sheet_names(file_name: str, file_bytes: bytes):
@@ -136,16 +196,10 @@ def _get_sheet_names(file_name: str, file_bytes: bytes):
 
     if ext == "xlsb":
         from pyxlsb import open_workbook
-
         with open_workbook(bio) as wb:
             return list(wb.sheets)
 
-    # xlsx / xlsm
-    try:
-        from openpyxl import load_workbook
-    except Exception as e:
-        raise ImportError("讀取 xlsx/xlsm 需要 openpyxl。") from e
-
+    from openpyxl import load_workbook
     wb = load_workbook(bio, read_only=True, data_only=True)
     return wb.sheetnames
 
@@ -158,14 +212,17 @@ def _read_excel_bytes(file_name: str, file_bytes: bytes, sheet_name: str) -> pd.
     if ext == "xlsb":
         return _read_xlsb_with_pyxlsb(file_bytes, sheet_name)
 
-    # xlsx / xlsm：用 openpyxl
+    # xlsx / xlsm
     df = pd.read_excel(bio, sheet_name=sheet_name, engine="openpyxl")
-    return _normalize_cols(df)
+    df = _normalize_cols(df)
+    df = _apply_column_aliases(df)
+    return df
 
 
 def _compute_stats(df: pd.DataFrame, inbound_type: str) -> dict:
     df = df.copy()
 
+    # 欄位保護
     for c in REQ_COLS:
         if c not in df.columns:
             raise KeyError(f"找不到必要欄位：{c}")
@@ -205,16 +262,14 @@ def main():
 
     file_bytes = up.getvalue()
 
-    # ✅ 讀取工作表清單 → 下拉選擇
+    # 工作表清單
     try:
         sheet_names = _get_sheet_names(up.name, file_bytes)
     except Exception as e:
         st.error(f"讀取工作表清單失敗：{e}")
         st.stop()
 
-    default_idx = 0
-    if SHEET_DEFAULT in sheet_names:
-        default_idx = sheet_names.index(SHEET_DEFAULT)
+    default_idx = sheet_names.index(SHEET_DEFAULT) if SHEET_DEFAULT in sheet_names else 0
 
     card_open("⚙️ 讀取設定")
     sheet_name = st.selectbox("工作表名稱", options=sheet_names, index=default_idx)
@@ -230,13 +285,16 @@ def main():
     if df.empty:
         st.warning(
             "已成功讀取檔案，但這張工作表資料是空的或沒有可解析的值。\n\n"
-            "若你這份 .xlsb 是 Excel 公式/樞紐即時產生的報表：\n"
-            "建議先用 Excel 開啟一次 → 讓它計算完成 → 另存新檔為 .xlsx 再上傳。"
+            "若這份報表是公式/樞紐即時產生：建議先用 Excel 開啟一次 → 等計算完成 → 另存為 .xlsx 再上傳。"
         )
         st.write("目前欄位：", list(df.columns))
         return
 
-    # 基本檢查
+    # ✅ 顯示「欄位對照後」的欄名，方便你確認
+    with st.expander("🔎 檢視目前欄位（已自動對照）", expanded=False):
+        st.write(list(df.columns))
+
+    # 必要欄位檢查
     missing = [c for c in REQ_COLS if c not in df.columns]
     if missing:
         st.error(f"缺少必要欄位：{', '.join(missing)}")
@@ -251,7 +309,6 @@ def main():
 
     overall_unique_suppliers = int(df["供應商代號"].nunique(dropna=True))
 
-    # 顯示結果
     card_open("📊 統計結果")
     cols = st.columns(len(types))
     for i, s in enumerate(stats_rows):
