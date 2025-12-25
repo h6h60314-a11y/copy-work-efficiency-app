@@ -166,7 +166,7 @@ gt_ship_actual = page_if_exists("pages/13_庫存訂單實出量分析.py", "庫�
 gt_putaway_daily = page_if_exists("pages/14_每日上架分析.py", "每日上架分析", "📦")
 gt_inv_accuracy = page_if_exists( "pages/15_庫存盤點正確率.py","庫存盤點正確率","🎯")
 gt_store_arrival_abn = page_if_exists("pages/16_門市到貨異常率.py","門市到貨異常率","🏪")
-t_daily_attendance = page_if_exists("pages/17_每日出勤工時分析.py", "每日出勤工時分析", "🕒")
+gt_daily_attendance = page_if_exists("pages/17_每日出勤工時分析.py", "每日出勤工時分析", "🕒")
 
 pg = st.navigation(
     {
@@ -179,6 +179,7 @@ pg = st.navigation(
 )
 
 pg.run()
+
 
 
 
