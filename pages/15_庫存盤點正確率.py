@@ -203,8 +203,9 @@ def main():
         """
 <style>
 .kpi-wrap{
-  max-width: 1080px;
   width: 100%;
+  max-width: none;              /* ✅ 取消上限，跟容器同寬 */
+  box-sizing: border-box;       /* ✅ 避免 padding 造成超出 */
   background: rgba(255,255,255,.86);
   border: 1px solid rgba(15,23,42,.10);
   border-radius: 14px;
