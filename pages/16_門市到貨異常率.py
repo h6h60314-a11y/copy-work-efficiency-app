@@ -18,12 +18,14 @@ def _fmt_int(x) -> str:
 
 def _fmt_num(x) -> str:
     try:
-        # 保留整數（你原本就是數量）
         return f"{float(x):,.0f}"
     except Exception:
         return "0"
 
 
+# ---------------------------
+# reader (xlsx/xlsm/xlsb/xls + fake xls PROVIDER)
+# ---------------------------
 def _is_fake_xls_provider(raw: bytes) -> bool:
     return b"PROVIDER" in raw[:256].upper()
 
@@ -52,9 +54,7 @@ def _read_fake_xls_text_or_html(raw: bytes) -> pd.DataFrame:
 
 
 def _pick_sheet_name(xls: pd.ExcelFile) -> str:
-    # 依你上傳檔案：優先「明細」
-    preferred = ["明細", "工作表1", "Sheet1"]
-    for p in preferred:
+    for p in ["明細", "工作表1", "Sheet1"]:
         if p in xls.sheet_names:
             return p
     return xls.sheet_names[0]
@@ -110,14 +110,13 @@ def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _validate_cols(df: pd.DataFrame) -> None:
-    # 依你原始邏輯會用到的欄位
     need = ["箱號", "應到數量", "實到數量", "異常原因"]
     missing = [c for c in need if c not in df.columns]
     if missing:
         raise KeyError(f"缺少必要欄位：{missing}（目前欄位：{list(df.columns)[:30]} ...）")
 
 
-def _parse_year_mmdd_from_box(df: pd.DataFrame, col_box: str = "箱號") -> pd.DataFrame:
+def _parse_year_mmdd_from_box(df: pd.DataFrame, col_box="箱號") -> pd.DataFrame:
     df = df.copy()
     s = df[col_box].astype(str)
     df["年"] = s.str[:4]
@@ -134,41 +133,39 @@ def _to_num(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 
 def _compute(df_raw: pd.DataFrame, year_filter: str, date_filter: str) -> tuple[pd.DataFrame, dict]:
-    """
-    回傳：處理後 df + 指標
-    """
     df = df_raw.copy()
 
-    # 解析 年/日期
     df = _parse_year_mmdd_from_box(df, "箱號")
 
-    # 篩選 年/日期（允許「全部」）
+    # 年/日期篩選（允許全部）
     before_filter = len(df)
     if year_filter != "全部":
         df = df[df["年"] == year_filter]
     if date_filter != "全部":
         df = df[df["日期"] == date_filter]
-    after_filter = len(df)
-    filtered_out = before_filter - after_filter
+    filtered_out = before_filter - len(df)
 
     # 數值欄位轉數值
     df = _to_num(df, ["應到數量", "實到數量", "差異", "數量"])
 
-    # 排除 異常原因 含 供應商
+    # 排除「異常原因」含「供應商」
     before_supplier = len(df)
     df = df[~df["異常原因"].astype(str).str.contains("供應商", na=False)]
     supplier_removed = before_supplier - len(df)
 
-    # 計算差異 = 實到 - 應到（若原本有差異欄位也直接覆蓋，避免舊值）
+    # 差異 = 實到 - 應到（覆蓋舊值）
     df["差異"] = df["實到數量"] - df["應到數量"]
 
-    # 指標
+    # 統計
     count_box_rows = int(df["箱號"].dropna().shape[0])  # 含重複：列數
     sum_excess = float(df.loc[df["異常原因"] == "到貨多貨", "差異"].sum())
     sum_shortage = float(df.loc[df["異常原因"] == "到貨短少", "差異"].sum())
+
     sum_defect = 0.0
     if "數量" in df.columns:
-        sum_defect = float(df.loc[df["異常原因"].isin(["到貨凹損", "到貨破損", "到貨漏液"]), "數量"].sum())
+        sum_defect = float(
+            df.loc[df["異常原因"].isin(["到貨凹損", "到貨破損", "到貨漏液"]), "數量"].sum()
+        )
 
     metrics = {
         "箱號總筆數": count_box_rows,
@@ -178,11 +175,10 @@ def _compute(df_raw: pd.DataFrame, year_filter: str, date_filter: str) -> tuple[
         "年日期剔除筆數": int(filtered_out),
         "供應商剔除筆數": int(supplier_removed),
     }
-
     return df, metrics
 
 
-def _to_excel_bytes(df: pd.DataFrame, sheet_name: str = "門市到貨異常") -> bytes:
+def _to_excel_bytes(df: pd.DataFrame, sheet_name="門市到貨異常_結果") -> bytes:
     bio = BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
@@ -197,7 +193,7 @@ def main():
     st.markdown(
         r"""
 <style>
-/* 讓結果區塊與上傳卡片同寬（不要縮窄） */
+/* KPI 外框同寬、順眼 */
 .fullw-wrap{
   width: 100%;
   background: rgba(255,255,255,.86);
@@ -214,14 +210,14 @@ def main():
   margin: 0 0 10px 0;
 }
 
-/* 3 欄 → 自動換列 */
+/* 3 欄一列，滿三欄自動換列 */
 .kpi-grid{
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
-/* 小一點、不要整列滿版的感覺：卡片本身剛好 */
+/* 卡片不要整列滿版的感覺：本身剛好、字體略小 */
 .metric-box{
   background: rgba(248,250,252,.92);
   border: 1px solid rgba(15,23,42,.10);
@@ -243,12 +239,14 @@ def main():
 .metric-value-main{
   font-size: 20px;
 }
+
 .note{
   margin-top: 8px;
   font-size: 12px;
   color: rgba(15,23,42,.62);
   font-weight: 650;
 }
+
 @media (max-width: 900px){
   .kpi-grid{ grid-template-columns: 1fr; }
 }
@@ -257,7 +255,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # 上傳
+    # 上傳區
     card_open("📌 上傳檔案（XLSX / XLSM / XLSB / XLS）")
     st.caption("工作表：優先「明細」，沒有則取第一張。")
     st.caption("必要欄位：箱號、應到數量、實到數量、異常原因（數量欄位用於凹損/破損/漏液統計）")
@@ -301,7 +299,7 @@ def main():
         st.dataframe(df.head(50), use_container_width=True)
         st.stop()
 
-    # 篩選條件（年 / 日期）
+    # 年/日期選單
     temp = _parse_year_mmdd_from_box(df, "箱號")
     years = sorted([y for y in temp["年"].dropna().astype(str).unique().tolist() if len(y) == 4])
     dates = sorted([d for d in temp["日期"].dropna().astype(str).unique().tolist() if len(d) == 4])
@@ -312,15 +310,15 @@ def main():
     with c2:
         date_filter = st.selectbox("保留 日期（箱號第 5-8 碼 MMDD）", ["全部"] + dates, index=0)
 
-    # 計算
+    # 計算中
     with st.spinner("統計計算中…"):
         df_out, m = _compute(df, year_filter, date_filter)
 
-    # 結果 KPI（同寬 + 3 欄換列）
-    st.markdown(
-        f"""
+    # ✅ KPI：一定要用 st.markdown + unsafe_allow_html=True（避免印出 HTML）
+    kpi_html = f"""
 <div class="fullw-wrap">
   <div class="fullw-title">門市到貨異常統計</div>
+
   <div class="kpi-grid">
     <div class="metric-box">
       <div class="metric-label">箱號總筆數（含重複）</div>
@@ -352,20 +350,19 @@ def main():
       <div class="metric-value">{_fmt_int(m["供應商剔除筆數"])}</div>
     </div>
   </div>
+
   <div class="note">已自動計算：差異 = 實到數量 - 應到數量（並排除「異常原因」含「供應商」）。</div>
 </div>
-""",
-        unsafe_allow_html=True,
-    )
+"""
+    st.markdown(kpi_html, unsafe_allow_html=True)
 
     # 匯出
-    out_bytes = _to_excel_bytes(df_out, sheet_name="門市到貨異常_結果")
+    out_bytes = _to_excel_bytes(df_out)
     st.download_button(
         "⬇️ 匯出（處理後）Excel",
         data=out_bytes,
         file_name="門市到貨異常_處理後.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=False,
     )
 
     st.markdown("### 明細預覽（前 200 列）")
