@@ -174,15 +174,22 @@ gt_ship_units = st.Page(
     icon="📦",
 )
 
+gt_xdock_close_compare = st.Page(
+    "pages/12_越庫訂單分析.py",
+    title="越庫訂單分析",
+    icon="🧾",
+)
+
 pg = st.navigation(
     {
         "": [home_page],
         "出貨課": [outbound_home, transfer_diff_page],
         "進貨課": [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page],
-        "大樹KPI": [gt_kpi_home, gt_inbound_receipt, gt_ship_units],
+        "大樹KPI": [gt_kpi_home, gt_inbound_receipt, gt_ship_units,gt_xdock_close_compare],
     },
     expanded=False,
 )
 
 pg.run()
+
 
