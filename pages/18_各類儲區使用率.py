@@ -1,10 +1,12 @@
 # pages/18_各類儲區使用率.py
 # -*- coding: utf-8 -*-
 """
-18_儲位使用率（部署版 / Streamlit）
+18_各類儲區使用率（部署版 / Streamlit）
 整合兩支 Tkinter 程式：
 A) 依「區(溫層)」統計：大/中/小儲位 有效貨位、已使用貨位、使用率
 B) 依「棚別」分類：大型/中型/小型/未知，並輸出：明細(含分類)、棚別統計、儲位類型統計
+
+✅ 支援 .xlsb（pyxlsb）
 """
 
 import warnings
@@ -51,12 +53,31 @@ def _spacer(h=10):
     st.markdown(f"<div style='height:{h}px'></div>", unsafe_allow_html=True)
 
 
-def detect_sheet_for_column(xls: pd.ExcelFile, must_have: str) -> str:
-    """在所有分頁中找第一個含 must_have 欄位的分頁；找不到就回第一張"""
+def detect_sheet_for_column_xls(xls: pd.ExcelFile, must_have: str) -> str:
+    """ExcelFile（xlsx/xlsm/xls）用：掃描分頁找欄位"""
     for name in xls.sheet_names:
         try:
             df0 = pd.read_excel(xls, sheet_name=name, nrows=0)
             if must_have in df0.columns:
+                return name
+        except Exception:
+            continue
+    return xls.sheet_names[0]
+
+
+def detect_sheet_for_column_xlsb(uploaded_bytes: bytes, must_have: str) -> str:
+    """
+    xlsb 用：pyxlsb 無法用 nrows=0 讀 header，因此用小量讀取
+    逐張讀前 50 行，檢查欄位
+    """
+    import pandas as pd
+    bio = io.BytesIO(uploaded_bytes)
+    xls = pd.ExcelFile(bio, engine="pyxlsb")
+    for name in xls.sheet_names:
+        try:
+            # 讀一點點資料來拿 columns
+            df = pd.read_excel(xls, sheet_name=name, engine="pyxlsb", nrows=50)
+            if must_have in df.columns:
                 return name
         except Exception:
             continue
@@ -68,28 +89,53 @@ def robust_read_excel_bytes(uploaded_file) -> tuple[pd.DataFrame, str]:
     上傳檔案讀取：
     - xlsx/xlsm: openpyxl
     - xls: xlrd（需 requirements 裝 xlrd==2.0.1）
+    - xlsb: pyxlsb（需 requirements 裝 pyxlsb）
     會自動選擇最適合的分頁：
       優先：含『區(溫層)』；其次：含『棚別』；再不行：第一張
     """
     filename = uploaded_file.name
     ext = os.path.splitext(filename)[1].lower()
-    data = uploaded_file.getvalue()
-    bio = io.BytesIO(data)
+    uploaded_bytes = uploaded_file.getvalue()
+
+    # ✅ xlsb
+    if ext == ".xlsb":
+        try:
+            xls = pd.ExcelFile(io.BytesIO(uploaded_bytes), engine="pyxlsb")
+        except Exception as e:
+            raise ValueError(f"讀取 xlsb 失敗（請確認已安裝 pyxlsb）：{e}")
+
+        sheet = None
+        for key in ["區(溫層)", "棚別"]:
+            candidate = detect_sheet_for_column_xlsb(uploaded_bytes, key)
+            try:
+                df_probe = pd.read_excel(xls, sheet_name=candidate, engine="pyxlsb", nrows=50)
+                if key in df_probe.columns:
+                    sheet = candidate
+                    break
+            except Exception:
+                pass
+
+        if sheet is None:
+            sheet = xls.sheet_names[0]
+
+        df = pd.read_excel(xls, sheet_name=sheet, engine="pyxlsb")
+        return df, sheet
+
+    # ✅ xlsx/xlsm/xls
+    bio = io.BytesIO(uploaded_bytes)
 
     if ext in (".xlsx", ".xlsm", ".xltx", ".xltm"):
         engine = "openpyxl"
     elif ext == ".xls":
         engine = "xlrd"
     else:
-        raise ValueError(f"不支援的檔案格式：{ext}")
+        raise ValueError(f"不支援的檔案格式：{ext}（請上傳 .xlsx/.xls/.xlsm/.xlsb）")
 
     xls = pd.ExcelFile(bio, engine=engine)
 
-    # 分頁策略：先找 區(溫層)，找不到再找 棚別
     sheet = None
     for key in ["區(溫層)", "棚別"]:
-        candidate = detect_sheet_for_column(xls, key)
-        # 若 candidate 的確含 key，再用它
+        candidate = detect_sheet_for_column_xls(xls, key)
         try:
             cols = pd.read_excel(xls, sheet_name=candidate, nrows=0).columns
             if key in cols:
@@ -136,24 +182,19 @@ def _safe_sum(s: pd.Series) -> float:
 
 
 def calc_util_by_zone(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    依『區(溫層)』『有效貨位』『已使用貨位』計算大/中/小
-    回傳 DataFrame: 類型/有效貨位/已使用貨位/使用率
-    """
+    """依『區(溫層)』『有效貨位』『已使用貨位』計算大/中/小"""
     if "區(溫層)" not in df.columns:
         return pd.DataFrame()
 
-    # 區碼轉三碼
     z = df["區(溫層)"].astype(str).str.strip()
     z = z.replace({"nan": "", "None": "", "": ""})
     z = z.str.zfill(3)
+
     df2 = df.copy()
     df2["區碼3"] = z
 
-    need_cols = ["有效貨位", "已使用貨位"]
-    for c in need_cols:
+    for c in ["有效貨位", "已使用貨位"]:
         if c not in df2.columns:
-            # 不存在就補 0
             df2[c] = 0
 
     def _row(kind, zones):
@@ -168,7 +209,6 @@ def calc_util_by_zone(df: pd.DataFrame) -> pd.DataFrame:
         _row("中儲位", MID),
         _row("小儲位", SMALL),
     ]
-    # 總計
     eff_total = sum(r["有效貨位"] for r in out)
     used_total = sum(r["已使用貨位"] for r in out)
     out.append({
@@ -197,27 +237,27 @@ def build_output_excel_bytes(
         df_type.to_excel(writer, sheet_name="儲位類型統計", index=False)
 
     out.seek(0)
-    filename = f"{base_name}_18_儲位使用率_輸出.xlsx"
+    filename = f"{base_name}_18_各類儲區使用率_輸出.xlsx"
     return filename, out.getvalue()
 
 
 # =========================
 # UI
 # =========================
-st.set_page_config(page_title="儲位使用率", page_icon="🧊", layout="wide")
+st.set_page_config(page_title="各類儲區使用率", page_icon="🧊", layout="wide")
 
 if HAS_COMMON_UI:
     inject_logistics_theme()
-    set_page("儲位使用率", icon="🧊", subtitle="大/中/小儲位｜使用率｜棚別統計｜Excel匯出")
+    set_page("各類儲區使用率", icon="🧊", subtitle="大/中/小儲區｜使用率｜棚別統計｜Excel匯出")
 else:
-    st.title("🧊 儲位使用率")
+    st.title("🧊 各類儲區使用率")
 
-st.markdown("上傳 Excel 後，自動統計：大/中/小儲位使用率，並依棚別分類統計。")
+st.markdown("上傳 Excel 後，自動統計：大/中/小儲區使用率，並依棚別分類統計。")
 _spacer(8)
 
 if HAS_COMMON_UI:
     card_open("📤 上傳檔案")
-uploaded = st.file_uploader("請上傳 Excel（.xlsx / .xls / .xlsm）", type=["xlsx", "xls", "xlsm"])
+uploaded = st.file_uploader("請上傳 Excel（.xlsx / .xls / .xlsm / .xlsb）", type=["xlsx", "xls", "xlsm", "xlsb"])
 if HAS_COMMON_UI:
     card_close()
 
@@ -236,21 +276,16 @@ except Exception as e:
 
 st.caption(f"使用分頁：{sheet_used}")
 
-# =========================
 # A) 使用率（區(溫層)）
-# =========================
 df_util = calc_util_by_zone(df)
 
-# =========================
 # B) 棚別分類 + 統計
-# =========================
 df_detail = df.copy()
 if "棚別" in df_detail.columns:
     df_detail["儲位類型"] = df_detail["棚別"].apply(classify_zone_from棚別)
 else:
     df_detail["儲位類型"] = "未知"
 
-# 棚別統計
 if "棚別" in df_detail.columns:
     df_shelf = (
         df_detail.groupby(["棚別"], dropna=False)
@@ -261,7 +296,6 @@ if "棚別" in df_detail.columns:
 else:
     df_shelf = pd.DataFrame([{"棚別": "（無棚別欄位）", "筆數": len(df_detail)}])
 
-# 儲位類型統計
 df_type = (
     df_detail.groupby(["儲位類型"], dropna=False)
     .size()
@@ -271,21 +305,17 @@ df_type = (
 
 _spacer(12)
 
-# =========================
-# 顯示區塊：左右兩欄（直向）
-# =========================
 left, right = st.columns([1, 1], gap="large")
 
 with left:
     if HAS_COMMON_UI:
-        card_open("📊 大/中/小儲位使用率")
+        card_open("📊 大/中/小儲區使用率")
     else:
-        st.subheader("📊 大/中/小儲位使用率")
+        st.subheader("📊 大/中/小儲區使用率")
 
     if df_util.empty:
         st.warning("此檔案沒有『區(溫層)』欄位，無法計算使用率。")
     else:
-        # 直向呈現：大、中、小、總計
         util_map = {r["儲位類型"]: r for _, r in df_util.iterrows()}
         for k in ["大儲位", "中儲位", "小儲位", "總計"]:
             r = util_map.get(k, {"有效貨位": 0, "已使用貨位": 0, "使用率(%)": 0})
@@ -301,7 +331,6 @@ with right:
     else:
         st.subheader("🏷️ 儲位類型統計（依棚別分類）")
 
-    # 直向呈現：大型/中型/小型/未知
     type_map = {r["儲位類型"]: int(r["筆數"]) for _, r in df_type.iterrows()}
     for k in ["大型儲位", "中型儲位", "小型儲位", "未知"]:
         st.metric(k, f"{type_map.get(k, 0):,} 筆")
@@ -311,7 +340,6 @@ with right:
 
 _spacer(12)
 
-# 棚別統計（表格）
 if HAS_COMMON_UI:
     card_open("📋 棚別統計（Top 50）")
 st.dataframe(df_shelf.head(50), use_container_width=True, hide_index=True)
@@ -320,7 +348,6 @@ if HAS_COMMON_UI:
 
 _spacer(10)
 
-# 下載
 base = os.path.splitext(uploaded.name)[0]
 download_name, excel_bytes = build_output_excel_bytes(
     base_name=base,
@@ -331,7 +358,7 @@ download_name, excel_bytes = build_output_excel_bytes(
 )
 
 st.download_button(
-    "⬇️ 下載 Excel（儲位使用率＋棚別統計）",
+    "⬇️ 下載 Excel（使用率＋棚別統計）",
     data=excel_bytes,
     file_name=download_name,
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
