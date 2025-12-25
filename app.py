@@ -63,7 +63,6 @@ section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]{
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="outbound-home"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="inbound-home"]){  display:none !important; }
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="gt-kpi-home"]){    display:none !important; }
-
 section[data-testid="stSidebar"] li:has(span[label="出貨課首頁"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(span[label="進貨課首頁"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(span[label="大樹KPI首頁"]){ display:none !important; }
@@ -77,17 +76,14 @@ section[data-testid="stSidebar"] li:has(span[label="大樹KPI首頁"]){ display:
   function hideByHrefAndLabel(){
     const sidebar = document.querySelector('section[data-testid="stSidebar"]');
     if(!sidebar) return;
-
     const links = sidebar.querySelectorAll('a[data-testid="stSidebarNavLink"]');
 
     links.forEach(a => {
       const href = (a.getAttribute("href") || a.href || "");
       const labelSpan = a.querySelector('span[label]');
       const label = labelSpan ? (labelSpan.getAttribute("label") || "") : "";
-
       const hitHref  = HIDE_KEYS.some(k => href.includes(k));
       const hitLabel = HIDE_LABELS.includes(label);
-
       if(hitHref || hitLabel){
         const li = a.closest("li");
         if(li) li.style.display = "none";
@@ -119,34 +115,34 @@ def page_if_exists(path: str, title: str, icon: str, **kwargs):
 
 
 # ✅ 首頁
-home_page = page_if_exists("pages/0_首頁.py", "首頁", "🏠", default=True, url_path="home")
+home_page = page_if_exists("app_pages/0_首頁.py", "首頁", "🏠", default=True, url_path="home")
 
-# ✅ 出貨課
-outbound_home = page_if_exists("pages/7_出貨課首頁.py", "出貨課首頁", "📦", url_path="outbound-home")
-transfer_diff_page = page_if_exists("pages/6_撥貨差異.py", "撥貨差異", "📦", url_path="outbound-transfer-diff")
+# ✅ 出貨課（群組首頁：要隱藏）
+outbound_home = page_if_exists("app_pages/7_出貨課首頁.py", "出貨課首頁", "📦", url_path="outbound-home")
+transfer_diff_page = page_if_exists("app_pages/6_撥貨差異.py", "撥貨差異", "📦", url_path="outbound-transfer-diff")
 
-# ✅ 進貨課
-inbound_home = page_if_exists("pages/8_進貨課首頁.py", "進貨課首頁", "🚚", url_path="inbound-home")
-qc_page = page_if_exists("pages/1_驗收作業效能.py", "驗收作業效能", "✅", url_path="inbound-qc")
-putaway_page = page_if_exists("pages/2_上架作業效能.py", "上架作業效能", "📦", url_path="inbound-putaway")
-pick_page = page_if_exists("pages/3_總揀作業效能.py", "總揀作業效能", "🎯", url_path="inbound-pick")
-slot_page = page_if_exists("pages/4_儲位使用率.py", "儲位使用率", "🧊", url_path="inbound-slot-util")
-diff_page = page_if_exists("pages/5_揀貨差異代庫存.py", "揀貨差異代庫存", "🔎", url_path="inbound-pick-diff")
+# ✅ 進貨課（群組首頁：要隱藏）
+inbound_home = page_if_exists("app_pages/8_進貨課首頁.py", "進貨課首頁", "🚚", url_path="inbound-home")
+qc_page = page_if_exists("app_pages/1_驗收作業效能.py", "驗收作業效能", "✅", url_path="inbound-qc")
+putaway_page = page_if_exists("app_pages/2_上架作業效能.py", "上架作業效能", "📦", url_path="inbound-putaway")
+pick_page = page_if_exists("app_pages/3_總揀作業效能.py", "總揀作業效能", "🎯", url_path="inbound-pick")
+slot_page = page_if_exists("app_pages/4_儲位使用率.py", "儲位使用率", "🧊", url_path="inbound-slot-util")
+diff_page = page_if_exists("app_pages/5_揀貨差異代庫存.py", "揀貨差異代庫存", "🔎", url_path="inbound-pick-diff")
 
-# ✅ 大樹KPI
-gt_kpi_home = page_if_exists("pages/9_大樹KPI首頁.py", "大樹KPI首頁", "📈", url_path="gt-kpi-home")
-gt_inbound_receipt = page_if_exists("pages/10_進貨驗收量.py", "進貨驗收量", "📥", url_path="gt-inbound-receipt")
-gt_ship_should = page_if_exists("pages/11_庫存訂單應出量分析.py", "庫存訂單應出量分析", "📦", url_path="gt-ship-should")
-gt_xdock = page_if_exists("pages/12_越庫訂單分析.py", "越庫訂單分析", "🧾", url_path="gt-xdock")
-gt_ship_actual = page_if_exists("pages/13_庫存訂單實出量分析.py", "庫存訂單實出量分析", "🚚", url_path="gt-ship-actual")
-gt_putaway_daily = page_if_exists("pages/14_每日上架分析.py", "每日上架分析", "📦", url_path="gt-putaway-daily")
-gt_inv_accuracy = page_if_exists("pages/15_庫存盤點正確率.py", "庫存盤點正確率", "🎯", url_path="gt-inv-accuracy")
-gt_store_arrival_abn = page_if_exists("pages/16_門市到貨異常率.py", "門市到貨異常率", "🏪", url_path="gt-store-arrival-abn")
-gt_daily_attendance = page_if_exists("pages/17_每日出勤工時分析.py", "每日出勤工時分析", "🕒", url_path="gt-daily-attendance")
+# ✅ 大樹KPI（群組首頁：要隱藏）
+gt_kpi_home = page_if_exists("app_pages/9_大樹KPI首頁.py", "大樹KPI首頁", "📈", url_path="gt-kpi-home")
+gt_inbound_receipt = page_if_exists("app_pages/10_進貨驗收量.py", "進貨驗收量", "📥", url_path="gt-inbound-receipt")
+gt_ship_should = page_if_exists("app_pages/11_庫存訂單應出量分析.py", "庫存訂單應出量分析", "📦", url_path="gt-ship-should")
+gt_xdock = page_if_exists("app_pages/12_越庫訂單分析.py", "越庫訂單分析", "🧾", url_path="gt-xdock")
+gt_ship_actual = page_if_exists("app_pages/13_庫存訂單實出量分析.py", "庫存訂單實出量分析", "🚚", url_path="gt-ship-actual")
+gt_putaway_daily = page_if_exists("app_pages/14_每日上架分析.py", "每日上架分析", "📦", url_path="gt-putaway-daily")
+gt_inv_accuracy = page_if_exists("app_pages/15_庫存盤點正確率.py", "庫存盤點正確率", "🎯", url_path="gt-inv-accuracy")
+gt_store_arrival_abn = page_if_exists("app_pages/16_門市到貨異常率.py", "門市到貨異常率", "🏪", url_path="gt-store-arrival-abn")
+gt_daily_attendance = page_if_exists("app_pages/17_每日出勤工時分析.py", "每日出勤工時分析", "🕒", url_path="gt-daily-attendance")
 
-# ✅ 18_儲位使用率（KPI入口用）
+# ✅ 18_儲位使用率（KPI 入口）
 slot_util_page = page_if_exists(
-    "pages/18_儲位使用率.py",
+    "app_pages/18_儲位使用率.py",
     "儲位使用率(18)",
     "🧊",
     url_path="gt-slot-util-18"
