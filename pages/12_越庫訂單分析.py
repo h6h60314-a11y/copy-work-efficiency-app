@@ -215,7 +215,7 @@ def main():
             st.metric("越庫＋成箱｜應作量總和", _fmt_num(stats["越庫_成箱_應作量"]))
 
         with c2:
-            st.markdown("#### 越庫訂單筆數（越庫/單號不重複）")
+            st.markdown("#### 越庫訂單筆數")
             st.metric("越庫訂單筆數｜訂單筆數", _fmt_num(stats["訂單筆數"]))
 
         with c3:
