@@ -11,7 +11,7 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 # ----------------------------
 # Page config / Theme
 # ----------------------------
-st.set_page_config(page_title="出貨訂單應出量分析", page_icon="📦", layout="wide")
+st.set_page_config(page_title="庫存訂單應出量分析", page_icon="📦", layout="wide")
 inject_logistics_theme()
 
 
@@ -172,7 +172,7 @@ def _download_xlsx(df: pd.DataFrame) -> bytes:
 # UI
 # ----------------------------
 set_page(
-    "出貨訂單應出量分析",
+    "庫存訂單應出量分析",
     icon="📦",
     subtitle="自動讀檔｜計算零散/成箱應出｜輸出處理後明細",
 )
