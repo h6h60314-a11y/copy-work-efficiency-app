@@ -10,6 +10,7 @@ inject_logistics_theme()
 # ✅ 允許從 KPI 首頁導頁的模組清單（安全白名單）
 ALLOW_PAGES = {
     "pages/10_進貨驗收量.py",
+    "pages/11_出貨訂單應出量分析.py",  # ✅ 新增
     # 之後新增 KPI 模組就往下加：
     # "pages/9_大樹KPI_總覽.py",
 }
@@ -118,7 +119,7 @@ def _nav_item(icon: str, title: str, page_path: str, desc: str):
             f'    <a class="kpi-link" href="?page={encoded}" target="_self">{title}：</a>'
             f'    <span class="kpi-desc">{desc}</span>'
             f'  </div>'
-            f'</div>'
+            f"</div>"
         ),
         unsafe_allow_html=True,
     )
@@ -140,6 +141,13 @@ def main():
         "進貨驗收量",
         "pages/10_進貨驗收量.py",
         "GPO / GXPO：供應商、採購單、品號、驗收數量合計",
+    )
+
+    _nav_item(
+        "📦",
+        "出貨訂單應出量分析",
+        "pages/11_出貨訂單應出量分析.py",
+        "自動讀檔｜計算零散/成箱應出｜統計儲位/品項｜可下載處理後明細",
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
