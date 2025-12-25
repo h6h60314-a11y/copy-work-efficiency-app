@@ -138,7 +138,7 @@ else:
 st.markdown("上傳出勤檔案（需含「總明細」分頁）並選擇日期")
 _spacer(10)
 
-# ✅ 直向：出勤Excel → 計算日期（且無橫線）
+# ✅ 直向：出勤Excel → 計算日期
 if HAS_COMMON_UI:
     card_open("📤 出勤 Excel")
 uploaded = st.file_uploader("上傳出勤 Excel（需含「總明細」分頁）", type=["xlsx", "xls", "xlsm"])
@@ -202,6 +202,7 @@ day = day[day["工時"] > 0].copy()
 day["姓名_去尾碼"] = day["員工姓名"].str.replace(NAME_SUFFIX_STRIP_REGEX, "", regex=True).str.strip()
 total_headcount = int(day["姓名_去尾碼"].nunique())
 
+# 人次
 role_counts = (
     day.groupby(role_col)["姓名_去尾碼"]
        .nunique()
@@ -210,6 +211,7 @@ role_counts = (
        .rename(columns={role_col: "職務", "姓名_去尾碼": "人次"})
 )
 
+# 工時（固定順序+總計）
 hours_summary = (
     day.groupby(role_col)["工時"].sum()
        .reindex(ROLE_ORDER, fill_value=0)
@@ -222,34 +224,54 @@ hours_summary = pd.concat(
 )
 hours_summary["工時"] = hours_summary["工時"].round(2)
 
-_spacer(8)
+# 轉 dict 方便直向列出
+counts_map = {r["職務"]: int(r["人次"]) for _, r in role_counts.iterrows()}
+hours_map = {r["職務"]: float(r["工時"]) for _, r in hours_summary.iterrows()}
 
-# 人次
-if HAS_COMMON_UI:
-    card_open("👥 當日人次總覽")
-else:
-    st.subheader("👥 當日人次總覽")
+_spacer(10)
 
-st.caption(TOP_NOTE)
-st.metric("總人次（去尾碼去重）", f"{total_headcount:,}")
+# =========================
+# ✅ 左右兩欄：直向清單
+# =========================
+left, right = st.columns([1, 1], gap="large")
 
-cols = st.columns(3)
-for i, r in enumerate(role_counts.itertuples(index=False)):
-    cols[i % 3].metric(r.職務, int(r.人次))
+with left:
+    if HAS_COMMON_UI:
+        card_open("👥 當日人次總覽")
+    else:
+        st.subheader("👥 當日人次總覽")
 
-if HAS_COMMON_UI:
-    card_close()
+    st.caption(TOP_NOTE)
+
+    # ✅ 直向：總人次 → 角色人次（固定順序）
+    st.metric("總人次（去尾碼去重）", f"{total_headcount:,}")
+    _spacer(6)
+    for role in ROLE_ORDER:
+        st.metric(role, f"{counts_map.get(role, 0):,}")
+
+    if HAS_COMMON_UI:
+        card_close()
+
+with right:
+    if HAS_COMMON_UI:
+        card_open("🧾 各職務總上班時間（小時）")
+    else:
+        st.subheader("🧾 各職務總上班時間（小時）")
+
+    # ✅ 直向：幹部 → ... → 支援外倉 → 總計
+    for role in ROLE_ORDER:
+        st.metric(role, f"{hours_map.get(role, 0.0):,.2f}")
+    _spacer(6)
+    st.metric("總計", f"{hours_map.get('總計', 0.0):,.2f}")
+
+    if HAS_COMMON_UI:
+        card_close()
 
 _spacer(14)
 
-# 工時
-if HAS_COMMON_UI:
-    card_open("🧾 各職務總上班時間（小時）")
-else:
-    st.subheader("🧾 各職務總上班時間（小時）")
-
-st.dataframe(hours_summary, use_container_width=True, hide_index=True)
-
+# =========================
+# 下載輸出
+# =========================
 base = os.path.splitext(uploaded.name)[0]
 out_name = f"{base}_{target_date}_工時與人次.xlsx"
 
@@ -268,6 +290,3 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=True,
 )
-
-if HAS_COMMON_UI:
-    card_close()
