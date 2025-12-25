@@ -62,6 +62,7 @@ def robust_read_upload(uploaded) -> pd.DataFrame:
     if name.endswith((".html", ".htm")):
         return _read_as_html(_decode_text(raw_bytes))
 
+    # fallback
     text = _decode_text(raw_bytes)
     low = text.lower()
     if "<html" in low or "<table" in low:
@@ -105,14 +106,21 @@ def compute_crossdock(df1: pd.DataFrame, df2: pd.DataFrame):
     close_map = df2.set_index("SONO")["CLOSE_USER"]
     df1["比對備註"] = df1["單號"].map(close_map).fillna("無對應").astype(str)
 
+    # 剔除 FT03~FT11
     mask_ex = df1["比對備註"].str.contains(PATTERN_EXCLUDE, na=False)
     df1 = df1[~mask_ex].copy()
 
-    df1["單號"] = df1["單號"].astype(str).str.replace("B", "", regex=False).str.replace("C", "", regex=False)
+    # B/C 清理
+    df1["單號"] = (
+        df1["單號"].astype(str)
+        .str.replace("B", "", regex=False)
+        .str.replace("C", "", regex=False)
+    )
 
     df1["應作量"] = pd.to_numeric(df1["應作量"], errors="coerce").fillna(0)
     df1["實作量"] = pd.to_numeric(df1["實作量"], errors="coerce").fillna(0)
 
+    # 只抓越庫
     cond = df1["單據類型"].astype(str).str.strip().eq("越庫")
     dfx = df1.loc[cond].copy()
 
@@ -125,9 +133,9 @@ def compute_crossdock(df1: pd.DataFrame, df2: pd.DataFrame):
         "越庫_零散_實作量": float(dfx.loc[scatter, "實作量"].sum()),
         "越庫_成箱_實作量": float(dfx.loc[box, "實作量"].sum()),
         "訂單筆數": int(dfx["單號"].nunique()),
-        "越庫明細筆數": int(len(dfx)),
     }
 
+    # 把「比對備註」插到第18欄（index 17）
     cols = list(df1.columns)
     if "比對備註" in cols:
         cols.remove("比對備註")
@@ -192,32 +200,30 @@ def main():
         except Exception as e:
             err = e
 
-    # 2) 結果區：改成 3 區塊
+    # 2) 結果區：三大區塊（直向）
     card_open("📊 計算結果")
     if err:
         st.error(f"讀取或計算失敗：{err}")
     elif not (f1 and f2):
         st.warning("請先上傳兩份檔案，才會顯示計算結果與明細。")
     else:
-        c1, c2, c3 = st.columns([1, 1, 1], gap="large")
+        # ① 越庫訂單量
+        st.markdown("### 1｜越庫訂單量")
+        st.metric("越庫＋零散｜應作量總和", _fmt_num(stats["越庫_零散_應作量"]))
+        st.metric("越庫＋成箱｜應作量總和", _fmt_num(stats["越庫_成箱_應作量"]))
 
-        # A. 越庫訂單量
-        with c1:
-            st.markdown("### 越庫訂單量")
-            st.metric("越庫＋零散｜應作量總和", _fmt_num(stats["越庫_零散_應作量"]))
-            st.metric("越庫＋成箱｜應作量總和", _fmt_num(stats["越庫_成箱_應作量"]))
-            st.metric("訂單筆數（越庫/單號不重複）", _fmt_num(stats["訂單筆數"]))
+        st.markdown("---")
 
-        # B. 越庫明細筆數
-        with c2:
-            st.markdown("### 越庫明細筆數")
-            st.metric("越庫明細筆數（剔除後）", _fmt_num(stats["越庫明細筆數"]))
+        # ② 越庫訂單筆數（越庫/單號不重複）
+        st.markdown("### 2｜越庫訂單筆數（越庫/單號不重複）")
+        st.metric("越庫訂單筆數｜訂單筆數", _fmt_num(stats["訂單筆數"]))
 
-        # C. 越庫實作量
-        with c3:
-            st.markdown("### 越庫實作量")
-            st.metric("越庫＋零散｜實作量總和", _fmt_num(stats["越庫_零散_實作量"]))
-            st.metric("越庫＋成箱｜實作量總和", _fmt_num(stats["越庫_成箱_實作量"]))
+        st.markdown("---")
+
+        # ③ 越庫實作量
+        st.markdown("### 3｜越庫實作量")
+        st.metric("越庫＋零散｜實作量總和", _fmt_num(stats["越庫_零散_實作量"]))
+        st.metric("越庫＋成箱｜實作量總和", _fmt_num(stats["越庫_成箱_實作量"]))
 
     card_close()
 
