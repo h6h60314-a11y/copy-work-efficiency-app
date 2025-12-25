@@ -15,6 +15,7 @@ ALLOW_PAGES = {
     "pages/13_庫存訂單實出量分析.py",
     "pages/14_每日上架分析.py",
     "pages/15_庫存盤點正確率.py",
+    "pages/16_門市到貨異常率.py",
 }
 
 
@@ -178,6 +179,13 @@ def main():
     "pages/15_庫存盤點正確率.py",
     "統計：商品號去重、儲位筆數、差異≠0筆數、正確率、差異正負總和",
     )
+
+    _nav_item(
+    "🏪",
+    "門市到貨異常率",
+    "pages/16_門市到貨異常率.py",
+    "依箱號解析年月日｜排除供應商｜統計多貨/短少/凹破漏｜匯出處理後明細",
+)
 
     st.markdown("</div>", unsafe_allow_html=True)
     card_close()
