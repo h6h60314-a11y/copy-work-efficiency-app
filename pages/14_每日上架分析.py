@@ -31,14 +31,14 @@ def _fmt_qty(x) -> str:
 
 
 def _is_fake_xls_provider(raw: bytes) -> bool:
-    # 常見「假 xls」會以 PROVIDER 開頭（實際是 HTML/文字表格）
-    head = raw[:64].upper()
+    head = raw[:128].upper()
     return b"PROVIDER" in head
 
 
 def _read_fake_xls_text_or_html(raw: bytes) -> pd.DataFrame:
-    # 先嘗試 HTML table
     text = raw.decode("utf-8", errors="ignore")
+
+    # 先嘗試 HTML table
     try:
         tables = pd.read_html(text)
         if tables:
@@ -46,8 +46,7 @@ def _read_fake_xls_text_or_html(raw: bytes) -> pd.DataFrame:
     except Exception:
         pass
 
-    # 再嘗試用分隔符猜測（tab / comma）
-    # 很多系統匯出是 tab-separated
+    # 再嘗試常見分隔符（tab/csv）
     for sep in ["\t", ",", ";", "|"]:
         try:
             df = pd.read_csv(BytesIO(raw), sep=sep, encoding="utf-8", engine="python")
@@ -63,7 +62,6 @@ def _pick_sheet_name(xls: pd.ExcelFile) -> str:
     preferred = "前一日上架清單"
     if preferred in xls.sheet_names:
         return preferred
-    # 有些檔名可能多了空白
     for s in xls.sheet_names:
         if str(s).strip() == preferred:
             return s
@@ -71,7 +69,6 @@ def _pick_sheet_name(xls: pd.ExcelFile) -> str:
 
 
 def _detect_header(df_head: pd.DataFrame) -> bool:
-    """判斷第一列是否像表頭（含 '上架儲位' 或 '上架數量'）"""
     if df_head is None or df_head.empty:
         return False
     first_row = df_head.iloc[0].astype("string").fillna("")
@@ -86,16 +83,13 @@ def _read_uploaded_table(uploaded) -> tuple[pd.DataFrame, dict]:
 
     info = {"engine": "", "sheet": "", "note": ""}
 
-    # ---- Excel family ----
     if ext in {"xlsx", "xlsm", "xltx", "xltm"}:
         engine = "openpyxl"
         info["engine"] = engine
-        bio = BytesIO(raw)
-        xls = pd.ExcelFile(bio, engine=engine)
+        xls = pd.ExcelFile(BytesIO(raw), engine=engine)
         sheet = _pick_sheet_name(xls)
         info["sheet"] = sheet
 
-        # 先讀頭幾列判斷表頭
         df_head = pd.read_excel(BytesIO(raw), sheet_name=sheet, engine=engine, nrows=5, header=None)
         has_header = _detect_header(df_head)
 
@@ -116,14 +110,12 @@ def _read_uploaded_table(uploaded) -> tuple[pd.DataFrame, dict]:
         return df, info
 
     if ext == "xls":
-        # 先判斷是否為假 xls
         if _is_fake_xls_provider(raw):
             info["engine"] = "text/html"
             info["note"] = "偵測到『假 xls』（PROVIDER）→ 已改用文字/HTML 解析"
             df = _read_fake_xls_text_or_html(raw)
             return df, info
 
-        # 真 xls 用 xlrd
         engine = "xlrd"
         info["engine"] = engine
         xls = pd.ExcelFile(BytesIO(raw), engine=engine)
@@ -140,9 +132,8 @@ def _read_uploaded_table(uploaded) -> tuple[pd.DataFrame, dict]:
 
 
 def _extract_loc_qty(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
-    # 1) 優先用欄名（若有表頭）
-    cols = [str(c).strip() for c in df.columns]
-    df.columns = cols
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
 
     if "上架儲位" in df.columns:
         loc = df["上架儲位"].astype("string")
@@ -165,16 +156,11 @@ def _compute(loc: pd.Series, qty: pd.Series) -> dict:
     pattern = "|".join(re.escape(x) for x in EXCLUDE_PATTERNS)
     mask_exclude = loc.fillna("").str.contains(pattern, na=False)
 
-    # 只計算「非排除」的筆數/數量
     keep = ~mask_exclude
-    count_rows = int(keep.sum())
-    sum_qty = float(qty.loc[keep].sum())
-    exclude_count = int(mask_exclude.sum())
-
     return {
-        "上架筆數": count_rows,
-        "上架總數量": sum_qty,
-        "排除筆數": exclude_count,
+        "上架筆數": int(keep.sum()),
+        "上架總數量": float(qty.loc[keep].sum()),
+        "排除筆數": int(mask_exclude.sum()),
         "mask_exclude": mask_exclude,
     }
 
@@ -196,8 +182,61 @@ def main():
         subtitle="前一日上架清單｜支援 XLSB｜排除指定儲位代碼｜統計上架筆數與上架總量",
     )
 
-    card_open("📌 上傳檔案（XLSX / XLSM / XLSB / XLS）")
+    # KPI 區塊樣式（框框更順眼）
+    st.markdown(
+        r"""
+<style>
+.kpi-wrap{
+  background: rgba(255,255,255,.86);
+  border: 1px solid rgba(15,23,42,.10);
+  border-radius: 16px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 32px rgba(15,23,42,.06);
+  margin-top: 10px;
+}
+.kpi-title{
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: .2px;
+  color: rgba(15,23,42,.92);
+  margin: 0 0 10px 0;
+}
+.kpi-grid{
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+.metric-box{
+  background: rgba(248,250,252,.92);
+  border: 1px solid rgba(15,23,42,.10);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+.metric-label{
+  font-size: 13.5px;
+  font-weight: 800;
+  color: rgba(15,23,42,.72);
+  letter-spacing: .25px;
+  margin-bottom: 4px;
+}
+.metric-value{
+  font-size: 28px;
+  font-weight: 950;
+  line-height: 1.15;
+  color: rgba(15,23,42,.94);
+}
+.kpi-sub{
+  margin-top: 8px;
+  font-size: 13px;
+  color: rgba(15,23,42,.62);
+  font-weight: 650;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
 
+    card_open("📌 上傳檔案（XLSX / XLSM / XLSB / XLS）")
     st.caption("讀取工作表：優先「前一日上架清單」，沒有則取第一張。")
     st.caption("欄位規則：B 欄＝上架儲位、C 欄＝上架數量（若有表頭會優先用欄名）。")
     st.caption("排除條件：上架儲位包含 " + " / ".join(EXCLUDE_PATTERNS))
@@ -231,7 +270,7 @@ def main():
     if info.get("note"):
         st.info(info["note"])
 
-    # --- 計算 ---
+    # 計算
     try:
         loc, qty = _extract_loc_qty(df)
         result = _compute(loc, qty)
@@ -239,32 +278,28 @@ def main():
         st.error(f"計算失敗：{e}")
         st.stop()
 
-    # ✅ 上架分析：不要大框框，直向呈現且更順眼
-    st.markdown("### 上架分析")
+    # ✅ 框框呈現：上架分析 / 上架筆數 / 上架總數量
     st.markdown(
-        """
-<style>
-div[data-testid="stMetric"]{ padding: 2px 0 !important; }
-div[data-testid="stMetric"] label{
-  font-size: 14px !important;
-  font-weight: 750 !important;
-  color: rgba(15,23,42,.76) !important;
-}
-div[data-testid="stMetricValue"]{
-  font-size: 26px !important;
-  font-weight: 900 !important;
-  letter-spacing: .2px !important;
-}
-</style>
+        f"""
+<div class="kpi-wrap">
+  <div class="kpi-title">上架分析</div>
+  <div class="kpi-grid">
+    <div class="metric-box">
+      <div class="metric-label">上架筆數</div>
+      <div class="metric-value">{_fmt_int(result["上架筆數"])}</div>
+    </div>
+    <div class="metric-box">
+      <div class="metric-label">上架總數量</div>
+      <div class="metric-value">{_fmt_qty(result["上架總數量"])}</div>
+    </div>
+  </div>
+  <div class="kpi-sub">排除筆數：{_fmt_int(result["排除筆數"])}（儲位命中排除代碼）</div>
+</div>
 """,
         unsafe_allow_html=True,
     )
 
-    st.metric("上架筆數", _fmt_int(result["上架筆數"]))
-    st.metric("上架總數量", _fmt_qty(result["上架總數量"]))
-    st.caption(f"排除筆數：{_fmt_int(result['排除筆數'])}（儲位命中排除代碼）")
-
-    # --- 匯出（剔除後）---
+    # 匯出（剔除後）
     df_keep = df.loc[~result["mask_exclude"]].copy()
     xlsx_bytes = _to_xlsx_bytes(df_keep)
     st.download_button(
@@ -275,7 +310,7 @@ div[data-testid="stMetricValue"]{
         use_container_width=False,
     )
 
-    # --- 預覽 ---
+    # 預覽
     st.markdown("### 明細預覽（前 200 列）")
     st.dataframe(df.head(200), use_container_width=True, height=420)
 
