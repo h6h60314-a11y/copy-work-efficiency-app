@@ -16,6 +16,7 @@ ALLOW_PAGES = {
     "pages/14_每日上架分析.py",
     "pages/15_庫存盤點正確率.py",
     "pages/16_門市到貨異常率.py",
+    "pages/17_每日出勤工時分析.py",
 }
 
 
@@ -185,7 +186,14 @@ def main():
     "門市到貨異常率",
     "pages/16_門市到貨異常率.py",
     "依箱號解析年月日｜排除供應商｜統計多貨/短少/凹破漏｜匯出處理後明細",
-)
+    )
+
+    _nav_item(
+        "🕒",
+        "每日出勤工時分析",
+        "pages/17_每日出勤工時分析.py",
+        "當日總人次（去尾碼去重）｜各職務人次｜各職務工時總計｜Excel下載",
+    )
 
     st.markdown("</div>", unsafe_allow_html=True)
     card_close()
