@@ -19,11 +19,18 @@ def _fmt_int(x) -> str:
 
 def _fmt_num(x) -> str:
     try:
-        return f"{float(x):,.0f}"
+        v = float(x)
+        # 保留正負號，千分位
+        if abs(v - int(v)) < 1e-9:
+            return f"{int(v):,}"
+        return f"{v:,.2f}"
     except Exception:
         return "0"
 
 
+# ----------------------------
+# robust excel readers
+# ----------------------------
 def _is_fake_xls_provider(raw: bytes) -> bool:
     return b"PROVIDER" in raw[:256].upper()
 
@@ -121,7 +128,6 @@ def _derive_year_mmdd_from_box(df: pd.DataFrame, col_box: str) -> pd.DataFrame:
     df["年"] = s.str[:4]
     df["日期"] = s.str[4:8]
 
-    # 僅保留 4 碼數字格式
     df.loc[~df["年"].str.fullmatch(r"\d{4}", na=False), "年"] = ""
     df.loc[~df["日期"].str.fullmatch(r"\d{4}", na=False), "日期"] = ""
     return df
@@ -135,22 +141,28 @@ def _to_num(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     return df
 
 
+# ----------------------------
+# business logic
+# ----------------------------
 def _compute_metrics(df: pd.DataFrame, col_box: str, col_reason: str) -> dict:
+    # 箱號筆數（含重複）：列數（箱號不為空）
     count_box_rows = int(df[col_box].dropna().shape[0])
 
+    # 多貨 / 短少：差異加總（差異 = 實到 - 應到）
     sum_excess = float(df.loc[df[col_reason] == "到貨多貨", "差異"].sum())
     sum_shortage = float(df.loc[df[col_reason] == "到貨短少", "差異"].sum())
 
+    # 凹損/破損/漏液：優先用「數量」加總；沒有則退回用 abs(差異) 加總
     if "數量" in df.columns:
         sum_defect = float(
             df.loc[df[col_reason].isin(["到貨凹損", "到貨破損", "到貨漏液"]), "數量"].sum()
         )
     else:
-        # 沒有「數量」欄就用差異絕對值做替代（避免報錯）
         sum_defect = float(
             df.loc[df[col_reason].isin(["到貨凹損", "到貨破損", "到貨漏液"]), "差異"].abs().sum()
         )
 
+    # 你指定的 4 個 KPI
     return {
         "箱號總筆數": count_box_rows,
         "到貨多貨總差異": sum_excess,
@@ -167,65 +179,12 @@ def _download_xlsx_bytes(df: pd.DataFrame) -> bytes:
     return bio.getvalue()
 
 
-def _render_kpi(metrics: dict):
-    # ✅ 用 components.html，避免被 Streamlit 當成 code block
+def _render_kpi_4cols(metrics: dict):
+    # ✅ 用 components.html，避免 HTML 被當成文字印出
     kpi_html = f"""
-<style>
-.kpi-wrap{{
-  width: 100%;
-  background: rgba(255,255,255,.86);
-  border: 1px solid rgba(15,23,42,.10);
-  border-radius: 14px;
-  padding: 14px 14px 12px 14px;
-  box-shadow: 0 10px 26px rgba(15,23,42,.06);
-  margin: 6px 0 8px 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-               "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
-}}
-.kpi-title{{
-  font-size: 18px;
-  font-weight: 950;
-  color: rgba(15,23,42,.92);
-  margin: 0 0 10px 0;
-}}
-.kpi-grid{{
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}}
-.metric-box{{
-  background: rgba(248,250,252,.92);
-  border: 1px solid rgba(15,23,42,.10);
-  border-radius: 12px;
-  padding: 10px 12px;
-}}
-.metric-label{{
-  font-size: 12.5px;
-  font-weight: 850;
-  color: rgba(15,23,42,.70);
-  margin-bottom: 4px;
-}}
-.metric-value{{
-  font-size: 20px;
-  font-weight: 950;
-  line-height: 1.12;
-  color: rgba(15,23,42,.94);
-}}
-.metric-span-3{{ grid-column: 1 / span 3; }}
-.kpi-note{{
-  margin-top: 8px;
-  font-size: 12.5px;
-  color: rgba(15,23,42,.62);
-  font-weight: 650;
-}}
-@media (max-width: 900px){{
-  .kpi-grid{{ grid-template-columns: 1fr; }}
-  .metric-span-3{{ grid-column: auto; }}
-}}
-</style>
-
 <div class="kpi-wrap">
   <div class="kpi-title">門市到貨異常統計</div>
+
   <div class="kpi-grid">
     <div class="metric-box">
       <div class="metric-label">箱號總筆數（含重複）</div>
@@ -242,7 +201,7 @@ def _render_kpi(metrics: dict):
       <div class="metric-value">{_fmt_num(metrics["到貨短少總差異"])}</div>
     </div>
 
-    <div class="metric-box metric-span-3">
+    <div class="metric-box">
       <div class="metric-label">到貨凹損 / 破損 / 漏液總數量（數量加總）</div>
       <div class="metric-value">{_fmt_num(metrics["到貨凹損破損漏液總數量"])}</div>
     </div>
@@ -250,9 +209,75 @@ def _render_kpi(metrics: dict):
 
   <div class="kpi-note">已自動計算：差異 = 實到數量 - 應到數量（並排除「異常原因」含「供應商」）。</div>
 </div>
+
+<style>
+  :root {{
+    --text: rgba(15,23,42,.92);
+    --muted: rgba(15,23,42,.70);
+    --border: rgba(15,23,42,.10);
+    --bg: rgba(255,255,255,.86);
+    --card: rgba(248,250,252,.92);
+  }}
+  body {{
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+                 "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+    color: var(--text);
+  }}
+  .kpi-wrap {{
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 14px 12px 14px;
+    box-shadow: 0 10px 26px rgba(15,23,42,.06);
+    box-sizing: border-box;
+  }}
+  .kpi-title {{
+    font-size: 18px;
+    font-weight: 950;
+    margin: 0 0 10px 0;
+  }}
+  .kpi-grid {{
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr)); /* ✅ 4 欄 */
+    gap: 10px;
+  }}
+  .metric-box {{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+    box-sizing: border-box;
+  }}
+  .metric-label {{
+    font-size: 12.5px;
+    font-weight: 850;
+    color: var(--muted);
+    margin-bottom: 4px;
+    line-height: 1.25;
+  }}
+  .metric-value {{
+    font-size: 20px;
+    font-weight: 950;
+    line-height: 1.12;
+  }}
+  .kpi-note {{
+    margin-top: 8px;
+    font-size: 12.5px;
+    color: rgba(15,23,42,.62);
+    font-weight: 650;
+  }}
+  @media (max-width: 1100px) {{
+    .kpi-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+  }}
+  @media (max-width: 700px) {{
+    .kpi-grid {{ grid-template-columns: 1fr; }}
+  }}
+</style>
 """
-    # height 依內容固定就好（避免出現捲軸）
-    components.html(kpi_html, height=240, scrolling=False)
+    # 這個高度足夠（4 卡 + note）
+    components.html(kpi_html, height=230, scrolling=False)
 
 
 def main():
@@ -260,6 +285,9 @@ def main():
     inject_logistics_theme()
     set_page("門市到貨異常率", icon="🏪", subtitle="上傳異常彙整｜依箱號年/日期篩選｜統計多貨/短少/凹損破損漏液")
 
+    # ----------------------------
+    # upload
+    # ----------------------------
     card_open("📌 上傳檔案（XLSX / XLSM / XLSB / XLS）")
     st.caption("工作表：優先「明細」，沒有則取第一張。")
     st.caption("必要欄位：箱號、異常原因、應到數量、實到數量（凹損/破損/漏液建議有「數量」欄）")
@@ -289,15 +317,17 @@ def main():
     if info.get("note"):
         st.info(info["note"])
 
+    # ----------------------------
+    # prepare / filter
+    # ----------------------------
     col_box = "箱號"
     col_reason = "異常原因"
     _require_cols(df, [col_box, col_reason])
 
-    # 解析年/日期（由箱號字串）
     df = _derive_year_mmdd_from_box(df, col_box)
 
-    years = sorted([y for y in df["年"].dropna().unique().tolist() if str(y).strip() != ""])
-    dates = sorted([d for d in df["日期"].dropna().unique().tolist() if str(d).strip() != ""])
+    years = sorted([y for y in df["年"].dropna().unique().tolist() if str(y).strip()])
+    dates = sorted([d for d in df["日期"].dropna().unique().tolist() if str(d).strip()])
 
     left, right = st.columns(2, gap="large")
     with left:
@@ -308,7 +338,7 @@ def main():
     if year_sel and date_sel:
         df = df[(df["年"] == str(year_sel)) & (df["日期"] == str(date_sel))].copy()
 
-    # 排除供應商原因
+    # 排除供應商原因（你不想顯示剔除筆數，但仍保留規則）
     df = df[~df[col_reason].astype(str).str.contains("供應商", na=False)].copy()
 
     # 轉數值 + 計算差異
@@ -316,12 +346,12 @@ def main():
     _require_cols(df, ["應到數量", "實到數量"])
     df["差異"] = df["實到數量"] - df["應到數量"]
 
+    # ----------------------------
+    # KPI + export + preview
+    # ----------------------------
     metrics = _compute_metrics(df, col_box, col_reason)
+    _render_kpi_4cols(metrics)
 
-    # ✅ KPI 顯示（不會再出現原始 HTML）
-    _render_kpi(metrics)
-
-    # 匯出
     out_bytes = _download_xlsx_bytes(df)
     st.download_button(
         "⬇️ 匯出（處理後）Excel",
