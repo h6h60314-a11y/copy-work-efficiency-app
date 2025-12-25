@@ -10,9 +10,8 @@ inject_logistics_theme()
 # ✅ 允許從 KPI 首頁導頁的模組清單（安全白名單）
 ALLOW_PAGES = {
     "pages/10_進貨驗收量.py",
-    "pages/11_出貨訂單應出量分析.py",  # ✅ 新增
-    # 之後新增 KPI 模組就往下加：
-    # "pages/9_大樹KPI_總覽.py",
+    "pages/11_出貨應出量分析.py",
+    "pages/12_越庫訂單分析.py",
 }
 
 
@@ -119,7 +118,7 @@ def _nav_item(icon: str, title: str, page_path: str, desc: str):
             f'    <a class="kpi-link" href="?page={encoded}" target="_self">{title}：</a>'
             f'    <span class="kpi-desc">{desc}</span>'
             f'  </div>'
-            f"</div>"
+            f'</div>'
         ),
         unsafe_allow_html=True,
     )
@@ -135,7 +134,6 @@ def main():
 
     st.markdown('<div class="kpi-list">', unsafe_allow_html=True)
 
-    # ✅ 目前已上線模組
     _nav_item(
         "📥",
         "進貨驗收量",
@@ -146,8 +144,15 @@ def main():
     _nav_item(
         "📦",
         "出貨訂單應出量分析",
-        "pages/11_出貨訂單應出量分析.py",
-        "自動讀檔｜計算零散/成箱應出｜統計儲位/品項｜可下載處理後明細",
+        "pages/11_出貨應出量分析.py",
+        "庫存出貨訂單量、總揀（儲位數/品項數），明細預覽與匯出",
+    )
+
+    _nav_item(
+        "🧾",
+        "越庫訂單分析",
+        "pages/12_越庫訂單分析.py",
+        "兩表比對 CLOSE_USER｜排除 FT03~FT11｜統計越庫應作/實作｜輸出結果",
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
