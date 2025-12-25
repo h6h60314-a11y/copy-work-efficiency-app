@@ -6,4 +6,6 @@ xlrd>=2.0.1
 supabase>=2.6.0
 xlsxwriter
 pyxlsb
+lxml
+beautifulsoup4
 
