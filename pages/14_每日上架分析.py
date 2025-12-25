@@ -9,8 +9,6 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 # ================== 固定規則 ==================
 EXCLUDE_PATTERNS = ["PD99", "QC99", "GRP", "CGS", "999", "GX010", "JCPL", "GREAT0001X"]
-
-# Excel 欄位位置（0-based）
 COL_LOC_IDX = 1  # B 欄 → 上架儲位
 COL_QTY_IDX = 2  # C 欄 → 上架數量
 # =============================================
@@ -31,14 +29,12 @@ def _fmt_qty(x) -> str:
 
 
 def _is_fake_xls_provider(raw: bytes) -> bool:
-    head = raw[:128].upper()
-    return b"PROVIDER" in head
+    return b"PROVIDER" in raw[:256].upper()
 
 
 def _read_fake_xls_text_or_html(raw: bytes) -> pd.DataFrame:
     text = raw.decode("utf-8", errors="ignore")
 
-    # 先嘗試 HTML table
     try:
         tables = pd.read_html(text)
         if tables:
@@ -46,7 +42,6 @@ def _read_fake_xls_text_or_html(raw: bytes) -> pd.DataFrame:
     except Exception:
         pass
 
-    # 再嘗試常見分隔符（tab/csv）
     for sep in ["\t", ",", ";", "|"]:
         try:
             df = pd.read_csv(BytesIO(raw), sep=sep, encoding="utf-8", engine="python")
@@ -62,9 +57,6 @@ def _pick_sheet_name(xls: pd.ExcelFile) -> str:
     preferred = "前一日上架清單"
     if preferred in xls.sheet_names:
         return preferred
-    for s in xls.sheet_names:
-        if str(s).strip() == preferred:
-            return s
     return xls.sheet_names[0]
 
 
@@ -72,8 +64,8 @@ def _detect_header(df_head: pd.DataFrame) -> bool:
     if df_head is None or df_head.empty:
         return False
     first_row = df_head.iloc[0].astype("string").fillna("")
-    tokens = "".join(first_row.tolist())
-    return ("上架儲位" in tokens) or ("上架數量" in tokens)
+    s = "".join(first_row.tolist())
+    return ("上架儲位" in s) or ("上架數量" in s)
 
 
 def _read_uploaded_table(uploaded) -> tuple[pd.DataFrame, dict]:
@@ -90,8 +82,8 @@ def _read_uploaded_table(uploaded) -> tuple[pd.DataFrame, dict]:
         sheet = _pick_sheet_name(xls)
         info["sheet"] = sheet
 
-        df_head = pd.read_excel(BytesIO(raw), sheet_name=sheet, engine=engine, nrows=5, header=None)
-        has_header = _detect_header(df_head)
+        head = pd.read_excel(BytesIO(raw), sheet_name=sheet, engine=engine, nrows=5, header=None)
+        has_header = _detect_header(head)
 
         df = pd.read_excel(BytesIO(raw), sheet_name=sheet, engine=engine, header=0 if has_header else None)
         return df, info
@@ -103,8 +95,8 @@ def _read_uploaded_table(uploaded) -> tuple[pd.DataFrame, dict]:
         sheet = _pick_sheet_name(xls)
         info["sheet"] = sheet
 
-        df_head = pd.read_excel(BytesIO(raw), sheet_name=sheet, engine=engine, nrows=5, header=None)
-        has_header = _detect_header(df_head)
+        head = pd.read_excel(BytesIO(raw), sheet_name=sheet, engine=engine, nrows=5, header=None)
+        has_header = _detect_header(head)
 
         df = pd.read_excel(BytesIO(raw), sheet_name=sheet, engine=engine, header=0 if has_header else None)
         return df, info
@@ -122,8 +114,8 @@ def _read_uploaded_table(uploaded) -> tuple[pd.DataFrame, dict]:
         sheet = _pick_sheet_name(xls)
         info["sheet"] = sheet
 
-        df_head = pd.read_excel(BytesIO(raw), sheet_name=sheet, engine=engine, nrows=5, header=None)
-        has_header = _detect_header(df_head)
+        head = pd.read_excel(BytesIO(raw), sheet_name=sheet, engine=engine, nrows=5, header=None)
+        has_header = _detect_header(head)
 
         df = pd.read_excel(BytesIO(raw), sheet_name=sheet, engine=engine, header=0 if has_header else None)
         return df, info
@@ -155,8 +147,8 @@ def _extract_loc_qty(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
 def _compute(loc: pd.Series, qty: pd.Series) -> dict:
     pattern = "|".join(re.escape(x) for x in EXCLUDE_PATTERNS)
     mask_exclude = loc.fillna("").str.contains(pattern, na=False)
-
     keep = ~mask_exclude
+
     return {
         "上架筆數": int(keep.sum()),
         "上架總數量": float(qty.loc[keep].sum()),
@@ -167,8 +159,8 @@ def _compute(loc: pd.Series, qty: pd.Series) -> dict:
 
 def _to_xlsx_bytes(df: pd.DataFrame) -> bytes:
     out = BytesIO()
-    with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="每日上架分析_剔除後")
+    with pd.ExcelWriter(out, engine="openpyxl") as w:
+        df.to_excel(w, index=False, sheet_name="每日上架分析_剔除後")
     return out.getvalue()
 
 
@@ -176,60 +168,61 @@ def main():
     st.set_page_config(page_title="每日上架分析", page_icon="📦", layout="wide")
     inject_logistics_theme()
 
-    set_page(
-        "每日上架分析",
-        icon="📦",
-        subtitle="前一日上架清單｜支援 XLSB｜排除指定儲位代碼｜統計上架筆數與上架總量",
-    )
+    set_page("每日上架分析", icon="📦", subtitle="前一日上架清單｜支援 XLSB｜排除指定儲位代碼｜統計筆數與總量")
 
-    # KPI 區塊樣式（框框更順眼）
+    # ✅ KPI：字體小一點 + 框框不要整列（限制最大寬度 + 置中靠左）
     st.markdown(
         r"""
 <style>
 .kpi-wrap{
+  max-width: 760px;
+  width: 100%;
   background: rgba(255,255,255,.86);
   border: 1px solid rgba(15,23,42,.10);
-  border-radius: 16px;
-  padding: 14px 16px;
-  box-shadow: 0 12px 32px rgba(15,23,42,.06);
-  margin-top: 10px;
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 10px 26px rgba(15,23,42,.06);
+  margin: 10px 0 6px 0;
 }
 .kpi-title{
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 900;
-  letter-spacing: .2px;
+  letter-spacing: .15px;
   color: rgba(15,23,42,.92);
   margin: 0 0 10px 0;
 }
 .kpi-grid{
   display: grid;
   grid-template-columns: 1fr;
-  gap: 10px;
+  gap: 8px;
 }
 .metric-box{
   background: rgba(248,250,252,.92);
   border: 1px solid rgba(15,23,42,.10);
-  border-radius: 14px;
-  padding: 10px 12px;
+  border-radius: 12px;
+  padding: 9px 11px;
 }
 .metric-label{
-  font-size: 13.5px;
-  font-weight: 800;
-  color: rgba(15,23,42,.72);
-  letter-spacing: .25px;
-  margin-bottom: 4px;
+  font-size: 12.5px;
+  font-weight: 850;
+  color: rgba(15,23,42,.70);
+  letter-spacing: .2px;
+  margin-bottom: 3px;
 }
 .metric-value{
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 950;
-  line-height: 1.15;
+  line-height: 1.12;
   color: rgba(15,23,42,.94);
 }
 .kpi-sub{
   margin-top: 8px;
-  font-size: 13px;
+  font-size: 12.5px;
   color: rgba(15,23,42,.62);
   font-weight: 650;
+}
+@media (min-width: 900px){
+  .kpi-wrap{ margin-left: 0; }
 }
 </style>
 """,
@@ -270,7 +263,6 @@ def main():
     if info.get("note"):
         st.info(info["note"])
 
-    # 計算
     try:
         loc, qty = _extract_loc_qty(df)
         result = _compute(loc, qty)
@@ -278,7 +270,7 @@ def main():
         st.error(f"計算失敗：{e}")
         st.stop()
 
-    # ✅ 框框呈現：上架分析 / 上架筆數 / 上架總數量
+    # ✅ 你要的：上架分析 / 上架筆數 / 上架總數量（字體小一點、框框不佔整列）
     st.markdown(
         f"""
 <div class="kpi-wrap">
@@ -299,7 +291,6 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # 匯出（剔除後）
     df_keep = df.loc[~result["mask_exclude"]].copy()
     xlsx_bytes = _to_xlsx_bytes(df_keep)
     st.download_button(
@@ -310,7 +301,6 @@ def main():
         use_container_width=False,
     )
 
-    # 預覽
     st.markdown("### 明細預覽（前 200 列）")
     st.dataframe(df.head(200), use_container_width=True, height=420)
 
