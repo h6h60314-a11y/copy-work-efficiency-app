@@ -204,7 +204,7 @@ def build_output_excel_bytes(
 # =========================
 # UI
 # =========================
-st.set_page_config(page_title="儲位使用率(18)", page_icon="🧊", layout="wide")
+st.set_page_config(page_title="儲位使用率", page_icon="🧊", layout="wide")
 
 if HAS_COMMON_UI:
     inject_logistics_theme()
