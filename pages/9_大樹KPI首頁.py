@@ -12,6 +12,7 @@ ALLOW_PAGES = {
     "pages/10_進貨驗收量.py",
     "pages/11_庫存訂單應出量分析.py",
     "pages/12_越庫訂單分析.py",
+    "pages/13_庫存訂單實出量分析.py",
 }
 
 
