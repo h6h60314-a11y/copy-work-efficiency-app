@@ -17,6 +17,7 @@ ALLOW_PAGES = {
     "pages/15_庫存盤點正確率.py",
     "pages/16_門市到貨異常率.py",
     "pages/17_每日出勤工時分析.py",
+    "pages/18_儲位使用率.py",
 }
 
 
@@ -193,6 +194,13 @@ def main():
         "每日出勤工時分析",
         "pages/17_每日出勤工時分析.py",
         "當日總人次（去尾碼去重）｜各職務人次｜各職務工時總計｜Excel下載",
+    )
+
+     _nav_item(
+        "🧊",
+        "儲位使用率",
+        "pages/18_儲位使用率.py",
+        "大/中/小儲位：有效貨位｜已使用貨位｜使用率｜棚別分類統計｜Excel匯出",
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
