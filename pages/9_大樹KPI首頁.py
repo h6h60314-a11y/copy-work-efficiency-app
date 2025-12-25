@@ -155,6 +155,13 @@ def main():
         "兩表比對 CLOSE_USER｜排除 FT03~FT11｜統計越庫應作/實作｜輸出結果",
     )
 
+    _nav_item(
+        "📦",
+        "庫存訂單實出量分析",
+        "pages/13_庫存訂單實出量分析.py",
+        "實際出貨量（零散/成箱/訂單筆數）｜混庫出貨件數（零散/成箱）",
+    )
+
     st.markdown("</div>", unsafe_allow_html=True)
     card_close()
 
