@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-# 若你平台有 common_ui，會自動套用同一套物流風格
 try:
     from common_ui import inject_logistics_theme, set_page, card_open, card_close
     HAS_COMMON_UI = True
@@ -155,7 +154,6 @@ if HAS_COMMON_UI:
 
 _spacer(14)
 
-# 防呆
 if not uploaded:
     st.info("請先上傳出勤 Excel 檔。")
     st.stop()
@@ -202,7 +200,6 @@ day = day[day["工時"] > 0].copy()
 day["姓名_去尾碼"] = day["員工姓名"].str.replace(NAME_SUFFIX_STRIP_REGEX, "", regex=True).str.strip()
 total_headcount = int(day["姓名_去尾碼"].nunique())
 
-# 人次
 role_counts = (
     day.groupby(role_col)["姓名_去尾碼"]
        .nunique()
@@ -211,7 +208,6 @@ role_counts = (
        .rename(columns={role_col: "職務", "姓名_去尾碼": "人次"})
 )
 
-# 工時（固定順序+總計）
 hours_summary = (
     day.groupby(role_col)["工時"].sum()
        .reindex(ROLE_ORDER, fill_value=0)
@@ -224,14 +220,17 @@ hours_summary = pd.concat(
 )
 hours_summary["工時"] = hours_summary["工時"].round(2)
 
-# 轉 dict 方便直向列出
 counts_map = {r["職務"]: int(r["人次"]) for _, r in role_counts.iterrows()}
 hours_map = {r["職務"]: float(r["工時"]) for _, r in hours_summary.iterrows()}
 
 _spacer(10)
 
+# ✅✅ 把備註移到兩欄上方（卡片外），避免左欄往下推造成不對齊
+st.caption(TOP_NOTE)
+_spacer(6)
+
 # =========================
-# ✅ 左右兩欄：直向清單
+# 左右兩欄：直向清單（✅總人次與右欄幹部同高）
 # =========================
 left, right = st.columns([1, 1], gap="large")
 
@@ -241,9 +240,6 @@ with left:
     else:
         st.subheader("👥 當日人次總覽")
 
-    st.caption(TOP_NOTE)
-
-    # ✅ 直向：總人次 → 角色人次（固定順序）
     st.metric("總人次（去尾碼去重）", f"{total_headcount:,}")
     _spacer(6)
     for role in ROLE_ORDER:
@@ -258,7 +254,6 @@ with right:
     else:
         st.subheader("🧾 各職務總上班時間（小時）")
 
-    # ✅ 直向：幹部 → ... → 支援外倉 → 總計
     for role in ROLE_ORDER:
         st.metric(role, f"{hours_map.get(role, 0.0):,.2f}")
     _spacer(6)
@@ -269,9 +264,7 @@ with right:
 
 _spacer(14)
 
-# =========================
-# 下載輸出
-# =========================
+# 下載
 base = os.path.splitext(uploaded.name)[0]
 out_name = f"{base}_{target_date}_工時與人次.xlsx"
 
