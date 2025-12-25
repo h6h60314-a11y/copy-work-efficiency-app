@@ -145,13 +145,12 @@ def build_output_excel_bytes(
 
 
 # =========================
-# 頁面 UI（✅移除英文標題、✅改直向排列）
+# 頁面 UI（✅刪除「規則」區塊）
 # =========================
 st.set_page_config(page_title="每日出勤工時分析", page_icon="🕒", layout="wide")
 
 if HAS_COMMON_UI:
     inject_logistics_theme()
-    # ✅ 不要英文：只用中文 subtitle（或你也可以改成空字串）
     set_page("每日出勤工時分析", icon="🕒", subtitle="出勤人次｜工時彙總｜Excel匯出")
 else:
     st.title("🕒 每日出勤工時分析")
@@ -159,19 +158,7 @@ else:
 st.markdown("上傳出勤檔案（需含「總明細」分頁）並選擇日期")
 st.divider()
 
-# ✅ 直向：規則 → 出勤Excel → 計算日期
-if HAS_COMMON_UI:
-    card_open("📌 規則")
-st.markdown(
-    "- ✅ 工時 > 0\n"
-    "- ✅ 姓名去尾碼(-1/-2)去重\n"
-    "- ✅ 排除職務含「主管」"
-)
-if HAS_COMMON_UI:
-    card_close()
-
-st.markdown("")
-
+# ✅ 直向：出勤Excel → 計算日期
 if HAS_COMMON_UI:
     card_open("📤 出勤 Excel")
 uploaded = st.file_uploader("上傳出勤 Excel（需含「總明細」分頁）", type=["xlsx", "xls", "xlsm"])
