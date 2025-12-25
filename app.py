@@ -1,5 +1,7 @@
 # app.py
+import os
 import streamlit as st
+
 
 st.set_page_config(
     page_title="大豐物流 - 作業平台",
@@ -74,7 +76,7 @@ section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]{
 }
 
 /* =========================================================
-   ✅✅ 隱藏「群組首頁頁」：CSS 版本（href + label 雙保險）
+   ✅✅ 隱藏「群組首頁頁」：href + label 雙保險
    ========================================================= */
 
 /* 1) 用 href url_path 關鍵字 */
@@ -82,7 +84,7 @@ section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*=
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="inbound-home"]){  display:none !important; }
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="gt-kpi-home"]){    display:none !important; }
 
-/* 2) 用 label 文字（你 DevTools 看到的 span[label="xxx"]） */
+/* 2) 用 label 文字 */
 section[data-testid="stSidebar"] li:has(span[label="出貨課首頁"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(span[label="進貨課首頁"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(span[label="大樹KPI首頁"]){ display:none !important; }
@@ -97,7 +99,6 @@ section[data-testid="stSidebar"] li:has(span[label="大樹KPI首頁"]){ display:
     const sidebar = document.querySelector('section[data-testid="stSidebar"]');
     if(!sidebar) return;
 
-    // ✅ 找所有 nav links
     const links = sidebar.querySelectorAll('a[data-testid="stSidebarNavLink"]');
 
     links.forEach(a => {
@@ -133,71 +134,45 @@ section[data-testid="stSidebar"] li:has(span[label="大樹KPI首頁"]){ display:
     unsafe_allow_html=True,
 )
 
+
+def page_if_exists(path: str, title: str, icon: str, **kwargs):
+    """避免 Streamlit Cloud 因缺檔直接爆炸導致側欄跑掉"""
+    if not os.path.exists(path):
+        return None
+    return st.Page(path, title=title, icon=icon, **kwargs)
+
+
 # ✅ 首頁
-home_page = st.Page("pages/0_首頁.py", title="首頁", icon="🏠", default=True)
+home_page = page_if_exists("pages/0_首頁.py", "首頁", "🏠", default=True)
 
-# ✅ 出貨課（第一個是群組首頁：要隱藏）
-outbound_home = st.Page(
-    "pages/7_出貨課首頁.py",
-    title="出貨課首頁",
-    icon="📦",
-    url_path="outbound-home",
-)
-transfer_diff_page = st.Page("pages/6_撥貨差異.py", title="撥貨差異", icon="📦")
+# ✅ 出貨課（群組首頁：要隱藏）
+outbound_home = page_if_exists("pages/7_出貨課首頁.py", "出貨課首頁", "📦", url_path="outbound-home")
+transfer_diff_page = page_if_exists("pages/6_撥貨差異.py", "撥貨差異", "📦")
 
-# ✅ 進貨課（第一個是群組首頁：要隱藏）
-inbound_home = st.Page(
-    "pages/8_進貨課首頁.py",
-    title="進貨課首頁",
-    icon="🚚",
-    url_path="inbound-home",
-)
-qc_page = st.Page("pages/1_驗收作業效能.py", title="驗收作業效能", icon="✅")
-putaway_page = st.Page("pages/2_上架作業效能.py", title="上架作業效能", icon="📦")
-pick_page = st.Page("pages/3_總揀作業效能.py", title="總揀作業效能", icon="🎯")
-slot_page = st.Page("pages/4_儲位使用率.py", title="儲位使用率", icon="🧊")
-diff_page = st.Page("pages/5_揀貨差異代庫存.py", title="揀貨差異代庫存", icon="🔎")
+# ✅ 進貨課（群組首頁：要隱藏）
+inbound_home = page_if_exists("pages/8_進貨課首頁.py", "進貨課首頁", "🚚", url_path="inbound-home")
+qc_page = page_if_exists("pages/1_驗收作業效能.py", "驗收作業效能", "✅")
+putaway_page = page_if_exists("pages/2_上架作業效能.py", "上架作業效能", "📦")
+pick_page = page_if_exists("pages/3_總揀作業效能.py", "總揀作業效能", "🎯")
+slot_page = page_if_exists("pages/4_儲位使用率.py", "儲位使用率", "🧊")
+diff_page = page_if_exists("pages/5_揀貨差異代庫存.py", "揀貨差異代庫存", "🔎")
 
-# ✅ 大樹KPI（第一個是群組首頁：要隱藏）
-gt_kpi_home = st.Page(
-    "pages/9_大樹KPI首頁.py",
-    title="大樹KPI首頁",
-    icon="📈",
-    url_path="gt-kpi-home",
-)
-gt_inbound_receipt = st.Page("pages/10_進貨驗收量.py", title="進貨驗收量", icon="📥")
-
-# ✅ 新模組：出貨應出量分析（檔名你指定：pages/11_庫存訂單應出量分析.py）
-gt_ship_units = st.Page(
-    "pages/11_庫存訂單應出量分析.py",
-    title="庫存訂單應出量分析",
-    icon="📦",
-)
-
-gt_xdock_close_compare = st.Page(
-    "pages/12_越庫訂單分析.py",
-    title="越庫訂單分析",
-    icon="🧾",
-)
-
-# ✅ 新模組：庫存訂單實出量分析（你前面指定要部署的 13）
-gt_stock_ship_actual = st.Page(
-    "pages/13_庫存訂單實出量分析.py",
-    title="庫存訂單實出量分析",
-    icon="📦",
-)
+# ✅ 大樹KPI（群組首頁：要隱藏）
+gt_kpi_home = page_if_exists("pages/9_大樹KPI首頁.py", "大樹KPI首頁", "📈", url_path="gt-kpi-home")
+gt_inbound_receipt = page_if_exists("pages/10_進貨驗收量.py", "進貨驗收量", "📥")
+gt_ship_should = page_if_exists("pages/11_庫存訂單應出量分析.py", "庫存訂單應出量分析", "📦")
+gt_xdock = page_if_exists("pages/12_越庫訂單分析.py", "越庫訂單分析", "🧾")
+gt_ship_actual = page_if_exists("pages/13_庫存訂單實出量分析.py", "庫存訂單實出量分析", "🚚")
+gt_putaway_daily = page_if_exists("pages/14_每日上架分析.py", "每日上架分析", "📦")
 
 pg = st.navigation(
     {
-        "": [home_page],
-        "出貨課": [outbound_home, transfer_diff_page],
-        "進貨課": [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page],
-        "大樹KPI": [gt_kpi_home, gt_inbound_receipt, gt_ship_units,gt_xdock_close_compare,gt_stock_ship_actual],
+        "": [p for p in [home_page] if p],
+        "出貨課": [p for p in [outbound_home, transfer_diff_page] if p],
+        "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page] if p],
+        "大樹KPI": [p for p in [gt_kpi_home, gt_inbound_receipt, gt_ship_should, gt_xdock, gt_ship_actual, gt_putaway_daily] if p],
     },
     expanded=False,
 )
 
 pg.run()
-
-
-
