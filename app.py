@@ -164,15 +164,17 @@ gt_ship_should = page_if_exists("pages/11_庫存訂單應出量分析.py", "庫�
 gt_xdock = page_if_exists("pages/12_越庫訂單分析.py", "越庫訂單分析", "🧾")
 gt_ship_actual = page_if_exists("pages/13_庫存訂單實出量分析.py", "庫存訂單實出量分析", "🚚")
 gt_putaway_daily = page_if_exists("pages/14_每日上架分析.py", "每日上架分析", "📦")
+gt_inv_accuracy = page_if_exists( "pages/15_庫存盤點正確率.py","庫存盤點正確率","🎯")
 
 pg = st.navigation(
     {
         "": [p for p in [home_page] if p],
         "出貨課": [p for p in [outbound_home, transfer_diff_page] if p],
         "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page] if p],
-        "大樹KPI": [p for p in [gt_kpi_home, gt_inbound_receipt, gt_ship_should, gt_xdock, gt_ship_actual, gt_putaway_daily] if p],
+        "大樹KPI": [p for p in [gt_kpi_home, gt_inbound_receipt, gt_ship_should, gt_xdock, gt_ship_actual, gt_putaway_daily,gt_inv_accuracy] if p],
     },
     expanded=False,
 )
 
 pg.run()
+
