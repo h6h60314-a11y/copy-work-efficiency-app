@@ -1,6 +1,7 @@
 # pages/16_門市到貨異常率.py
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from io import BytesIO
 
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
@@ -145,6 +146,7 @@ def _compute_metrics(df: pd.DataFrame, col_box: str, col_reason: str) -> dict:
             df.loc[df[col_reason].isin(["到貨凹損", "到貨破損", "到貨漏液"]), "數量"].sum()
         )
     else:
+        # 沒有「數量」欄就用差異絕對值做替代（避免報錯）
         sum_defect = float(
             df.loc[df[col_reason].isin(["到貨凹損", "到貨破損", "到貨漏液"]), "差異"].abs().sum()
         )
@@ -165,128 +167,63 @@ def _download_xlsx_bytes(df: pd.DataFrame) -> bytes:
     return bio.getvalue()
 
 
-def main():
-    st.set_page_config(page_title="門市到貨異常率", page_icon="🏪", layout="wide")
-    inject_logistics_theme()
-    set_page("門市到貨異常率", icon="🏪", subtitle="上傳異常彙整｜依箱號年/日期篩選｜統計多貨/短少/凹損破損漏液")
-
-    st.markdown(
-        r"""
+def _render_kpi(metrics: dict):
+    # ✅ 用 components.html，避免被 Streamlit 當成 code block
+    kpi_html = f"""
 <style>
-.kpi-wrap{
+.kpi-wrap{{
   width: 100%;
-  max-width: none;
   background: rgba(255,255,255,.86);
   border: 1px solid rgba(15,23,42,.10);
   border-radius: 14px;
   padding: 14px 14px 12px 14px;
   box-shadow: 0 10px 26px rgba(15,23,42,.06);
-  margin: 10px 0 8px 0;
-}
-.kpi-title{
+  margin: 6px 0 8px 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+               "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+}}
+.kpi-title{{
   font-size: 18px;
   font-weight: 950;
   color: rgba(15,23,42,.92);
   margin: 0 0 10px 0;
-}
-.kpi-grid{
+}}
+.kpi-grid{{
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-}
-.metric-box{
+}}
+.metric-box{{
   background: rgba(248,250,252,.92);
   border: 1px solid rgba(15,23,42,.10);
   border-radius: 12px;
   padding: 10px 12px;
-}
-.metric-label{
+}}
+.metric-label{{
   font-size: 12.5px;
   font-weight: 850;
   color: rgba(15,23,42,.70);
   margin-bottom: 4px;
-}
-.metric-value{
+}}
+.metric-value{{
   font-size: 20px;
   font-weight: 950;
   line-height: 1.12;
   color: rgba(15,23,42,.94);
-}
-.metric-span-3{ grid-column: 1 / span 3; }
-.kpi-note{
+}}
+.metric-span-3{{ grid-column: 1 / span 3; }}
+.kpi-note{{
   margin-top: 8px;
   font-size: 12.5px;
   color: rgba(15,23,42,.62);
   font-weight: 650;
-}
-@media (max-width: 900px){
-  .kpi-grid{ grid-template-columns: 1fr; }
-  .metric-span-3{ grid-column: auto; }
-}
+}}
+@media (max-width: 900px){{
+  .kpi-grid{{ grid-template-columns: 1fr; }}
+  .metric-span-3{{ grid-column: auto; }}
+}}
 </style>
-""",
-        unsafe_allow_html=True,
-    )
 
-    card_open("📌 上傳檔案（XLSX / XLSM / XLSB / XLS）")
-    st.caption("工作表：優先「明細」，沒有則取第一張。")
-    st.caption("必要欄位：箱號、異常原因、應到數量、實到數量（凹損/破損/漏液建議有「數量」欄）")
-    uploaded = st.file_uploader(
-        "選擇檔案",
-        type=["xlsx", "xlsm", "xlsb", "xls"],
-        accept_multiple_files=False,
-        label_visibility="collapsed",
-    )
-    card_close()
-
-    if not uploaded:
-        st.stop()
-
-    with st.spinner("資料讀取中…"):
-        try:
-            df, info = _read_uploaded_excel(uploaded)
-            df = _normalize_cols(df)
-        except Exception as e:
-            st.error(f"讀取失敗：{e}")
-            st.stop()
-
-    rows, cols = df.shape
-    msg = f"已讀取：{uploaded.name}"
-    msg += f"（工作表：{info.get('sheet','')}｜engine：{info.get('engine','')}｜{rows:,} 列｜{cols:,} 欄）"
-    st.success(msg)
-    if info.get("note"):
-        st.info(info["note"])
-
-    col_box = "箱號"
-    col_reason = "異常原因"
-    _require_cols(df, [col_box, col_reason])
-
-    df = _derive_year_mmdd_from_box(df, col_box)
-
-    years = sorted([y for y in df["年"].dropna().unique().tolist() if str(y).strip() != ""])
-    dates = sorted([d for d in df["日期"].dropna().unique().tolist() if str(d).strip() != ""])
-
-    left, right = st.columns(2, gap="large")
-    with left:
-        year_sel = st.selectbox("保留 年（箱號前 4 碼）", options=years if years else [""])
-    with right:
-        date_sel = st.selectbox("保留 日期（箱號第5-8碼 MMDD）", options=dates if dates else [""])
-
-    if year_sel and date_sel:
-        df = df[(df["年"] == str(year_sel)) & (df["日期"] == str(date_sel))].copy()
-
-    # 排除供應商原因
-    df = df[~df[col_reason].astype(str).str.contains("供應商", na=False)].copy()
-
-    # 轉數值 + 計算差異
-    df = _to_num(df, ["應到數量", "實到數量", "數量"])
-    _require_cols(df, ["應到數量", "實到數量"])
-    df["差異"] = df["實到數量"] - df["應到數量"]
-
-    metrics = _compute_metrics(df, col_box, col_reason)
-
-    # ✅✅ 這裡一定要用 st.markdown + unsafe_allow_html=True，才能渲染卡片
-    kpi_html = f"""
 <div class="kpi-wrap">
   <div class="kpi-title">門市到貨異常統計</div>
   <div class="kpi-grid">
@@ -314,8 +251,77 @@ def main():
   <div class="kpi-note">已自動計算：差異 = 實到數量 - 應到數量（並排除「異常原因」含「供應商」）。</div>
 </div>
 """
-    st.markdown(kpi_html, unsafe_allow_html=True)
+    # height 依內容固定就好（避免出現捲軸）
+    components.html(kpi_html, height=240, scrolling=False)
 
+
+def main():
+    st.set_page_config(page_title="門市到貨異常率", page_icon="🏪", layout="wide")
+    inject_logistics_theme()
+    set_page("門市到貨異常率", icon="🏪", subtitle="上傳異常彙整｜依箱號年/日期篩選｜統計多貨/短少/凹損破損漏液")
+
+    card_open("📌 上傳檔案（XLSX / XLSM / XLSB / XLS）")
+    st.caption("工作表：優先「明細」，沒有則取第一張。")
+    st.caption("必要欄位：箱號、異常原因、應到數量、實到數量（凹損/破損/漏液建議有「數量」欄）")
+    uploaded = st.file_uploader(
+        "選擇檔案",
+        type=["xlsx", "xlsm", "xlsb", "xls"],
+        accept_multiple_files=False,
+        label_visibility="collapsed",
+    )
+    card_close()
+
+    if not uploaded:
+        st.stop()
+
+    with st.spinner("資料讀取中…"):
+        try:
+            df, info = _read_uploaded_excel(uploaded)
+            df = _normalize_cols(df)
+        except Exception as e:
+            st.error(f"讀取失敗：{e}")
+            st.stop()
+
+    rows, cols = df.shape
+    st.success(
+        f"已讀取：{uploaded.name}（工作表：{info.get('sheet','')}｜engine：{info.get('engine','')}｜{rows:,} 列｜{cols:,} 欄）"
+    )
+    if info.get("note"):
+        st.info(info["note"])
+
+    col_box = "箱號"
+    col_reason = "異常原因"
+    _require_cols(df, [col_box, col_reason])
+
+    # 解析年/日期（由箱號字串）
+    df = _derive_year_mmdd_from_box(df, col_box)
+
+    years = sorted([y for y in df["年"].dropna().unique().tolist() if str(y).strip() != ""])
+    dates = sorted([d for d in df["日期"].dropna().unique().tolist() if str(d).strip() != ""])
+
+    left, right = st.columns(2, gap="large")
+    with left:
+        year_sel = st.selectbox("保留 年（箱號前 4 碼）", options=years if years else [""])
+    with right:
+        date_sel = st.selectbox("保留 日期（箱號第5-8碼 MMDD）", options=dates if dates else [""])
+
+    if year_sel and date_sel:
+        df = df[(df["年"] == str(year_sel)) & (df["日期"] == str(date_sel))].copy()
+
+    # 排除供應商原因
+    df = df[~df[col_reason].astype(str).str.contains("供應商", na=False)].copy()
+
+    # 轉數值 + 計算差異
+    df = _to_num(df, ["應到數量", "實到數量", "數量"])
+    _require_cols(df, ["應到數量", "實到數量"])
+    df["差異"] = df["實到數量"] - df["應到數量"]
+
+    metrics = _compute_metrics(df, col_box, col_reason)
+
+    # ✅ KPI 顯示（不會再出現原始 HTML）
+    _render_kpi(metrics)
+
+    # 匯出
     out_bytes = _download_xlsx_bytes(df)
     st.download_button(
         "⬇️ 匯出（處理後）Excel",
