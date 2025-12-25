@@ -144,20 +144,14 @@ def main():
     left, right = st.columns([1, 1], gap="large")
 
     with left:
-        st.markdown("#### 庫存出貨訂單量")
-        a, b = st.columns(2, gap="medium")
-        with a:
-            st.metric("出貨訂單庫存零散應出", _fmt_qty(result["零散應出"]))
-        with b:
-            st.metric("出貨訂單庫存成箱應出", _fmt_qty(result["成箱應出"]))
+    st.markdown("#### 庫存出貨訂單量")
+    st.metric("出貨訂單庫存零散應出", _fmt_qty(result["零散應出"]))
+    st.metric("出貨訂單庫存成箱應出", _fmt_qty(result["成箱應出"]))
 
     with right:
-        st.markdown("#### 總揀")
-        a, b = st.columns(2, gap="medium")
-        with a:
-            st.metric("儲位數", _fmt_int(result["儲位數"]))
-        with b:
-            st.metric("品項數", _fmt_int(result["品項數"]))
+    st.markdown("#### 總揀")
+    st.metric("儲位數", _fmt_int(result["儲位數"]))
+    st.metric("品項數", _fmt_int(result["品項數"]))
 
     st.markdown("### 📄 明細預覽（已加入：原始配庫存出貨單位量）")
     st.dataframe(result["df_out"], use_container_width=True, height=520)
