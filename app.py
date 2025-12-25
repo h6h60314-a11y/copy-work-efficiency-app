@@ -164,12 +164,19 @@ gt_kpi_home = st.Page(
 )
 gt_inbound_receipt = st.Page("pages/10_進貨驗收量.py", title="進貨驗收量", icon="📥")
 
+# ✅ ✅ 新增：放在「大樹KPI」底下的新模組（請把檔案放到 pages/11_出貨應出量分析.py）
+gt_ship_units = st.Page(
+    "pages/11_出貨應出量分析.py",
+    title="出貨應出量分析",
+    icon="📦",
+)
+
 pg = st.navigation(
     {
         "": [home_page],
         "出貨課": [outbound_home, transfer_diff_page],
         "進貨課": [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page],
-        "大樹KPI": [gt_kpi_home, gt_inbound_receipt],
+        "大樹KPI": [gt_kpi_home, gt_inbound_receipt, gt_ship_units],
     },
     expanded=False,
 )
