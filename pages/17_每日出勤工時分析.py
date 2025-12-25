@@ -1,12 +1,5 @@
 # pages/17_每日出勤工時分析.py
 # -*- coding: utf-8 -*-
-"""
-手動上傳檔案 + 手動選日期（YYYY-MM-DD）
-→ 上方顯示：總人次、幹部、理貨人員、計時、派遣、支援本倉、支援外倉
-   （皆為姓名去尾碼(-1/-2)後去重；工時>0；排除主管）
-→ 下方顯示：各職務總上班時間（小時；排除主管；固定職務順序；含總計）
-→ 提供下載：輸出 Excel（含抬頭區塊 + 工時表）
-"""
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -27,9 +20,6 @@ except Exception:
     HAS_COMMON_UI = False
 
 
-# =========================
-# 參數區（沿用你原本）
-# =========================
 ROLE_ORDER = ["幹部", "理貨人員", "計時", "派遣", "支援本倉", "支援外倉"]
 EXCLUDE_ROLE_REGEX = r"主管"
 NAME_SUFFIX_STRIP_REGEX = r"\s*-(?:1|2)\s*$"
@@ -37,9 +27,10 @@ TOP_NOTE = "備註：姓名以去尾碼(-1/-2)後去重；已排除職務含『�
 SHEET_NAME = "總明細"
 
 
-# =========================
-# 工具函式
-# =========================
+def _spacer(h: int = 10):
+    st.markdown(f"<div style='height:{h}px'></div>", unsafe_allow_html=True)
+
+
 def detect_role_column(cols) -> str | None:
     if "職務" in cols:
         return "職務"
@@ -53,7 +44,7 @@ def to_num(s):
 
 
 def compute_hours(df: pd.DataFrame) -> pd.Series:
-    """依你的原邏輯：上班時數 → 打卡時數 → (下班-上班)-用餐"""
+    """上班時數 → 打卡時數 → (下班-上班)-用餐"""
     h = pd.Series(np.nan, index=df.index, dtype="float64")
 
     if "上班時數" in df.columns:
@@ -79,11 +70,6 @@ def normalize_role(s: pd.Series) -> pd.Series:
 
 
 def robust_read_excel(uploaded_file, sheet_name: str) -> pd.DataFrame:
-    """
-    Streamlit 上傳檔案後，以 bytes 讀取。
-    - xlsx / xlsm：openpyxl
-    - xls：xlrd（需安裝 xlrd==2.0.1）
-    """
     filename = uploaded_file.name
     ext = os.path.splitext(filename)[1].lower()
     data = uploaded_file.getvalue()
@@ -105,11 +91,10 @@ def build_output_excel_bytes(
     target_date: date,
     out_name: str,
 ) -> tuple[str, bytes]:
-    """產生 xlsx bytes（含抬頭區塊 + 工時表）"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         sheet = "當日_各職務_工時"
-        start_row = 8  # 工時表從第 9 列開始（0-based）
+        start_row = 8
         hours_summary.to_excel(writer, sheet_name=sheet, index=False, startrow=start_row)
 
         ws = writer.sheets[sheet]
@@ -119,22 +104,17 @@ def build_output_excel_bytes(
         label = wb.add_format({"bold": True})
         gray = wb.add_format({"font_color": "#666666"})
 
-        # 日期
         ws.write(0, 0, f"{target_date}", big)
-        # 備註
         ws.write(1, 0, TOP_NOTE, gray)
-        # 總人次
         ws.write(2, 0, "總人次：", label)
         ws.write(2, 1, int(total_headcount), big)
 
-        # 各職務人次
         row = 3
         for _, r in role_counts.iterrows():
             ws.write(row, 0, f"{r['職務']}：", label)
             ws.write(row, 1, int(r["人次"]))
             row += 1
 
-        # 欄寬 & 凍結
         ws.set_column(0, 0, 16)
         ws.set_column(1, 1, 12)
         ws.set_column(2, 10, 14)
@@ -145,7 +125,7 @@ def build_output_excel_bytes(
 
 
 # =========================
-# 頁面 UI（✅刪除「規則」區塊）
+# UI
 # =========================
 st.set_page_config(page_title="每日出勤工時分析", page_icon="🕒", layout="wide")
 
@@ -156,16 +136,16 @@ else:
     st.title("🕒 每日出勤工時分析")
 
 st.markdown("上傳出勤檔案（需含「總明細」分頁）並選擇日期")
-st.divider()
+_spacer(10)
 
-# ✅ 直向：出勤Excel → 計算日期
+# ✅ 直向：出勤Excel → 計算日期（且無橫線）
 if HAS_COMMON_UI:
     card_open("📤 出勤 Excel")
 uploaded = st.file_uploader("上傳出勤 Excel（需含「總明細」分頁）", type=["xlsx", "xls", "xlsm"])
 if HAS_COMMON_UI:
     card_close()
 
-st.markdown("")
+_spacer(14)
 
 if HAS_COMMON_UI:
     card_open("📅 計算日期")
@@ -173,11 +153,9 @@ target_date = st.date_input("選擇要計算的日期", value=None)
 if HAS_COMMON_UI:
     card_close()
 
-st.divider()
+_spacer(14)
 
-# =========================
 # 防呆
-# =========================
 if not uploaded:
     st.info("請先上傳出勤 Excel 檔。")
     st.stop()
@@ -186,16 +164,13 @@ if not target_date:
     st.info("請選擇要計算的日期。")
     st.stop()
 
-# =========================
 # 讀檔
-# =========================
 try:
     df = robust_read_excel(uploaded, sheet_name=SHEET_NAME)
 except Exception as e:
     st.error(f"讀取失敗：找不到分頁「{SHEET_NAME}」或檔案格式不支援。\n\n錯誤訊息：{e}")
     st.stop()
 
-# 欄位檢查
 if "年月日" not in df.columns:
     st.error("欄位缺少：找不到「年月日」欄位。")
     st.stop()
@@ -209,9 +184,7 @@ if "員工姓名" not in df.columns:
     st.error("欄位缺少：找不到「員工姓名」欄位。")
     st.stop()
 
-# =========================
 # 計算
-# =========================
 df["日期"] = pd.to_datetime(df["年月日"], errors="coerce").dt.date
 df["工時"] = compute_hours(df)
 
@@ -223,15 +196,12 @@ if day.empty:
 day[role_col] = normalize_role(day[role_col])
 day["員工姓名"] = day["員工姓名"].astype(str).str.strip()
 
-# 排除主管、僅工時>0
 day = day[~day[role_col].str.contains(EXCLUDE_ROLE_REGEX, na=False)].copy()
 day = day[day["工時"] > 0].copy()
 
-# 姓名去尾碼後去重（人次）
 day["姓名_去尾碼"] = day["員工姓名"].str.replace(NAME_SUFFIX_STRIP_REGEX, "", regex=True).str.strip()
 total_headcount = int(day["姓名_去尾碼"].nunique())
 
-# 各職務人次（缺的補0，固定順序）
 role_counts = (
     day.groupby(role_col)["姓名_去尾碼"]
        .nunique()
@@ -240,7 +210,6 @@ role_counts = (
        .rename(columns={role_col: "職務", "姓名_去尾碼": "人次"})
 )
 
-# 工時彙總（固定順序+總計）
 hours_summary = (
     day.groupby(role_col)["工時"].sum()
        .reindex(ROLE_ORDER, fill_value=0)
@@ -253,16 +222,15 @@ hours_summary = pd.concat(
 )
 hours_summary["工時"] = hours_summary["工時"].round(2)
 
-# =========================
-# 顯示：人次
-# =========================
+_spacer(8)
+
+# 人次
 if HAS_COMMON_UI:
     card_open("👥 當日人次總覽")
 else:
     st.subheader("👥 當日人次總覽")
 
 st.caption(TOP_NOTE)
-
 st.metric("總人次（去尾碼去重）", f"{total_headcount:,}")
 
 cols = st.columns(3)
@@ -272,11 +240,9 @@ for i, r in enumerate(role_counts.itertuples(index=False)):
 if HAS_COMMON_UI:
     card_close()
 
-st.divider()
+_spacer(14)
 
-# =========================
-# 顯示：工時
-# =========================
+# 工時
 if HAS_COMMON_UI:
     card_open("🧾 各職務總上班時間（小時）")
 else:
@@ -284,9 +250,6 @@ else:
 
 st.dataframe(hours_summary, use_container_width=True, hide_index=True)
 
-# =========================
-# 下載輸出
-# =========================
 base = os.path.splitext(uploaded.name)[0]
 out_name = f"{base}_{target_date}_工時與人次.xlsx"
 
