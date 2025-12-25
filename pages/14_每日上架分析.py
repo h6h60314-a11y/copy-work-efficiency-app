@@ -27,14 +27,56 @@ def _pick_engine_by_ext(ext: str):
     if ext == ".xlsb":
         return ["pyxlsb"]  # 需要 requirements.txt 安裝 pyxlsb
     if ext == ".xls":
-        return ["xlrd"]    # 需要安裝 xlrd
+        return ["xlrd"]    # 需要 xlrd；若遇到「假 xls」會自動 fallback
     return ["openpyxl", "pyxlsb", "xlrd"]
+
+
+def _read_fake_xls_as_html_or_text(data: bytes) -> pd.DataFrame:
+    """
+    .xls 但其實是 HTML/文字（常見：PROVIDER / Expected BOF record）
+    解析順序：
+      1) HTML table -> 取第一張表
+      2) 文字分隔 -> tab / comma / ; / | 自動嘗試
+    """
+    text = None
+    for enc in ("utf-8", "utf-8-sig", "cp950", "big5", "latin1"):
+        try:
+            t = data.decode(enc, errors="ignore")
+            if t and t.strip():
+                text = t
+                break
+        except Exception:
+            continue
+
+    if not text:
+        raise ValueError("假 xls 解析失敗：檔案內容無法解碼為文字。")
+
+    # 1) HTML 表格
+    try:
+        tables = pd.read_html(io.StringIO(text))
+        if tables and len(tables) > 0:
+            return tables[0]
+    except Exception:
+        pass
+
+    # 2) 文字分隔
+    for sep in ("\t", ",", ";", "|"):
+        try:
+            df = pd.read_csv(io.StringIO(text), sep=sep, dtype=str, engine="python")
+            if df is not None and df.shape[1] >= 2:
+                return df
+        except Exception:
+            continue
+
+    raise ValueError("假 xls 解析失敗：不是可辨識的 HTML 表格或分隔文字格式。")
 
 
 def _read_excel_bytes(uploaded, sheet_prefer="前一日上架清單"):
     """
-    支援 xlsx/xlsm/xlsb/xls，依副檔名選 engine，並自動挑工作表：
-    優先用「前一日上架清單」，沒有就用第一張。
+    支援 xlsx/xlsm/xlsb/xls
+    - xlsx/xlsm: openpyxl
+    - xlsb: pyxlsb
+    - xls: xlrd；若出現 PROVIDER/BOF -> 自動改用 HTML/文字解析
     """
     name = uploaded.name
     ext = "." + name.split(".")[-1].lower() if "." in name else ""
@@ -56,20 +98,23 @@ def _read_excel_bytes(uploaded, sheet_prefer="前一日上架清單"):
             )
             return df, sheet_name, eng
 
-        except ImportError as e:
-            last_err = e
-            continue
         except Exception as e:
             last_err = e
+
+            # ✅ .xls 但其實是 HTML/文字（假 xls）→ fallback
+            if ext == ".xls":
+                msg = str(e)
+                if ("PROVIDER" in msg) or ("Expected BOF record" in msg):
+                    df = _read_fake_xls_as_html_or_text(data)
+                    return df, "（假xls：HTML/文字解析）", "html/text"
+
             continue
 
-    # 走到這裡表示所有 engine 都失敗
     msg = f"Excel 讀取失敗：{last_err}"
-    # 特別針對 xlsb 給提示
     if ext == ".xlsb":
         msg += "\n\n⚠️ 你上傳的是 .xlsb，請確認 requirements.txt 有加入：pyxlsb"
     if ext == ".xls":
-        msg += "\n\n⚠️ 你上傳的是 .xls，請確認 requirements.txt 有加入：xlrd"
+        msg += "\n\n⚠️ 你上傳的是 .xls，請確認 requirements.txt 有加入：xlrd（若仍失敗，本頁會自動改用 HTML/文字解析，但檔案需為可解析格式）"
     raise RuntimeError(msg)
 
 
@@ -80,7 +125,6 @@ def _compute(df: pd.DataFrame):
     loc = df.iloc[:, COL_LOC_IDX].astype("string")  # 上架儲位
     qty = pd.to_numeric(df.iloc[:, COL_QTY_IDX], errors="coerce").fillna(0)  # 上架數量
 
-    # 排除規則（只看上架儲位）
     pattern = "|".join(re.escape(x) for x in EXCLUDE_PATTERNS)
     mask_exclude = loc.str.contains(pattern, na=False)
 
@@ -92,18 +136,17 @@ def _compute(df: pd.DataFrame):
 
 
 def main():
-    set_page("每日上架分析", icon="📦", subtitle="前一日上架清單｜支援 XLSB｜排除指定儲位代碼｜統計上架筆數與上架總量")
+    set_page(
+        "每日上架分析",
+        icon="📦",
+        subtitle="前一日上架清單｜支援 XLSB｜若 .xls 為假檔自動 HTML/文字解析｜統計上架筆數與上架總量",
+    )
 
     card_open("📌 上傳檔案（XLSX / XLSM / XLSB / XLS）")
     st.caption("讀取工作表：優先「前一日上架清單」，沒有則取第一張。")
-    st.caption("欄位規則：B欄=上架儲位、C欄=上架數量（從第 1 列開始依檔案實際內容）。")
+    st.caption("欄位規則：B欄=上架儲位、C欄=上架數量（0-based：B=1、C=2）。")
     st.caption("排除條件：上架儲位包含 " + " / ".join(EXCLUDE_PATTERNS))
-
-    uploaded = st.file_uploader(
-        "選擇檔案",
-        type=["xlsx", "xlsm", "xlsb", "xls"],
-        accept_multiple_files=False,
-    )
+    uploaded = st.file_uploader("選擇檔案", type=["xlsx", "xlsm", "xlsb", "xls"], accept_multiple_files=False)
     card_close()
 
     if not uploaded:
@@ -119,6 +162,9 @@ def main():
         st.success(
             f"已讀取：{uploaded.name}（工作表：{sheet_name}｜engine：{engine_used}｜{df.shape[0]:,} 列｜{df.shape[1]:,} 欄）"
         )
+
+        if engine_used == "html/text":
+            st.info("此 .xls 檔判定為『假 xls』（PROVIDER/BOF），已自動改用文字/HTML 解析。")
 
         a, b, c = st.columns(3, gap="large")
         with a:
