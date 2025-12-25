@@ -213,7 +213,7 @@ def main():
             st.markdown("### 越庫明細筆數")
             st.metric("越庫明細筆數（剔除後）", _fmt_num(stats["越庫明細筆數"]))
 
-        # C. 實作
+        # C. 越庫實作量
         with c3:
             st.markdown("### 越庫實作量")
             st.metric("越庫＋零散｜實作量總和", _fmt_num(stats["越庫_零散_實作量"]))
