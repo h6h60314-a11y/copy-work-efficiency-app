@@ -6,6 +6,9 @@ from io import BytesIO
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 
+# =========================
+# format helpers
+# =========================
 def _fmt_int(x) -> str:
     try:
         return f"{int(x):,}"
@@ -13,7 +16,7 @@ def _fmt_int(x) -> str:
         return "0"
 
 
-def _fmt_num(x) -> str:
+def _fmt_num0(x) -> str:
     try:
         return f"{float(x):,.0f}"
     except Exception:
@@ -27,6 +30,9 @@ def _fmt_pct(x) -> str:
         return "0.00%"
 
 
+# =========================
+# read helpers
+# =========================
 def _is_fake_xls_provider(raw: bytes) -> bool:
     return b"PROVIDER" in raw[:256].upper()
 
@@ -117,30 +123,45 @@ def _validate_cols(df: pd.DataFrame) -> None:
         raise KeyError(f"缺少必要欄位：{missing}（目前欄位：{list(df.columns)[:30]} ...）")
 
 
+# =========================
+# compute
+# =========================
 def _compute(df: pd.DataFrame) -> dict:
+    # 商品號去重
     unique_item_count = df["商品號"].dropna().nunique()
-    slot_count = df["儲位"].dropna().shape[0]
 
+    # 儲位筆數（含重複）= 儲位欄有值的列數
+    slot_count = int(df["儲位"].dropna().shape[0])
+
+    # 差異轉數值
     diff = pd.to_numeric(df["差異"], errors="coerce").fillna(0)
+
+    # 差異 ≠ 0 筆數
     diff_nonzero_count = int((diff != 0).sum())
 
+    # 正確筆數（差異=0）以「有儲位的筆數」當分母
     denom = max(int(slot_count), 0)
-    correct_count = max(denom - diff_nonzero_count, 0)
+    correct_count = max(denom - int(diff_nonzero_count), 0)
     accuracy = (correct_count / denom) if denom > 0 else 0.0
 
+    # 差異 >0 / <0
     diff_positive_sum = float(diff[diff > 0].sum())
-    diff_negative_sum = float(diff[diff < 0].sum())
+    diff_negative_sum_abs = float(abs(diff[diff < 0].sum()))
 
     return {
         "商品號去重": int(unique_item_count),
         "儲位筆數": int(slot_count),
         "差異≠0筆數": int(diff_nonzero_count),
+        "差異=0筆數": int(correct_count),
         "正確率": float(accuracy),
         "差異>0總和": float(diff_positive_sum),
-        "差異<0絕對值": float(abs(diff_negative_sum)),  # 顯示「缺少總和」用
+        "差異<0絕對值": float(diff_negative_sum_abs),
     }
 
 
+# =========================
+# UI
+# =========================
 def main():
     st.set_page_config(page_title="庫存盤點正確率", page_icon="🎯", layout="wide")
     inject_logistics_theme()
@@ -149,8 +170,9 @@ def main():
     st.markdown(
         r"""
 <style>
+/* 外框 */
 .kpi-wrap{
-  max-width: 980px;
+  max-width: 1080px;
   width: 100%;
   background: rgba(255,255,255,.86);
   border: 1px solid rgba(15,23,42,.10);
@@ -160,14 +182,15 @@ def main():
   margin: 10px 0 6px 0;
 }
 
+/* 標題 */
 .kpi-title{
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 950;
   color: rgba(15,23,42,.92);
   margin: 0 0 10px 0;
 }
 
-/* ✅ 3 欄排列，滿 3 欄自動換下一列 */
+/* ✅ 3 欄自動換行 */
 .kpi-grid{
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -182,23 +205,22 @@ def main():
 }
 
 .metric-label{
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 850;
   color: rgba(15,23,42,.70);
   margin-bottom: 4px;
 }
 
 .metric-value{
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 950;
-  line-height: 1.18;
+  line-height: 1.12;
   color: rgba(15,23,42,.94);
 }
 
-/* ✅ 讓「正確率」更醒目 */
+/* ✅ 讓「正確率」更醒目一些 */
 .metric-value-main{
-  font-size: 20px;
-  font-weight: 980;
+  font-size: 22px;
 }
 
 .kpi-note{
@@ -258,17 +280,14 @@ def main():
         st.dataframe(df.head(50), use_container_width=True)
         st.stop()
 
-    # ✅ 重點：全部 KPI 卡片一次渲染，避免 HTML 變文字
-    html = f"""
+    # ✅ 盤點摘要 → 盤點正確率；3 欄排滿換行
+    st.markdown(
+        f"""
 <div class="kpi-wrap">
   <div class="kpi-title">盤點正確率</div>
 
   <div class="kpi-grid">
-    <div class="metric-box">
-      <div class="metric-label">商品號（去重）</div>
-      <div class="metric-value">{_fmt_int(result["商品號去重"])}</div>
-    </div>
-
+    <!-- 第 1 列：核心 -->
     <div class="metric-box">
       <div class="metric-label">儲位筆數（含重複）</div>
       <div class="metric-value">{_fmt_int(result["儲位筆數"])}</div>
@@ -284,21 +303,28 @@ def main():
       <div class="metric-value metric-value-main">{_fmt_pct(result["正確率"])}</div>
     </div>
 
+    <!-- 第 2 列：原因拆解 -->
     <div class="metric-box">
       <div class="metric-label">差異 &gt; 0（多帳總和）</div>
-      <div class="metric-value">{_fmt_num(result["差異>0總和"])}</div>
+      <div class="metric-value">{_fmt_num0(result["差異>0總和"])}</div>
     </div>
 
     <div class="metric-box">
       <div class="metric-label">差異 &lt; 0（缺少總和）</div>
-      <div class="metric-value">{_fmt_num(result["差異<0絕對值"])}</div>
+      <div class="metric-value">{_fmt_num0(result["差異<0絕對值"])}</div>
+    </div>
+
+    <div class="metric-box">
+      <div class="metric-label">差異 = 0 筆數（正確筆數）</div>
+      <div class="metric-value">{_fmt_int(result["差異=0筆數"])}</div>
     </div>
   </div>
 
-  <div class="kpi-note">提示：若你希望「正確率」用全列當分母，我可以再幫你改成以總列數計算。</div>
+  <div class="kpi-note">提示：目前正確率分母採「儲位欄有值的列數」。若要改用「總列數」當分母，我也可以幫你一鍵改。</div>
 </div>
-"""
-    st.markdown(html, unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
 
     st.markdown("### 明細預覽（前 200 列）")
     st.dataframe(df.head(200), use_container_width=True, height=420)
