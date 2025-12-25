@@ -25,9 +25,9 @@ def _pick_engine_by_ext(ext: str):
     if ext in (".xlsx", ".xlsm"):
         return ["openpyxl"]
     if ext == ".xlsb":
-        return ["pyxlsb"]  # 需要 requirements.txt 安裝 pyxlsb
+        return ["pyxlsb"]  # requirements.txt 需安裝 pyxlsb
     if ext == ".xls":
-        return ["xlrd"]    # 需要 xlrd；若遇到「假 xls」會自動 fallback
+        return ["xlrd"]    # requirements.txt 需安裝 xlrd；遇「假 xls」會 fallback
     return ["openpyxl", "pyxlsb", "xlrd"]
 
 
@@ -157,7 +157,7 @@ def main():
             df, sheet_name, engine_used = _read_excel_bytes(uploaded)
 
         with st.spinner("計算中…"):
-            count_rows, sum_qty, excluded_rows = _compute(df)
+            count_rows, sum_qty, _excluded_rows = _compute(df)
 
         st.success(
             f"已讀取：{uploaded.name}（工作表：{sheet_name}｜engine：{engine_used}｜{df.shape[0]:,} 列｜{df.shape[1]:,} 欄）"
@@ -166,13 +166,11 @@ def main():
         if engine_used == "html/text":
             st.info("此 .xls 檔判定為『假 xls』（PROVIDER/BOF），已自動改用文字/HTML 解析。")
 
-        a, b, c = st.columns(3, gap="large")
-        with a:
-            st.metric("上架筆數（排除後）", f"{count_rows:,}")
-        with b:
-            st.metric("上架總數量（排除後）", f"{sum_qty:,.0f}")
-        with c:
-            st.metric("排除筆數", f"{excluded_rows:,}")
+        # ✅ 直向呈現（你要的：上架分析 → 上架筆數 → 上架總數量）
+        card_open("📊 上架分析")
+        st.metric("上架筆數", f"{count_rows:,}")
+        st.metric("上架總數量", f"{sum_qty:,.0f}")
+        card_close()
 
         st.markdown("#### 明細預覽（前 200 列）")
         st.dataframe(df.head(200), use_container_width=True)
