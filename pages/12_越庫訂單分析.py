@@ -125,8 +125,7 @@ def compute_crossdock(df1: pd.DataFrame, df2: pd.DataFrame):
         "越庫_零散_實作量": float(dfx.loc[scatter, "實作量"].sum()),
         "越庫_成箱_實作量": float(dfx.loc[box, "實作量"].sum()),
         "訂單筆數": int(dfx["單號"].nunique()),
-        "剔除筆數_FT03_FT11": int(mask_ex.sum()),
-        "越庫筆數": int(len(dfx)),
+        "越庫明細筆數": int(len(dfx)),
     }
 
     cols = list(df1.columns)
@@ -154,7 +153,7 @@ def _to_excel_bytes(df: pd.DataFrame, sheet_name: str = "結果"):
 
 
 # =========================
-# UI (單頁：由上往下)
+# UI (單頁)
 # =========================
 def main():
     set_page("越庫訂單分析", icon="🧾", subtitle="上傳兩份報表｜剔除 FT03~FT11｜越庫(零散/成箱) 應作/實作｜訂單筆數")
@@ -180,7 +179,6 @@ def main():
 
     st.markdown("---")
 
-    # 讀檔與計算
     stats = None
     df_out = None
     dfx = None
@@ -194,28 +192,33 @@ def main():
         except Exception as e:
             err = e
 
-    # 2) 結果區
+    # 2) 結果區：改成 3 區塊
     card_open("📊 計算結果")
     if err:
         st.error(f"讀取或計算失敗：{err}")
     elif not (f1 and f2):
         st.warning("請先上傳兩份檔案，才會顯示計算結果與明細。")
     else:
-        left, right = st.columns([1, 1], gap="large")
+        c1, c2, c3 = st.columns([1, 1, 1], gap="large")
 
-        with left:
+        # A. 越庫訂單量
+        with c1:
             st.markdown("### 越庫訂單量")
             st.metric("越庫＋零散｜應作量總和", _fmt_num(stats["越庫_零散_應作量"]))
             st.metric("越庫＋成箱｜應作量總和", _fmt_num(stats["越庫_成箱_應作量"]))
             st.metric("訂單筆數（越庫/單號不重複）", _fmt_num(stats["訂單筆數"]))
 
-        with right:
-            st.markdown("### 實作/清理狀態")
+        # B. 越庫明細筆數
+        with c2:
+            st.markdown("### 越庫明細筆數")
+            st.metric("越庫明細筆數（剔除後）", _fmt_num(stats["越庫明細筆數"]))
+
+        # C. 實作
+        with c3:
+            st.markdown("### 越庫實作量")
             st.metric("越庫＋零散｜實作量總和", _fmt_num(stats["越庫_零散_實作量"]))
             st.metric("越庫＋成箱｜實作量總和", _fmt_num(stats["越庫_成箱_實作量"]))
-            st.metric("已剔除筆數（FT03~FT11）", _fmt_num(stats["剔除筆數_FT03_FT11"]))
 
-        st.caption(f"越庫明細筆數：{stats['越庫筆數']:,}（剔除後）")
     card_close()
 
     st.markdown("---")
