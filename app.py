@@ -24,7 +24,7 @@ section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]{
   text-decoration: none !important;
 }
 
-/* ✅ 文字：更舒服、直觀（不會太粗） */
+/* ✅ 文字：更舒服、直觀 */
 section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"] *{
   font-size: 15.5px !important;
   font-weight: 650 !important;
@@ -32,15 +32,13 @@ section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"] *{
   letter-spacing: .2px !important;
 }
 
-/* ✅ 每個項目上下距離：緊湊但不擠 */
+/* ✅ 每個項目上下距離 */
 section[data-testid="stSidebar"] li a[data-testid="stSidebarNavLink"]{
   padding-top: 6px !important;
   padding-bottom: 6px !important;
 }
 
-/* =========================
-   ✅ 首頁最大（但不誇張）
-   ========================= */
+/* ✅ 首頁最大（不誇張） */
 section[data-testid="stSidebar"] ul > li:first-child a[data-testid="stSidebarNavLink"]{
   display:flex !important;
   align-items:center !important;
@@ -59,10 +57,7 @@ section[data-testid="stSidebar"] ul > li:first-child a[data-testid="stSidebarNav
   letter-spacing: .3px !important;
 }
 
-/* =========================
-   ✅ 群組標題（出貨課/進貨課/大樹KPI）
-   Streamlit 會用 h2/h3/h4 或類似元素呈現
-   ========================= */
+/* ✅ 群組標題（出貨課/進貨課/大樹KPI） */
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h2,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h3,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h4{
@@ -78,47 +73,55 @@ section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]{
   gap: 8px !important;
 }
 
-/* =========================
-   ✅✅ 備援：直接用 CSS :has 隱藏含特定 href 的 li（Chrome OK）
-   目的：不要顯示「出貨課首頁 / 進貨課首頁 / 大樹KPI首頁」
-   ========================= */
+/* =========================================================
+   ✅✅ 隱藏「群組首頁頁」：CSS 版本（href + label 雙保險）
+   ========================================================= */
+
+/* 1) 用 href url_path 關鍵字 */
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="outbound-home"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="inbound-home"]){  display:none !important; }
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="gt-kpi-home"]){    display:none !important; }
+
+/* 2) 用 label 文字（你 DevTools 看到的 span[label="xxx"]） */
+section[data-testid="stSidebar"] li:has(span[label="出貨課首頁"]){ display:none !important; }
+section[data-testid="stSidebar"] li:has(span[label="進貨課首頁"]){ display:none !important; }
+section[data-testid="stSidebar"] li:has(span[label="大樹KPI首頁"]){ display:none !important; }
 </style>
 
 <script>
 (function () {
-  const HIDE_KEYS = ["outbound-home", "inbound-home", "gt-kpi-home"];
+  const HIDE_LABELS = ["出貨課首頁", "進貨課首頁", "大樹KPI首頁"];
+  const HIDE_KEYS   = ["outbound-home", "inbound-home", "gt-kpi-home"];
 
-  function shouldHide(href){
-    if(!href) return false;
-    return HIDE_KEYS.some(k => href.includes(k));
-  }
-
-  function hideGroupHomeLinks(){
+  function hideByHrefAndLabel(){
     const sidebar = document.querySelector('section[data-testid="stSidebar"]');
     if(!sidebar) return;
 
-    // ✅ 直接掃整個 sidebar 內所有 nav link（不依賴 container 結構）
-    const links = sidebar.querySelectorAll('a[data-testid="stSidebarNavLink"][href]');
+    // ✅ 找所有 nav links
+    const links = sidebar.querySelectorAll('a[data-testid="stSidebarNavLink"]');
+
     links.forEach(a => {
-      const href = a.getAttribute("href") || a.href || "";
-      if (shouldHide(href)) {
+      const href = (a.getAttribute("href") || a.href || "");
+      const labelSpan = a.querySelector('span[label]');
+      const label = labelSpan ? (labelSpan.getAttribute("label") || "") : "";
+
+      const hitHref  = HIDE_KEYS.some(k => href.includes(k));
+      const hitLabel = HIDE_LABELS.includes(label);
+
+      if(hitHref || hitLabel){
         const li = a.closest("li");
-        if (li) li.style.display = "none";
+        if(li) li.style.display = "none";
         a.style.display = "none";
       }
     });
   }
 
-  function run(){ hideGroupHomeLinks(); }
+  function run(){ hideByHrefAndLabel(); }
 
   const root = document.querySelector('#root') || document.body;
   const obs = new MutationObserver(() => run());
   obs.observe(root, { childList: true, subtree: true });
 
-  // 多跑幾次，保證 Streamlit 重繪也能吃到
   run();
   setTimeout(run, 50);
   setTimeout(run, 200);
@@ -164,10 +167,10 @@ gt_kpi_home = st.Page(
 )
 gt_inbound_receipt = st.Page("pages/10_進貨驗收量.py", title="進貨驗收量", icon="📥")
 
-# ✅ ✅ 新增：放在「大樹KPI」底下的新模組（請把檔案放到 pages/11_出貨訂單應出量分析.py）
+# ✅ 新模組：出貨應出量分析（檔名你指定：pages/11_出貨訂單應出量分析.py）
 gt_ship_units = st.Page(
     "pages/11_出貨訂單應出量分析.py",
-    title="出貨應出量分析",
+    title="出貨訂單應出量分析",
     icon="📦",
 )
 
@@ -182,5 +185,3 @@ pg = st.navigation(
 )
 
 pg.run()
-
-
