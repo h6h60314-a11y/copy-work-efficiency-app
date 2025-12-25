@@ -1,4 +1,4 @@
-# pages/11_出貨訂單應出量分析.py
+# pages/11_出貨訂單應應出量分析.py
 import os
 import io
 import pandas as pd
@@ -8,26 +8,19 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 
 def robust_read_from_upload(uploaded_file) -> pd.DataFrame:
-    """
-    依副檔名自動嘗試多種讀取方式（從上傳檔 bytes 讀）
-    支援：Excel / CSV / HTML
-    """
     name = uploaded_file.name
     ext = os.path.splitext(name)[1].lower()
     data = uploaded_file.getvalue()
 
-    # Excel
     if ext in (".xlsx", ".xlsm", ".xltx", ".xltm"):
-        engines = ["openpyxl", "xlrd"]
-        for eng in engines:
+        for eng in ("openpyxl", "xlrd"):
             try:
                 return pd.read_excel(io.BytesIO(data), engine=eng)
             except Exception:
                 pass
 
     if ext == ".xls":
-        engines = ["xlrd", "openpyxl"]
-        for eng in engines:
+        for eng in ("xlrd", "openpyxl"):
             try:
                 return pd.read_excel(io.BytesIO(data), engine=eng)
             except Exception:
@@ -39,9 +32,7 @@ def robust_read_from_upload(uploaded_file) -> pd.DataFrame:
         except Exception as e:
             raise ValueError(f"讀取 .xlsb 失敗：{e}")
 
-    # CSV
     if ext == ".csv":
-        # 先用 utf-8，失敗再用 cp950
         for enc in ("utf-8", "utf-8-sig", "cp950"):
             try:
                 return pd.read_csv(io.BytesIO(data), encoding=enc)
@@ -49,7 +40,6 @@ def robust_read_from_upload(uploaded_file) -> pd.DataFrame:
                 pass
         raise ValueError("CSV 讀取失敗：請確認編碼（utf-8 / cp950）")
 
-    # HTML
     if ext in (".html", ".htm"):
         try:
             html_text = data.decode("utf-8", errors="ignore")
@@ -70,15 +60,13 @@ def compute_kpi(df: pd.DataFrame) -> dict:
 
     d = df.copy()
 
-    # 轉數值
     d["原始配庫存量"] = pd.to_numeric(d["原始配庫存量"], errors="coerce").fillna(0)
-    d["出貨入數"] = pd.to_numeric(d["出貨入數"], errors="coerce").replace(0, pd.NA)
+    d["出貨入數"] = pd.to_numeric(d["出貨入數"], errors="coerce")
     d["計量單位"] = pd.to_numeric(d["計量單位"], errors="coerce")
 
-    # 計算「原始配庫存出貨單位量」
-    d["原始配庫存出貨單位量"] = (d["原始配庫存量"] / d["出貨入數"]).fillna(0)
+    denom = d["出貨入數"].replace(0, pd.NA)
+    d["原始配庫存出貨單位量"] = (d["原始配庫存量"] / denom).fillna(0)
 
-    # 應出量計算（沿用你原本邏輯）
     mask1 = (d["原始配庫存出貨單位量"] == 1) & (d["計量單位"] == 2)
     total1 = d.loc[mask1, "原始配庫存量"].sum()
 
@@ -90,7 +78,6 @@ def compute_kpi(df: pd.DataFrame) -> dict:
 
     combined_2 = total1 + total2
 
-    # 統計 儲位 / 商品（可選）
     slot_count = d["儲位"].nunique() if "儲位" in d.columns else None
     item_count = d["商品"].nunique() if "商品" in d.columns else None
 
@@ -110,8 +97,17 @@ def df_to_xlsx_bytes(df: pd.DataFrame) -> bytes:
     return bio.getvalue()
 
 
+def _fmt_qty(v: float) -> str:
+    # 你現在畫面是顯示到小數點後 2 位左右（也可以改成 0 位）
+    return f"{v:,.2f}"
+
+
+def _fmt_int(v) -> str:
+    return "-" if v is None else f"{int(v):,}"
+
+
 def main():
-    st.set_page_config(page_title="出貨訂單應出量分析", page_icon="📦", layout="wide")
+    st.set_page_config(page_title="出貨應出量分析", page_icon="📦", layout="wide")
     inject_logistics_theme()
 
     set_page(
@@ -144,11 +140,24 @@ def main():
         st.error(str(e))
         st.stop()
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("出貨訂單庫存零散應出", f"{result['零散應出']:,}")
-    c2.metric("出貨訂單庫存成箱應出", f"{result['成箱應出']:,}")
-    c3.metric("儲位數", "-" if result["儲位數"] is None else f"{result['儲位數']:,}")
-    c4.metric("品項數", "-" if result["品項數"] is None else f"{result['品項數']:,}")
+    # ✅✅ 你要的呈現方式（兩欄分組）
+    left, right = st.columns([1, 1], gap="large")
+
+    with left:
+        st.markdown("#### 庫存出貨訂單量")
+        a, b = st.columns(2, gap="medium")
+        with a:
+            st.metric("出貨訂單庫存零散應出", _fmt_qty(result["零散應出"]))
+        with b:
+            st.metric("出貨訂單庫存成箱應出", _fmt_qty(result["成箱應出"]))
+
+    with right:
+        st.markdown("#### 總揀")
+        a, b = st.columns(2, gap="medium")
+        with a:
+            st.metric("儲位數", _fmt_int(result["儲位數"]))
+        with b:
+            st.metric("品項數", _fmt_int(result["品項數"]))
 
     st.markdown("### 📄 明細預覽（已加入：原始配庫存出貨單位量）")
     st.dataframe(result["df_out"], use_container_width=True, height=520)
@@ -159,7 +168,6 @@ def main():
         data=xlsx_bytes,
         file_name=os.path.splitext(uploaded.name)[0] + "_處理結果.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=False,
     )
 
 
