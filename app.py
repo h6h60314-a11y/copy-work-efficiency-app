@@ -142,10 +142,10 @@ gt_daily_attendance = page_if_exists("app_pages/17_每日出勤工時分析.py",
 
 # ✅ 18_儲位使用率（KPI 入口）
 slot_util_page = page_if_exists(
-    "app_pages/18_儲位使用率.py",
-    "儲位使用率(18)",
+    "pages/18_各類儲區使用率.py",
+    "各類儲區使用率",
     "🧊",
-    url_path="gt-slot-util-18"
+    url_path="slot-zone-util-18"
 )
 
 pg = st.navigation(
@@ -163,3 +163,4 @@ pg = st.navigation(
 )
 
 pg.run()
+
