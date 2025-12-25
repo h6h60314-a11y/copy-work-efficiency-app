@@ -131,7 +131,6 @@ def _compute(df: pd.DataFrame) -> dict:
     diff_nonzero_count = (diff != 0).sum()
 
     # 正確率（差異=0 / 有儲位的筆數）
-    # 若你想用「全列」當分母，把 denom 改成 len(df)
     denom = max(int(slot_count), 0)
     correct_count = max(denom - int(diff_nonzero_count), 0)
     accuracy = (correct_count / denom) if denom > 0 else 0.0
@@ -147,6 +146,7 @@ def _compute(df: pd.DataFrame) -> dict:
         "正確率": float(accuracy),
         "差異>0總和": float(diff_positive_sum),
         "差異<0總和": float(diff_negative_sum),
+        "差異<0絕對值": float(abs(diff_negative_sum)),  # ✅ 顯示「缺少總和」用
     }
 
 
@@ -168,41 +168,58 @@ def main():
   box-shadow: 0 10px 26px rgba(15,23,42,.06);
   margin: 10px 0 6px 0;
 }
+
+/* ✅ 標題比數字大，但整體更舒服 */
 .kpi-title{
-  font-size: 26px;          /* 標題比數字大 */
+  font-size: 18px;
   font-weight: 950;
   color: rgba(15,23,42,.92);
   margin: 0 0 10px 0;
 }
+
+/* ✅ 6格：三欄排列 */
 .kpi-grid{
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
+
 .metric-box{
   background: rgba(248,250,252,.92);
   border: 1px solid rgba(15,23,42,.10);
   border-radius: 12px;
   padding: 10px 12px;
 }
+
+/* ✅ label 小一點 */
 .metric-label{
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 850;
   color: rgba(15,23,42,.70);
   margin-bottom: 4px;
 }
+
+/* ✅ 數字小一點 */
 .metric-value{
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 950;
-  line-height: 1.12;
+  line-height: 1.18;
   color: rgba(15,23,42,.94);
 }
+
+/* ✅ 正確率更醒目 */
+.metric-value-main{
+  font-size: 20px;
+  font-weight: 980;
+}
+
 .kpi-note{
   margin-top: 8px;
   font-size: 12.5px;
   color: rgba(15,23,42,.62);
   font-weight: 650;
 }
+
 @media (max-width: 900px){
   .kpi-grid{ grid-template-columns: 1fr; }
 }
@@ -253,6 +270,7 @@ def main():
         st.dataframe(df.head(50), use_container_width=True)
         st.stop()
 
+    # ✅ 依你要求：差異<0 用「缺少總和」顯示絕對值，不顯示負號
     st.markdown(
         f"""
 <div class="kpi-wrap">
@@ -273,15 +291,15 @@ def main():
 
     <div class="metric-box">
       <div class="metric-label">盤點正確率（差異=0 / 儲位筆數）</div>
-      <div class="metric-value">{_fmt_pct(result["正確率"])}</div>
+      <div class="metric-value metric-value-main">{_fmt_pct(result["正確率"])}</div>
     </div>
     <div class="metric-box">
-      <div class="metric-label">差異 > 0（總和）</div>
+      <div class="metric-label">差異 &gt; 0（多帳總和）</div>
       <div class="metric-value">{_fmt_num(result["差異>0總和"])}</div>
     </div>
     <div class="metric-box">
-      <div class="metric-label">差異 < 0（總和）</div>
-      <div class="metric-value">{_fmt_num(result["差異<0總和"])}</div>
+      <div class="metric-label">差異 &lt; 0（缺少總和）</div>
+      <div class="metric-value">{_fmt_num(result["差異<0絕對值"])}</div>
     </div>
   </div>
   <div class="kpi-note">提示：若你希望「正確率」用全列當分母，我可以再幫你改成以總列數計算。</div>
