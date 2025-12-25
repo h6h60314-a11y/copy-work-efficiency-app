@@ -118,60 +118,61 @@ def _validate_cols(df: pd.DataFrame) -> None:
 
 
 def _compute(df: pd.DataFrame) -> dict:
-    # 商品號去重
+    # 以「儲位有值的列」為基準，讓筆數/正確率一致且直觀
+    base = df["儲位"].notna()
+
+    # 商品號去重（全檔）
     unique_item_count = int(df["商品號"].dropna().nunique())
 
-    # 儲位筆數（含重複）
-    slot_count = int(df["儲位"].dropna().shape[0])
+    # 儲位筆數（含重複）：只算儲位有值的列
+    slot_count = int(base.sum())
 
     # 差異轉數值
     diff = pd.to_numeric(df["差異"], errors="coerce").fillna(0)
 
-    # 差異 ≠ 0 筆數
-    diff_nonzero_count = int((diff != 0).sum())
+    # 只在 base 範圍內統計
+    diff_nonzero_count = int(((diff != 0) & base).sum())
+    correct_count = int(((diff == 0) & base).sum())
 
-    # 正確率（差異=0 / 儲位筆數）
-    denom = max(int(slot_count), 0)
-    correct_count = max(denom - int(diff_nonzero_count), 0)
-    accuracy = (correct_count / denom) if denom > 0 else 0.0
+    accuracy = (correct_count / slot_count) if slot_count > 0 else 0.0
 
-    # 差異 > 0 總和 / 差異 < 0 絕對值
-    diff_positive_sum = float(diff[diff > 0].sum())
-    diff_negative_sum_abs = float(abs(diff[diff < 0].sum()))
+    diff_positive_sum = float(diff[(diff > 0) & base].sum())
+    diff_negative_sum_abs = float(abs(diff[(diff < 0) & base].sum()))
 
     return {
-        "商品號去重": unique_item_count,
-        "儲位筆數": slot_count,
-        "差異≠0筆數": diff_nonzero_count,
-        "差異=0筆數": correct_count,
-        "正確率": float(accuracy),
+        "盤點商品號去重": unique_item_count,
+        "盤點儲位數": slot_count,
+        "盤點≠0筆數": diff_nonzero_count,
         "差異>0總和": diff_positive_sum,
-        "差異<0絕對值": diff_negative_sum_abs,
+        "差異<0缺少總和": diff_negative_sum_abs,
+        "盤點正確率": float(accuracy),
     }
 
 
 def _kpi_html(result: dict) -> str:
-    # ✅ 注意：這裡「每一行都不縮排」，避免被 Markdown 當 code block
+    # ✅ 每一行不縮排，避免被 Markdown 當 code block
     return (
         '<div class="kpi-wrap">'
         '<div class="kpi-title">盤點正確率</div>'
         '<div class="kpi-grid">'
 
+        # Row 1
         '<div class="metric-box">'
-        '<div class="metric-label">儲位筆數（含重複）</div>'
-        f'<div class="metric-value">{_fmt_int(result["儲位筆數"])}</div>'
+        '<div class="metric-label">盤點商品號去重</div>'
+        f'<div class="metric-value">{_fmt_int(result["盤點商品號去重"])}</div>'
         '</div>'
 
         '<div class="metric-box">'
-        '<div class="metric-label">差異 ≠ 0 筆數</div>'
-        f'<div class="metric-value">{_fmt_int(result["差異≠0筆數"])}</div>'
+        '<div class="metric-label">盤點儲位數（含重複）</div>'
+        f'<div class="metric-value">{_fmt_int(result["盤點儲位數"])}</div>'
         '</div>'
 
         '<div class="metric-box">'
-        '<div class="metric-label">盤點正確率（差異=0 / 儲位筆數）</div>'
-        f'<div class="metric-value metric-value-main">{_fmt_pct(result["正確率"])}</div>'
+        '<div class="metric-label">盤點 ≠ 0 筆數</div>'
+        f'<div class="metric-value">{_fmt_int(result["盤點≠0筆數"])}</div>'
         '</div>'
 
+        # Row 2
         '<div class="metric-box">'
         '<div class="metric-label">差異 &gt; 0（多帳總和）</div>'
         f'<div class="metric-value">{_fmt_num0(result["差異>0總和"])}</div>'
@@ -179,16 +180,16 @@ def _kpi_html(result: dict) -> str:
 
         '<div class="metric-box">'
         '<div class="metric-label">差異 &lt; 0（缺少總和）</div>'
-        f'<div class="metric-value">{_fmt_num0(result["差異<0絕對值"])}</div>'
+        f'<div class="metric-value">{_fmt_num0(result["差異<0缺少總和"])}</div>'
         '</div>'
 
         '<div class="metric-box">'
-        '<div class="metric-label">差異 = 0 筆數（正確筆數）</div>'
-        f'<div class="metric-value">{_fmt_int(result["差異=0筆數"])}</div>'
+        '<div class="metric-label">盤點正確率（差異=0 / 儲位筆數）</div>'
+        f'<div class="metric-value metric-value-main">{_fmt_pct(result["盤點正確率"])}</div>'
         '</div>'
 
         '</div>'
-        '<div class="kpi-note">提示：目前正確率分母採「儲位欄有值的列數」。若要改用「總列數」當分母，我可以幫你一鍵切換。</div>'
+        '<div class="kpi-note">提示：統計基準為「儲位欄有值的列」。若要改成以「總列數」為分母，我也可以幫你切換。</div>'
         '</div>'
     )
 
@@ -299,7 +300,6 @@ def main():
         st.dataframe(df.head(50), use_container_width=True)
         st.stop()
 
-    # ✅ 這裡會正常渲染，不再印出 HTML 原始碼
     st.markdown(_kpi_html(result), unsafe_allow_html=True)
 
     st.markdown("### 明細預覽（前 200 列）")
