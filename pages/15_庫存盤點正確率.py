@@ -118,26 +118,18 @@ def _validate_cols(df: pd.DataFrame) -> None:
 
 
 def _compute(df: pd.DataFrame) -> dict:
-    # 商品號去重
     unique_item_count = df["商品號"].dropna().nunique()
-
-    # 儲位筆數（含重複）：等同有值的列數
     slot_count = df["儲位"].dropna().shape[0]
 
-    # 差異轉數值
     diff = pd.to_numeric(df["差異"], errors="coerce").fillna(0)
+    diff_nonzero_count = int((diff != 0).sum())
 
-    # 差異 ≠ 0 筆數
-    diff_nonzero_count = (diff != 0).sum()
-
-    # 正確率（差異=0 / 有儲位的筆數）
     denom = max(int(slot_count), 0)
-    correct_count = max(denom - int(diff_nonzero_count), 0)
+    correct_count = max(denom - diff_nonzero_count, 0)
     accuracy = (correct_count / denom) if denom > 0 else 0.0
 
-    # 差異 >0 總和、差異 <0 總和
-    diff_positive_sum = diff[diff > 0].sum()
-    diff_negative_sum = diff[diff < 0].sum()
+    diff_positive_sum = float(diff[diff > 0].sum())
+    diff_negative_sum = float(diff[diff < 0].sum())
 
     return {
         "商品號去重": int(unique_item_count),
@@ -145,8 +137,7 @@ def _compute(df: pd.DataFrame) -> dict:
         "差異≠0筆數": int(diff_nonzero_count),
         "正確率": float(accuracy),
         "差異>0總和": float(diff_positive_sum),
-        "差異<0總和": float(diff_negative_sum),
-        "差異<0絕對值": float(abs(diff_negative_sum)),  # ✅ 顯示「缺少總和」用
+        "差異<0絕對值": float(abs(diff_negative_sum)),  # 顯示「缺少總和」用
     }
 
 
@@ -169,7 +160,6 @@ def main():
   margin: 10px 0 6px 0;
 }
 
-/* ✅ 標題比數字大，但整體更舒服 */
 .kpi-title{
   font-size: 18px;
   font-weight: 950;
@@ -177,7 +167,7 @@ def main():
   margin: 0 0 10px 0;
 }
 
-/* ✅ 6格：三欄排列 */
+/* ✅ 3 欄排列，滿 3 欄自動換下一列 */
 .kpi-grid{
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -191,7 +181,6 @@ def main():
   padding: 10px 12px;
 }
 
-/* ✅ label 小一點 */
 .metric-label{
   font-size: 12px;
   font-weight: 850;
@@ -199,7 +188,6 @@ def main():
   margin-bottom: 4px;
 }
 
-/* ✅ 數字小一點 */
 .metric-value{
   font-size: 17px;
   font-weight: 950;
@@ -207,7 +195,7 @@ def main():
   color: rgba(15,23,42,.94);
 }
 
-/* ✅ 正確率更醒目 */
+/* ✅ 讓「正確率」更醒目 */
 .metric-value-main{
   font-size: 20px;
   font-weight: 980;
@@ -270,20 +258,22 @@ def main():
         st.dataframe(df.head(50), use_container_width=True)
         st.stop()
 
-    # ✅ 依你要求：差異<0 用「缺少總和」顯示絕對值，不顯示負號
-    st.markdown(
-        f"""
+    # ✅ 重點：全部 KPI 卡片一次渲染，避免 HTML 變文字
+    html = f"""
 <div class="kpi-wrap">
-  <div class="kpi-title">盤點摘要</div>
+  <div class="kpi-title">盤點正確率</div>
+
   <div class="kpi-grid">
     <div class="metric-box">
       <div class="metric-label">商品號（去重）</div>
       <div class="metric-value">{_fmt_int(result["商品號去重"])}</div>
     </div>
+
     <div class="metric-box">
       <div class="metric-label">儲位筆數（含重複）</div>
       <div class="metric-value">{_fmt_int(result["儲位筆數"])}</div>
     </div>
+
     <div class="metric-box">
       <div class="metric-label">差異 ≠ 0 筆數</div>
       <div class="metric-value">{_fmt_int(result["差異≠0筆數"])}</div>
@@ -293,20 +283,22 @@ def main():
       <div class="metric-label">盤點正確率（差異=0 / 儲位筆數）</div>
       <div class="metric-value metric-value-main">{_fmt_pct(result["正確率"])}</div>
     </div>
+
     <div class="metric-box">
       <div class="metric-label">差異 &gt; 0（多帳總和）</div>
       <div class="metric-value">{_fmt_num(result["差異>0總和"])}</div>
     </div>
+
     <div class="metric-box">
       <div class="metric-label">差異 &lt; 0（缺少總和）</div>
       <div class="metric-value">{_fmt_num(result["差異<0絕對值"])}</div>
     </div>
   </div>
+
   <div class="kpi-note">提示：若你希望「正確率」用全列當分母，我可以再幫你改成以總列數計算。</div>
 </div>
-""",
-        unsafe_allow_html=True,
-    )
+"""
+    st.markdown(html, unsafe_allow_html=True)
 
     st.markdown("### 明細預覽（前 200 列）")
     st.dataframe(df.head(200), use_container_width=True, height=420)
