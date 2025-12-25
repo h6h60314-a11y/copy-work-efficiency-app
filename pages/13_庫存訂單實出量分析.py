@@ -2,8 +2,7 @@
 import io
 import os
 import re
-import tempfile
-from typing import Tuple, Optional
+from typing import Tuple, Dict, List
 
 import pandas as pd
 import streamlit as st
@@ -19,33 +18,75 @@ inject_logistics_theme()
 
 
 # -----------------------------
-# Helpers
+# Requirements
 # -----------------------------
 REQUIRED_COLS = [
     "箱類型", "packqty", "入數",
     "buyersreference", "BOXTYPE",
     "externorderkey", "SKU", "boxid"
 ]
-
 BUYERS_OK = {"GSO", "GCOR"}
 
 
-def _norm_cols(df: pd.DataFrame) -> pd.DataFrame:
+# -----------------------------
+# Column mapping (auto)
+# 你可以繼續加同義欄位，越完整越不會讀不到
+# key=標準欄名, values=可能出現的同義欄名（大小寫不拘、可含空白/底線）
+# -----------------------------
+COLUMN_SYNONYMS: Dict[str, List[str]] = {
+    "箱類型": ["箱類型", "箱型", "箱别", "箱別", "boxtype_name", "carton_type", "箱種", "箱种"],
+    "packqty": ["packqty", "pack_qty", "pack quantity", "數量", "数量", "pcs", "qty", "pack"],
+    "入數": ["入數", "入数", "入數量", "入数量", "innum", "in_qty", "unitspercase", "units_per_case", "casepack", "case_pack"],
+    "buyersreference": ["buyersreference", "buyers_reference", "buyer reference", "buyerref", "order_type", "單別", "单别", "refer", "buyers ref"],
+    "BOXTYPE": ["boxtype", "box_type", "箱別型態", "箱型態", "箱别型态", "箱類型代碼", "箱类型代码"],
+    "externorderkey": ["externorderkey", "extern_order_key", "orderkey", "order_key", "order id", "order_id", "訂單號", "订单号", "單號", "单号", "externorder"],
+    "SKU": ["sku", "item", "itemcode", "item_code", "商品", "商品碼", "商品码", "品號", "品号", "料號", "料号"],
+    "boxid": ["boxid", "box_id", "box id", "箱號", "箱号", "箱碼", "箱码", "cartonid", "carton_id", "containerid", "container_id"],
+}
+
+
+def _normalize_col(s: str) -> str:
+    """把欄名統一成：小寫 + 去空白 + 移除特殊字元"""
+    s = str(s).strip()
+    s = s.replace("\u3000", " ")  # 全形空白
+    s = re.sub(r"\s+", "", s)     # 移除所有空白
+    s = s.replace("-", "_").replace(".", "_").replace("/", "_")
+    s = re.sub(r"[^0-9a-zA-Z_\u4e00-\u9fff]", "", s)  # 保留中英數與底線
+    return s.lower()
+
+
+def _apply_column_mapping(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, str]]:
+    """
+    依 COLUMN_SYNONYMS 自動把同義欄名 rename 成標準欄名
+    回傳：新df + 命中的對照表（原欄名 -> 標準欄名）
+    """
     df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+    orig_cols = list(df.columns)
+
+    norm_to_orig = {}
+    for c in orig_cols:
+        norm_to_orig[_normalize_col(c)] = c
+
+    rename_map = {}  # orig -> std
+    for std, syns in COLUMN_SYNONYMS.items():
+        for syn in syns:
+            key = _normalize_col(syn)
+            if key in norm_to_orig:
+                rename_map[norm_to_orig[key]] = std
+                break
+
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
+    return df, rename_map
 
 
 def _is_provider_fake_xls(raw: bytes) -> bool:
-    # 你遇到的錯誤：Expected BOF record; found b'PROVIDER'
-    # 通常是 HTML table 或文字被包成 .xls
     head = raw[:2048].upper()
     return (b"PROVIDER" in head) or (b"<HTML" in head) or (b"<TABLE" in head)
 
 
 def _read_html_from_bytes(raw: bytes) -> pd.DataFrame:
-    # 用 pandas 直接吃 HTML
-    # 先嘗試 utf-8，再退回 big5/latin1
     for enc in ("utf-8", "utf-8-sig", "big5", "cp950", "latin1"):
         try:
             text = raw.decode(enc, errors="ignore")
@@ -58,15 +99,6 @@ def _read_html_from_bytes(raw: bytes) -> pd.DataFrame:
 
 
 def _read_txt_to_df(raw: bytes) -> pd.DataFrame:
-    """
-    TXT 可能是：
-    - Tab 分隔
-    - 逗號分隔
-    - 管線 | 分隔
-    - 固定寬度（比較少）
-    這邊用「自動偵測分隔符」策略。
-    """
-    # 嘗試多種編碼
     content = None
     for enc in ("utf-8", "utf-8-sig", "cp950", "big5", "latin1"):
         try:
@@ -78,8 +110,6 @@ def _read_txt_to_df(raw: bytes) -> pd.DataFrame:
         content = raw.decode("latin1", errors="ignore")
 
     sample = content[:5000]
-
-    # 分隔符偵測：tab > comma > pipe
     sep = None
     if "\t" in sample:
         sep = "\t"
@@ -90,71 +120,60 @@ def _read_txt_to_df(raw: bytes) -> pd.DataFrame:
 
     if sep:
         return pd.read_csv(io.StringIO(content), sep=sep, engine="python")
-    # 沒偵測到就用自動空白分隔
     return pd.read_csv(io.StringIO(content), sep=r"\s+", engine="python")
 
 
 def _read_any(uploaded) -> Tuple[pd.DataFrame, str]:
-    """
-    回傳 (df, source_name)
-    """
     name = uploaded.name
     ext = os.path.splitext(name)[1].lower()
     raw = uploaded.getvalue()
 
-    # TXT -> DF
     if ext == ".txt":
         df = _read_txt_to_df(raw)
-        return _norm_cols(df), name
+        return df, name
 
-    # CSV
     if ext == ".csv":
         df = pd.read_csv(io.BytesIO(raw))
-        return _norm_cols(df), name
+        return df, name
 
-    # HTML/HTM
     if ext in (".html", ".htm"):
         df = _read_html_from_bytes(raw)
-        return _norm_cols(df), name
+        return df, name
 
-    # XLSX/XLSM
     if ext in (".xlsx", ".xlsm"):
         df = pd.read_excel(io.BytesIO(raw), engine="openpyxl")
-        return _norm_cols(df), name
+        return df, name
 
-    # XLS：可能真 xls，也可能假 xls(HTML)
     if ext == ".xls":
         if _is_provider_fake_xls(raw):
             df = _read_html_from_bytes(raw)
-            return _norm_cols(df), name
-        # 真 xls
+            return df, name
         try:
             df = pd.read_excel(io.BytesIO(raw), engine="xlrd")
-            return _norm_cols(df), name
+            return df, name
         except Exception:
-            # 最後再嘗試當 html
             df = _read_html_from_bytes(raw)
-            return _norm_cols(df), name
+            return df, name
 
-    # 其他：嘗試用 read_excel(openpyxl) / read_html
+    # fallback
     try:
         df = pd.read_excel(io.BytesIO(raw), engine="openpyxl")
-        return _norm_cols(df), name
+        return df, name
     except Exception:
         df = _read_html_from_bytes(raw)
-        return _norm_cols(df), name
+        return df, name
 
 
-def _validate_cols(df: pd.DataFrame):
+def _validate_cols(df: pd.DataFrame) -> List[str]:
     missing = [c for c in REQUIRED_COLS if c not in df.columns]
-    if missing:
-        raise KeyError(f"缺少必要欄位：{missing}")
+    return missing
 
 
 def _to_number(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     for c in ("packqty", "入數", "BOXTYPE"):
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
 
@@ -166,7 +185,6 @@ def _compute(df: pd.DataFrame) -> dict:
 
     # 新增「出貨單位數量」
     if "出貨單位數量" not in df.columns:
-        # 放在 入數 後面（若存在）
         try:
             idx = df.columns.get_loc("入數")
             df.insert(idx + 1, "出貨單位數量", 0)
@@ -175,8 +193,7 @@ def _compute(df: pd.DataFrame) -> dict:
 
     df["出貨單位數量"] = df["packqty"] / df["入數"]
 
-    # A. 實際出貨量（PTL）
-    mask_base = df["buyersreference"].isin(BUYERS_OK)
+    mask_base = df["buyersreference"].astype(str).isin(BUYERS_OK)
 
     mask0 = mask_base & (df["BOXTYPE"] == 0)
     total_packqty_box0 = df.loc[mask0, "packqty"].sum()
@@ -190,7 +207,6 @@ def _compute(df: pd.DataFrame) -> dict:
     total_combined = total_packqty_box1_eq + total_units_box1_neq
 
     filtered = df[mask_base].copy()
-    # 訂單筆數：externorderkey + SKU 組合
     pivot = (
         filtered
         .pivot_table(index=["externorderkey", "SKU"], aggfunc="size")
@@ -198,7 +214,6 @@ def _compute(df: pd.DataFrame) -> dict:
     )
     total_groups = int(pivot.shape[0])
 
-    # B. 混庫出貨件數（boxid 不重複）
     df_box0 = df[df["BOXTYPE"] == 0]
     df_box1 = df[df["BOXTYPE"] == 1]
     count_box0 = int(df_box0["boxid"].nunique())
@@ -231,7 +246,7 @@ def _fmt_num(x) -> str:
 set_page(
     "庫存訂單實出量分析",
     icon="📦",
-    subtitle="支援 TXT 先轉成 Excel 再計算｜排除箱類型=站所｜實際出貨量(PTL)｜混庫出貨件數",
+    subtitle="支援 TXT / 假xls(PROVIDER)｜欄位自動對照｜排除箱類型=站所｜實際出貨量(PTL)｜混庫出貨件數",
 )
 
 card_open("📌 上傳明細檔")
@@ -239,43 +254,51 @@ uploaded = st.file_uploader(
     "請上傳明細檔（XLSX / XLSM / XLS / CSV / HTML / TXT）",
     type=["xlsx", "xlsm", "xls", "csv", "html", "htm", "txt"],
 )
-
-st.caption("必要欄位：箱類型、packqty、入數、buyersreference、BOXTYPE、externorderkey、SKU、boxid")
+st.caption("必要欄位：箱類型、packqty、入數、buyersreference、BOXTYPE、externorderkey、SKU、boxid（可同義欄名自動對照）")
 card_close()
 
 if not uploaded:
     st.stop()
 
-# ✅ 這裡就是你要的「資料讀取中」
 progress = st.progress(0, text="資料讀取中…")
 with st.spinner("資料讀取中…請稍候（檔案越大越久）"):
-    # 1) 讀取
     progress.progress(15, text="資料讀取中…（讀取檔案）")
     df, src_name = _read_any(uploaded)
 
-    # 2) 欄位檢查
-    progress.progress(35, text="資料讀取中…（欄位檢查）")
-    _validate_cols(df)
+    progress.progress(35, text="資料讀取中…（欄位清理/自動對照）")
+    df.columns = [str(c).strip() for c in df.columns]
+    df, hit_map = _apply_column_mapping(df)
 
-    # 3) 轉數字 + 清理
-    progress.progress(55, text="資料讀取中…（資料清理/轉型）")
+    progress.progress(55, text="資料讀取中…（欄位檢查）")
+    missing = _validate_cols(df)
+
+    # ✅ 缺欄位：不要讓整頁爆掉，直接顯示提示 + 欄位清單
+    if missing:
+        progress.empty()
+        st.error(f"缺少必要欄位：{missing}")
+
+        if hit_map:
+            st.info("已自動對照（原欄名 → 標準欄名）：")
+            st.write(hit_map)
+
+        st.markdown("#### 你上傳檔案目前的欄位（請對照是否名稱不同/有同義欄位）")
+        st.dataframe(pd.DataFrame({"columns": list(df.columns)}), use_container_width=True, height=300)
+
+        st.stop()
+
+    progress.progress(70, text="資料讀取中…（資料轉型）")
     df = _to_number(df)
 
-    # 4) 計算
-    progress.progress(80, text="資料讀取中…（計算中）")
+    progress.progress(90, text="資料讀取中…（計算中）")
     result = _compute(df)
 
     progress.progress(100, text="完成 ✅")
 
-# 讀完就把進度條收掉（畫面更乾淨）
 progress.empty()
-
 st.success(f"已讀取：{src_name}（{len(result['df']):,} 筆 / {len(result['df'].columns)} 欄）")
 
-# -----------------------------
 # Metrics
-# -----------------------------
-left, mid, right = st.columns([1.2, 0.12, 1.2])
+left, right = st.columns([1, 1], gap="large")
 
 with left:
     st.markdown("### 實際出貨量（PTL）")
@@ -290,13 +313,10 @@ with right:
 
 st.divider()
 
-# -----------------------------
-# Preview & Export
-# -----------------------------
 st.markdown("### 明細預覽（含：出貨單位數量）")
 st.dataframe(result["df"].head(200), use_container_width=True, height=420)
 
-# 匯出
+# Export
 out_df = result["df"].copy()
 buf = io.BytesIO()
 with pd.ExcelWriter(buf, engine="openpyxl") as writer:
