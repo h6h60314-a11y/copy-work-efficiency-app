@@ -185,7 +185,7 @@ def main():
   margin: 10px 0 6px 0;
 }
 .kpi-title{
-  font-size: 26px;          /* ✅ 比數字大 */
+  font-size: 25px;          /* ✅ 比數字大 */
   font-weight: 950;
   letter-spacing: .2px;
   color: rgba(15,23,42,.92);
