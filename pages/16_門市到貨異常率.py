@@ -1,7 +1,6 @@
 # pages/16_門市到貨異常率.py
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 from io import BytesIO
 
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
@@ -20,7 +19,6 @@ def _fmt_int(x) -> str:
 def _fmt_num(x) -> str:
     try:
         v = float(x)
-        # 保留正負號，千分位
         if abs(v - int(v)) < 1e-9:
             return f"{int(v):,}"
         return f"{v:,.2f}"
@@ -145,14 +143,11 @@ def _to_num(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 # business logic
 # ----------------------------
 def _compute_metrics(df: pd.DataFrame, col_box: str, col_reason: str) -> dict:
-    # 箱號筆數（含重複）：列數（箱號不為空）
     count_box_rows = int(df[col_box].dropna().shape[0])
 
-    # 多貨 / 短少：差異加總（差異 = 實到 - 應到）
     sum_excess = float(df.loc[df[col_reason] == "到貨多貨", "差異"].sum())
     sum_shortage = float(df.loc[df[col_reason] == "到貨短少", "差異"].sum())
 
-    # 凹損/破損/漏液：優先用「數量」加總；沒有則退回用 abs(差異) 加總
     if "數量" in df.columns:
         sum_defect = float(
             df.loc[df[col_reason].isin(["到貨凹損", "到貨破損", "到貨漏液"]), "數量"].sum()
@@ -162,7 +157,6 @@ def _compute_metrics(df: pd.DataFrame, col_box: str, col_reason: str) -> dict:
             df.loc[df[col_reason].isin(["到貨凹損", "到貨破損", "到貨漏液"]), "差異"].abs().sum()
         )
 
-    # 你指定的 4 個 KPI
     return {
         "箱號總筆數": count_box_rows,
         "到貨多貨總差異": sum_excess,
@@ -179,111 +173,74 @@ def _download_xlsx_bytes(df: pd.DataFrame) -> bytes:
     return bio.getvalue()
 
 
-def _render_kpi_4cols(metrics: dict):
-    # ✅ 用 components.html，避免 HTML 被當成文字印出
-    kpi_html = f"""
-<div class="kpi-wrap">
-  <div class="kpi-title">門市到貨異常統計</div>
-
-  <div class="kpi-grid">
-    <div class="metric-box">
-      <div class="metric-label">箱號總筆數（含重複）</div>
-      <div class="metric-value">{_fmt_int(metrics["箱號總筆數"])}</div>
-    </div>
-
-    <div class="metric-box">
-      <div class="metric-label">到貨多貨總差異（差異加總）</div>
-      <div class="metric-value">{_fmt_num(metrics["到貨多貨總差異"])}</div>
-    </div>
-
-    <div class="metric-box">
-      <div class="metric-label">到貨短少總差異（差異加總）</div>
-      <div class="metric-value">{_fmt_num(metrics["到貨短少總差異"])}</div>
-    </div>
-
-    <div class="metric-box">
-      <div class="metric-label">到貨凹損 / 破損 / 漏液總數量（數量加總）</div>
-      <div class="metric-value">{_fmt_num(metrics["到貨凹損破損漏液總數量"])}</div>
-    </div>
-  </div>
-
-  <div class="kpi-note">已自動計算：差異 = 實到數量 - 應到數量（並排除「異常原因」含「供應商」）。</div>
-</div>
-
-<style>
-  :root {{
-    --text: rgba(15,23,42,.92);
-    --muted: rgba(15,23,42,.70);
-    --border: rgba(15,23,42,.10);
-    --bg: rgba(255,255,255,.86);
-    --card: rgba(248,250,252,.92);
-  }}
-  body {{
-    margin: 0;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-                 "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
-    color: var(--text);
-  }}
-  .kpi-wrap {{
-    width: 100%;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 14px 14px 12px 14px;
-    box-shadow: 0 10px 26px rgba(15,23,42,.06);
-    box-sizing: border-box;
-  }}
-  .kpi-title {{
-    font-size: 18px;
-    font-weight: 950;
-    margin: 0 0 10px 0;
-  }}
-  .kpi-grid {{
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr)); /* ✅ 4 欄 */
-    gap: 10px;
-  }}
-  .metric-box {{
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 10px 12px;
-    box-sizing: border-box;
-  }}
-  .metric-label {{
-    font-size: 12.5px;
-    font-weight: 850;
-    color: var(--muted);
-    margin-bottom: 4px;
-    line-height: 1.25;
-  }}
-  .metric-value {{
-    font-size: 20px;
-    font-weight: 950;
-    line-height: 1.12;
-  }}
-  .kpi-note {{
-    margin-top: 8px;
-    font-size: 12.5px;
-    color: rgba(15,23,42,.62);
-    font-weight: 650;
-  }}
-  @media (max-width: 1100px) {{
-    .kpi-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
-  }}
-  @media (max-width: 700px) {{
-    .kpi-grid {{ grid-template-columns: 1fr; }}
-  }}
-</style>
-"""
-    # 這個高度足夠（4 卡 + note）
-    components.html(kpi_html, height=230, scrolling=False)
-
-
 def main():
     st.set_page_config(page_title="門市到貨異常率", page_icon="🏪", layout="wide")
     inject_logistics_theme()
     set_page("門市到貨異常率", icon="🏪", subtitle="上傳異常彙整｜依箱號年/日期篩選｜統計多貨/短少/凹損破損漏液")
+
+    # ✅ 4 欄 KPI 版面（同寬、不卡整列）
+    st.markdown(
+        r"""
+<style>
+.kpi-wrap{
+  width: 100%;
+  max-width: none;                 /* ✅ 與上傳區同寬 */
+  background: rgba(255,255,255,.86);
+  border: 1px solid rgba(15,23,42,.10);
+  border-radius: 14px;
+  padding: 14px 14px 12px 14px;
+  box-shadow: 0 10px 26px rgba(15,23,42,.06);
+  margin: 10px 0 8px 0;
+  box-sizing: border-box;
+}
+.kpi-title{
+  font-size: 18px;
+  font-weight: 950;
+  color: rgba(15,23,42,.92);
+  margin: 0 0 10px 0;
+}
+.kpi-grid{
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));   /* ✅ 4 欄 */
+  gap: 10px;
+}
+.metric-box{
+  min-width: 0;
+  background: rgba(248,250,252,.92);
+  border: 1px solid rgba(15,23,42,.10);
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
+.metric-label{
+  font-size: 12.5px;
+  font-weight: 850;
+  color: rgba(15,23,42,.70);
+  margin-bottom: 4px;
+  line-height: 1.25;
+}
+.metric-value{
+  font-size: 20px;
+  font-weight: 950;
+  line-height: 1.12;
+  color: rgba(15,23,42,.94);
+}
+.kpi-note{
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: rgba(15,23,42,.62);
+  font-weight: 650;
+}
+@media (max-width: 1200px){
+  .kpi-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px){
+  .kpi-grid{ grid-template-columns: 1fr; }
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
 
     # ----------------------------
     # upload
@@ -338,7 +295,7 @@ def main():
     if year_sel and date_sel:
         df = df[(df["年"] == str(year_sel)) & (df["日期"] == str(date_sel))].copy()
 
-    # 排除供應商原因（你不想顯示剔除筆數，但仍保留規則）
+    # 排除供應商原因（不顯示剔除筆數，但保留規則）
     df = df[~df[col_reason].astype(str).str.contains("供應商", na=False)].copy()
 
     # 轉數值 + 計算差異
@@ -350,7 +307,38 @@ def main():
     # KPI + export + preview
     # ----------------------------
     metrics = _compute_metrics(df, col_box, col_reason)
-    _render_kpi_4cols(metrics)
+
+    # ✅ 這裡用 st.markdown 渲染，不會變成文字
+    kpi_html = f"""
+<div class="kpi-wrap">
+  <div class="kpi-title">門市到貨異常統計</div>
+
+  <div class="kpi-grid">
+    <div class="metric-box">
+      <div class="metric-label">箱號總筆數（含重複）</div>
+      <div class="metric-value">{_fmt_int(metrics["箱號總筆數"])}</div>
+    </div>
+
+    <div class="metric-box">
+      <div class="metric-label">到貨多貨總差異（差異加總）</div>
+      <div class="metric-value">{_fmt_num(metrics["到貨多貨總差異"])}</div>
+    </div>
+
+    <div class="metric-box">
+      <div class="metric-label">到貨短少總差異（差異加總）</div>
+      <div class="metric-value">{_fmt_num(metrics["到貨短少總差異"])}</div>
+    </div>
+
+    <div class="metric-box">
+      <div class="metric-label">到貨凹損 / 破損 / 漏液總數量（數量加總）</div>
+      <div class="metric-value">{_fmt_num(metrics["到貨凹損破損漏液總數量"])}</div>
+    </div>
+  </div>
+
+  <div class="kpi-note">已自動計算：差異 = 實到數量 - 應到數量（並排除「異常原因」含「供應商」）。</div>
+</div>
+"""
+    st.markdown(kpi_html, unsafe_allow_html=True)
 
     out_bytes = _download_xlsx_bytes(df)
     st.download_button(
