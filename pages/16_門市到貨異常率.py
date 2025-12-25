@@ -193,8 +193,9 @@ def _render_kpi_cards(metrics: dict):
     }}
     .kpi-title{{
       font-size: 18px;
-      font-weight: 950;
+      font-weight: 1000;   /* ✅ 更粗 */
       margin: 0 0 10px 0;
+      letter-spacing: .2px;
     }}
     .kpi-grid{{
       display: grid;
@@ -237,7 +238,7 @@ def _render_kpi_cards(metrics: dict):
   </style>
 
   <div class="kpi-wrap">
-    <div class="kpi-title">門市到貨異常統計</div>
+    <div class="kpi-title"><strong>門市到貨異常統計</strong></div>
 
     <div class="kpi-grid">
       <div class="metric-box">
@@ -265,8 +266,17 @@ def _render_kpi_cards(metrics: dict):
   </div>
 </div>
 """
-    # 高度抓剛好，不要捲軸
-    components.html(html, height=210, scrolling=False)
+    components.html(html, height=220, scrolling=False)
+
+
+def _clean_year(x: str) -> str:
+    s = (x or "").strip()
+    return s if len(s) == 4 and s.isdigit() else ""
+
+
+def _clean_mmdd(x: str) -> str:
+    s = (x or "").strip()
+    return s if len(s) == 4 and s.isdigit() else ""
 
 
 def main():
@@ -312,17 +322,32 @@ def main():
 
     df = _derive_year_mmdd_from_box(df, col_box)
 
-    years = sorted([y for y in df["年"].dropna().unique().tolist() if str(y).strip()])
-    dates = sorted([d for d in df["日期"].dropna().unique().tolist() if str(d).strip()])
+    years = sorted([str(y) for y in df["年"].dropna().unique().tolist() if str(y).strip()])
+    dates = sorted([str(d) for d in df["日期"].dropna().unique().tolist() if str(d).strip()])
 
-    left, right = st.columns(2, gap="large")
-    with left:
+    # ----------------------------
+    # filter UI: select + manual input
+    # ----------------------------
+    c1, c2 = st.columns(2, gap="large")
+
+    with c1:
         year_sel = st.selectbox("保留 年（箱號前 4 碼）", options=years if years else [""])
-    with right:
-        date_sel = st.selectbox("保留 日期（箱號第5-8碼 MMDD）", options=dates if dates else [""])
+        year_manual = st.text_input("手動輸入年（YYYY，優先）", value="", placeholder="例如：2025", max_chars=4)
 
-    if year_sel and date_sel:
-        df = df[(df["年"] == str(year_sel)) & (df["日期"] == str(date_sel))].copy()
+    with c2:
+        date_sel = st.selectbox("保留 日期（箱號第5-8碼 MMDD）", options=dates if dates else [""])
+        date_manual = st.text_input("手動輸入日期（MMDD，優先）", value="", placeholder="例如：0101", max_chars=4)
+
+    year_use = _clean_year(year_manual) or (year_sel if year_sel else "")
+    date_use = _clean_mmdd(date_manual) or (date_sel if date_sel else "")
+
+    if year_manual.strip() and not _clean_year(year_manual):
+        st.warning("手動輸入年格式不正確，請輸入 4 碼數字（YYYY）。")
+    if date_manual.strip() and not _clean_mmdd(date_manual):
+        st.warning("手動輸入日期格式不正確，請輸入 4 碼數字（MMDD）。")
+
+    if year_use and date_use:
+        df = df[(df["年"] == str(year_use)) & (df["日期"] == str(date_use))].copy()
 
     # 排除供應商原因
     df = df[~df[col_reason].astype(str).str.contains("供應商", na=False)].copy()
@@ -334,7 +359,7 @@ def main():
 
     metrics = _compute_metrics(df, col_box, col_reason)
 
-    # ✅ KPI 區塊：保證會顯示、4 欄
+    # KPI 區塊：4 欄 + 同寬
     _render_kpi_cards(metrics)
 
     out_bytes = _download_xlsx_bytes(df)
