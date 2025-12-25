@@ -170,7 +170,7 @@ def main():
 
     set_page("每日上架分析", icon="📦", subtitle="前一日上架清單｜支援 XLSB｜排除指定儲位代碼｜統計筆數與總量")
 
-    # ✅ KPI：字體小一點 + 框框不要整列（限制最大寬度 + 置中靠左）
+    # ✅ 調整：標題「上架分析」要比數字大
     st.markdown(
         r"""
 <style>
@@ -185,9 +185,9 @@ def main():
   margin: 10px 0 6px 0;
 }
 .kpi-title{
-  font-size: 16px;
-  font-weight: 900;
-  letter-spacing: .15px;
+  font-size: 28px;          /* ✅ 比數字大 */
+  font-weight: 950;
+  letter-spacing: .2px;
   color: rgba(15,23,42,.92);
   margin: 0 0 10px 0;
 }
@@ -210,7 +210,7 @@ def main():
   margin-bottom: 3px;
 }
 .metric-value{
-  font-size: 24px;
+  font-size: 22px;          /* ✅ 數字略小於標題 */
   font-weight: 950;
   line-height: 1.12;
   color: rgba(15,23,42,.94);
@@ -220,9 +220,6 @@ def main():
   font-size: 12.5px;
   color: rgba(15,23,42,.62);
   font-weight: 650;
-}
-@media (min-width: 900px){
-  .kpi-wrap{ margin-left: 0; }
 }
 </style>
 """,
@@ -270,7 +267,6 @@ def main():
         st.error(f"計算失敗：{e}")
         st.stop()
 
-    # ✅ 你要的：上架分析 / 上架筆數 / 上架總數量（字體小一點、框框不佔整列）
     st.markdown(
         f"""
 <div class="kpi-wrap">
