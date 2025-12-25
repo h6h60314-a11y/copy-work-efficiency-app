@@ -180,16 +180,24 @@ gt_xdock_close_compare = st.Page(
     icon="🧾",
 )
 
+# ✅ 新模組：庫存訂單實出量分析（你前面指定要部署的 13）
+gt_stock_ship_actual = st.Page(
+    "pages/13_庫存訂單實出量分析.py",
+    title="庫存訂單實出量分析",
+    icon="📦",
+)
+
 pg = st.navigation(
     {
         "": [home_page],
         "出貨課": [outbound_home, transfer_diff_page],
         "進貨課": [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page],
-        "大樹KPI": [gt_kpi_home, gt_inbound_receipt, gt_ship_units,gt_xdock_close_compare],
+        "大樹KPI": [gt_kpi_home, gt_inbound_receipt, gt_ship_units,gt_xdock_close_compare,gt_stock_ship_actual],
     },
     expanded=False,
 )
 
 pg.run()
+
 
 
