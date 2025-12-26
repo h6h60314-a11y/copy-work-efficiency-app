@@ -265,9 +265,9 @@ for sn, df in main_sheets.items():
     processed_by_sheet[sn] = kept2
     all_concat.append(kept2.assign(_Sheet=str(sn)))
 
-    totals["ITEM"] += cnt
     totals["高空"] += c_high
     totals["低空"] += c_low
+    totals["ITEM"] += cnt
     totals["未知"] += c_unknown
     totals["無法對應"] += c_nomap
 
