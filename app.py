@@ -175,7 +175,7 @@ slot_util_page = page_if_exists(
 
 # 大豐KPI（新增）
 df_kpi_home = page_if_exists("pages/19_大豐KPI首頁.py", "大豐KPI首頁", "📊", url_path="df-kpi-home")
-df_qc_volume = page_if_exists("pages/20_進貨課驗收量體.py", "進貨課驗收量體", "✅", url_path="df-qc-volume")
+df_qc_volume = page_if_exists("pages/20_進貨課 - 驗收量體.py", "進貨課 - 驗收量體", "✅", url_path="df-qc-volume")
 
 # =========================
 # ✅ Sidebar 顯示「壞頁」清單（不讓整站掛）
@@ -205,5 +205,6 @@ pg = st.navigation(
 )
 
 pg.run()
+
 
 
