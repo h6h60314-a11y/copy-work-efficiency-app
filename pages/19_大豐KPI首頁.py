@@ -7,9 +7,10 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 st.set_page_config(page_title="大豐KPI", page_icon="📊", layout="wide")
 inject_logistics_theme()
 
+# ✅ 允許從 KPI 首頁導頁的模組清單（安全白名單）
 ALLOW_PAGES = {
-    "pages/20_進貨課 - 驗收量體.py",  # ✅ 新增：驗收量體（到=QC）
-    "pages/21_進貨課 - 上架量體.py", 
+    "pages/20_進貨課 - 驗收量體.py",
+    "pages/21_進貨課 - 上架量體.py",  # ✅ 新增：上架量體
 }
 
 
@@ -138,14 +139,14 @@ def main():
         "進貨課 - 驗收量體",
         "pages/20_進貨課 - 驗收量體.py",
         "只保留「到=QC」｜SKU（唯一商品）｜ITEM（筆數）｜輸出Excel",
-        
-     # ✅ 21_進貨課 - 上架量體
+    )
+
+    # ✅ 21_進貨課 - 上架量體
     _nav_item(
         "📦",
         "進貨課上架量體",
         "pages/21_進貨課 - 上架量體.py",
         "由=QC｜到排除關鍵字｜對應儲位類型｜高低空統計｜輸出Excel",
-        
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
