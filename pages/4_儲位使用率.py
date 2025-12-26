@@ -43,7 +43,6 @@ def _to_num(s: pd.Series) -> pd.Series:
 
 
 def _inject_responsive_grid_css():
-    """卡片自動排版：依螢幕寬度自動切欄數"""
     st.markdown(
         """
 <style>
@@ -61,7 +60,6 @@ def _inject_responsive_grid_css():
 
 
 def sidebar_category_editor() -> dict:
-    """Sidebar：可手動調整分類定義（逗號分隔）"""
     if "categories" not in st.session_state:
         st.session_state.categories = {k: v[:] for k, v in DEFAULT_CATEGORIES.items()}
 
@@ -154,7 +152,6 @@ def compute_by_zone_categories(
 
 
 def _chart_usage_rate(res_df: pd.DataFrame, threshold: float, show_target_line: bool):
-    """使用率圖：>threshold 紅色"""
     if res_df is None or res_df.empty:
         st.info("無資料可視覺化")
         return
@@ -199,7 +196,6 @@ def _chart_usage_rate(res_df: pd.DataFrame, threshold: float, show_target_line: 
 
 
 def _category_card_html(item: dict, warn_threshold: float) -> str:
-    """卡片 KPI：直向一項一列；>門檻紅卡"""
     cat = str(item.get("類別", ""))
     valid = int(item.get("有效貨位", 0))
     used = int(item.get("已使用貨位", 0))
@@ -207,7 +203,6 @@ def _category_card_html(item: dict, warn_threshold: float) -> str:
     rate = float(item.get("使用率(%)", 0.0))
 
     is_bad = rate > float(warn_threshold)
-
     bg = "rgba(255,199,206,0.85)" if is_bad else "rgba(198,239,206,0.70)"
     bd = "rgba(156,0,6,0.45)" if is_bad else "rgba(0,97,0,0.30)"
     fg = "rgba(156,0,6,1.0)" if is_bad else "rgba(0,97,0,1.0)"
@@ -249,7 +244,7 @@ def _category_card_html(item: dict, warn_threshold: float) -> str:
 
 
 # =========================================================
-# ✅ B) 依「棚別」分類（同步部署你的 Tkinter 邏輯）
+# ✅ B) 依「棚別」分類（同步你 Tkinter 邏輯）
 # =========================================================
 大型儲位 = [
     '010','018','019','020','021','022','023','041',
@@ -267,7 +262,6 @@ SMALL = set(小型儲位)
 
 
 def _to_zone3(x) -> str:
-    """從『棚別』抓出 3 碼區碼（例如：010 / 011 / 001）"""
     if x is None or (isinstance(x, float) and pd.isna(x)):
         return ""
     s = str(x).strip()
@@ -279,7 +273,6 @@ def _to_zone3(x) -> str:
 
 
 def classify_zone_from棚別(x) -> str:
-    """回傳：大型儲位/中型儲位/小型儲位/未知"""
     z = _to_zone3(x)
     if not z:
         return "未知"
@@ -293,10 +286,6 @@ def classify_zone_from棚別(x) -> str:
 
 
 def robust_read_any_sheet_bytes(uploaded) -> tuple[pd.DataFrame, str]:
-    """
-    ✅ 支援：xlsx / xls / xlsm / xlsb / csv
-    ✅ 自動找分頁：先找「區(溫層)」→ 再找「棚別」→ 最後第一張
-    """
     filename = uploaded.name
     ext = os.path.splitext(filename)[1].lower()
     data = uploaded.getvalue()
@@ -378,9 +367,9 @@ def main():
     inject_logistics_theme()
     _inject_responsive_grid_css()
 
-    set_page("儲位使用率", icon="🧊", subtitle="區(溫層)分類 + 棚別分類（含未知明細）｜支援 xlsb")
+    set_page("儲位使用率", icon="🧊", subtitle="區(溫層)分類 + 棚別分類（未知明細全寬）｜支援 xlsb")
 
-    # Sidebar（永遠顯示）
+    # Sidebar
     with st.sidebar:
         st.header("⚙️ 欄位設定（區(溫層)分類）")
         col_zone = st.text_input("區(溫層) 欄位", value=DEFAULT_COL_ZONE, key="col_zone")
@@ -401,9 +390,12 @@ def main():
             "紅卡門檻（使用率 %）", min_value=0.0, max_value=100.0, value=90.0, step=1.0, key="card_warn_threshold"
         )
 
+        st.divider()
+        shelf_table_full_width = st.checkbox("棚別統計 Top50 改成全寬顯示", value=False, key="shelf_full_width")
+
     categories = sidebar_category_editor()
 
-    # 上傳
+    # Upload
     card_open("📤 上傳 Excel（儲位明細）")
     uploaded = st.file_uploader(
         "請上傳儲位明細檔案（支援 xlsx/xls/xlsm/xlsb/csv）",
@@ -416,7 +408,7 @@ def main():
         st.info("請先上傳儲位明細檔案")
         return
 
-    # 讀檔（支援 xlsb）
+    # Read
     try:
         df, sheet_used = robust_read_any_sheet_bytes(uploaded)
     except Exception as e:
@@ -427,14 +419,40 @@ def main():
     df.columns = df.columns.astype(str).str.strip()
     st.caption(f"使用分頁：{sheet_used}")
 
+    # Prepare shelf side outputs first (for full-width section)
+    shelf_ok = "棚別" in df.columns
+    df_shelf_detail = None
+    df_shelf = None
+    df_type = None
+    df_unknown = None
+    type_map = {}
+
+    if shelf_ok:
+        df_shelf_detail = df.copy()
+        df_shelf_detail["儲位類型"] = df_shelf_detail["棚別"].apply(classify_zone_from棚別)
+        df_shelf = (
+            df_shelf_detail.groupby(["棚別"], dropna=False)
+            .size()
+            .reset_index(name="筆數")
+            .sort_values(["筆數", "棚別"], ascending=[False, True])
+        )
+        df_type = (
+            df_shelf_detail.groupby(["儲位類型"], dropna=False)
+            .size()
+            .reset_index(name="筆數")
+            .sort_values(["筆數", "儲位類型"], ascending=[False, True])
+        )
+        type_map = {str(r["儲位類型"]): int(r["筆數"]) for _, r in df_type.iterrows()}
+        df_unknown = df_shelf_detail[df_shelf_detail["儲位類型"] == "未知"].copy()
+    else:
+        df_unknown = pd.DataFrame()
+
     # =====================================================
     # ✅ 兩欄：左 區(溫層)分類｜右 棚別分類統計
     # =====================================================
     left_col, right_col = st.columns([1, 1], gap="large")
 
-    # --------------------------
-    # 左欄：區(溫層)分類
-    # --------------------------
+    # Left
     with left_col:
         card_open("📌 區(溫層)分類（KPI + 卡片 + 圖表）")
 
@@ -461,7 +479,6 @@ def main():
 
             st.divider()
 
-            # 卡片
             items = res_df.to_dict("records")
             cards_html = "\n".join(
                 [f'<div class="gt-slot">{_category_card_html(it, float(warn_threshold))}</div>' for it in items]
@@ -469,8 +486,6 @@ def main():
             st.markdown(f'<div class="gt-card-grid">{cards_html}</div>', unsafe_allow_html=True)
 
             st.divider()
-
-            # 圖表
             _chart_usage_rate(res_df, threshold=float(chart_threshold), show_target_line=bool(show_target_line))
 
             st.divider()
@@ -480,7 +495,6 @@ def main():
             else:
                 st.success("全部已納入分類")
 
-            # 匯出（區(溫層)分類結果）
             out = io.BytesIO()
             with pd.ExcelWriter(out, engine="openpyxl") as writer:
                 res_df.to_excel(writer, index=False, sheet_name="儲位分類統計")
@@ -498,103 +512,94 @@ def main():
 
         card_close()
 
-    # --------------------------
-    # 右欄：棚別分類統計
-    # --------------------------
+    # Right
     with right_col:
         card_open("🏷️ 棚別分類統計（大型/中型/小型/未知）")
 
-        if "棚別" not in df.columns:
+        if not shelf_ok:
             st.error("❌ 找不到欄位『棚別』，無法進行棚別分類統計。")
             st.write("目前欄位：", list(df.columns))
             card_close()
-            return
-
-        df_shelf_detail = df.copy()
-        df_shelf_detail["儲位類型"] = df_shelf_detail["棚別"].apply(classify_zone_from棚別)
-
-        # 棚別統計
-        df_shelf = (
-            df_shelf_detail.groupby(["棚別"], dropna=False)
-            .size()
-            .reset_index(name="筆數")
-            .sort_values(["筆數", "棚別"], ascending=[False, True])
-        )
-
-        # 儲位類型統計
-        df_type = (
-            df_shelf_detail.groupby(["儲位類型"], dropna=False)
-            .size()
-            .reset_index(name="筆數")
-            .sort_values(["筆數", "儲位類型"], ascending=[False, True])
-        )
-        type_map = {str(r["儲位類型"]): int(r["筆數"]) for _, r in df_type.iterrows()}
-
-        # ✅ 未知明細
-        df_unknown = df_shelf_detail[df_shelf_detail["儲位類型"] == "未知"].copy()
-
-        # ✅ 顯示方式：兩欄換列（大型/中型｜小型/未知）
-        c1, c2 = st.columns(2, gap="large")
-        with c1:
-            st.markdown("### 大型儲位")
-            st.markdown(f"**{type_map.get('大型儲位', 0):,} 筆**")
-        with c2:
-            st.markdown("### 中型儲位")
-            st.markdown(f"**{type_map.get('中型儲位', 0):,} 筆**")
-
-        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-
-        c3, c4 = st.columns(2, gap="large")
-        with c3:
-            st.markdown("### 小型儲位")
-            st.markdown(f"**{type_map.get('小型儲位', 0):,} 筆**")
-        with c4:
-            st.markdown("### 未知")
-            st.markdown(f"**{type_map.get('未知', 0):,} 筆**")
-
-        st.divider()
-
-        st.subheader("📋 棚別統計（Top 50）")
-        st.dataframe(df_shelf.head(50), use_container_width=True, hide_index=True)
-
-        st.divider()
-        if len(df_unknown) == 0:
-            st.info("未知：0 筆（無需列明細）")
         else:
-            with st.expander(f"📌 未知明細（{len(df_unknown):,} 筆）", expanded=True):
-                st.dataframe(df_unknown, use_container_width=True, hide_index=True)
+            # ✅ 兩欄換列（大型/中型｜小型/未知）
+            c1, c2 = st.columns(2, gap="large")
+            with c1:
+                st.markdown("### 大型儲位")
+                st.markdown(f"**{type_map.get('大型儲位', 0):,} 筆**")
+            with c2:
+                st.markdown("### 中型儲位")
+                st.markdown(f"**{type_map.get('中型儲位', 0):,} 筆**")
 
-                out_unknown = io.BytesIO()
-                with pd.ExcelWriter(out_unknown, engine="xlsxwriter") as writer:
-                    df_unknown.to_excel(writer, sheet_name="未知明細", index=False)
-                out_unknown.seek(0)
+            st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
-                st.download_button(
-                    "⬇️ 下載 未知明細.xlsx",
-                    data=out_unknown.getvalue(),
-                    file_name="未知明細.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                )
+            c3, c4 = st.columns(2, gap="large")
+            with c3:
+                st.markdown("### 小型儲位")
+                st.markdown(f"**{type_map.get('小型儲位', 0):,} 筆**")
+            with c4:
+                st.markdown("### 未知")
+                st.markdown(f"**{type_map.get('未知', 0):,} 筆**")
 
-        base = os.path.splitext(uploaded.name)[0]
-        shelf_filename, shelf_bytes = build_shelf_output_excel_bytes(
-            base_name=base,
-            df_detail=df_shelf_detail,
-            df_shelf=df_shelf,
-            df_type=df_type,
-            df_unknown=df_unknown,
-        )
+            # ✅ Top50：預設留右欄；若勾選則移到下方全寬
+            if not shelf_table_full_width:
+                st.divider()
+                st.subheader("📋 棚別統計（Top 50）")
+                st.dataframe(df_shelf.head(50), use_container_width=True, hide_index=True)
 
-        st.download_button(
-            "⬇️ 匯出（棚別分類統計 Excel）",
-            data=shelf_bytes,
-            file_name=shelf_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
+            # 右欄保留匯出按鈕（棚別分類）
+            base = os.path.splitext(uploaded.name)[0]
+            shelf_filename, shelf_bytes = build_shelf_output_excel_bytes(
+                base_name=base,
+                df_detail=df_shelf_detail,
+                df_shelf=df_shelf,
+                df_type=df_type,
+                df_unknown=df_unknown,
+            )
+            st.divider()
+            st.download_button(
+                "⬇️ 匯出（棚別分類統計 Excel）",
+                data=shelf_bytes,
+                file_name=shelf_filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
 
+            card_close()
+
+    # =====================================================
+    # ✅ 全寬區塊（同等寬）：棚別統計 Top50（可選） + 未知明細
+    # =====================================================
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    # Top50 改全寬（使用者勾選才顯示）
+    if shelf_ok and shelf_table_full_width:
+        card_open("📋 棚別統計（Top 50）")
+        st.dataframe(df_shelf.head(50), use_container_width=True, hide_index=True)
         card_close()
+
+    # ✅ 未知明細：永遠全寬（你要的同等寬）
+    if shelf_ok:
+        if df_unknown is None or len(df_unknown) == 0:
+            card_open("📌 未知明細")
+            st.info("未知：0 筆（無需列明細）")
+            card_close()
+        else:
+            card_open(f"📌 未知明細（{len(df_unknown):,} 筆）")
+            st.dataframe(df_unknown, use_container_width=True, hide_index=True)
+
+            out_unknown = io.BytesIO()
+            with pd.ExcelWriter(out_unknown, engine="xlsxwriter") as writer:
+                df_unknown.to_excel(writer, sheet_name="未知明細", index=False)
+            out_unknown.seek(0)
+
+            st.download_button(
+                "⬇️ 下載 未知明細.xlsx",
+                data=out_unknown.getvalue(),
+                file_name="未知明細.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+            card_close()
 
 
 if __name__ == "__main__":
