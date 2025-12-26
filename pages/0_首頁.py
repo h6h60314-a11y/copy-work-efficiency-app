@@ -12,6 +12,7 @@ ALLOW = {
     "pages/7_出貨課首頁.py",
     "pages/8_進貨課首頁.py",
     "pages/9_大樹KPI首頁.py",
+    "pages/19_大豐KPI首頁.py", 
 }
 
 def _route_by_query():
@@ -140,6 +141,7 @@ def main():
         _tile("📦", "出貨課", "撥貨差異｜出貨/包裝/異常（進入後以條列式顯示）", "pages/7_出貨課首頁.py"),
         _tile("🚚", "進貨課", "驗收/上架/總揀/儲位/差異代庫存（進入後以條列式顯示）", "pages/8_進貨課首頁.py"),
         _tile("📈", "大樹KPI", "KPI 模組入口｜匯總｜趨勢（進入後以條列式顯示）", "pages/9_大樹KPI首頁.py"),
+        _tile("📊", "大豐KPI", "KPI 模組入口｜進貨課整體｜出貨課整體（進入後以條列式顯示）", "pages/19_大豐KPI首頁.py"),
     ]
 
     st.markdown('<div class="entry-grid">' + "".join(tiles) + "</div>", unsafe_allow_html=True)
