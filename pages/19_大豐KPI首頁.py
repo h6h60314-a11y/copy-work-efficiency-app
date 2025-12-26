@@ -11,6 +11,7 @@ inject_logistics_theme()
 ALLOW_PAGES = {
     "pages/20_進貨課 - 驗收量體.py",
     "pages/21_進貨課 - 上架量體.py",  # ✅ 新增：上架量體
+    "pages/4_儲位使用率.py",
 }
 
 
@@ -149,6 +150,13 @@ def main():
         "由=QC｜到排除關鍵字｜對應儲位類型｜高低空統計｜輸出Excel",
     )
 
+    _nav_item(
+        "🧊",
+        "儲位使用率分析",
+        "pages/4_儲位使用率.py",
+        "依區(溫層)分類統計、使用率門檻提示、分類可調整、KPI圖格呈現",
+    )
+    
     st.markdown("</div>", unsafe_allow_html=True)
     card_close()
 
