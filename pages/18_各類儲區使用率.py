@@ -3,7 +3,7 @@
 """
 18_各類儲區使用率（部署版 / Streamlit）
 整合兩支 Tkinter 程式：
-A) 依「區(溫層)」統計：大/中/小儲位 有效貨位、已使用貨位、使用率
+A) 依「區(溫層)」統計：大/中/小儲位 有效貨位、已使用貨位、未使用貨位、使用率
 B) 依「棚別」分類：大型/中型/小型/未知，並輸出：明細(含分類)、棚別統計、儲位類型統計
 
 ✅ 支援 .xlsb（pyxlsb）
@@ -15,7 +15,6 @@ warnings.filterwarnings("ignore")
 import io
 import os
 import re
-from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -47,7 +46,7 @@ SMALL = set(SMALL_ZONES)
 
 
 # =========================
-# 工具：欄位偵測 / 轉區碼 / 讀檔
+# 小工具
 # =========================
 def _spacer(h=10):
     st.markdown(f"<div style='height:{h}px'></div>", unsafe_allow_html=True)
@@ -66,16 +65,10 @@ def detect_sheet_for_column_xls(xls: pd.ExcelFile, must_have: str) -> str:
 
 
 def detect_sheet_for_column_xlsb(uploaded_bytes: bytes, must_have: str) -> str:
-    """
-    xlsb 用：pyxlsb 無法用 nrows=0 讀 header，因此用小量讀取
-    逐張讀前 50 行，檢查欄位
-    """
-    import pandas as pd
-    bio = io.BytesIO(uploaded_bytes)
-    xls = pd.ExcelFile(bio, engine="pyxlsb")
+    """xlsb 用：pyxlsb 以小量讀取拿 columns，逐張找欄位"""
+    xls = pd.ExcelFile(io.BytesIO(uploaded_bytes), engine="pyxlsb")
     for name in xls.sheet_names:
         try:
-            # 讀一點點資料來拿 columns
             df = pd.read_excel(xls, sheet_name=name, engine="pyxlsb", nrows=50)
             if must_have in df.columns:
                 return name
@@ -90,7 +83,7 @@ def robust_read_excel_bytes(uploaded_file) -> tuple[pd.DataFrame, str]:
     - xlsx/xlsm: openpyxl
     - xls: xlrd（需 requirements 裝 xlrd==2.0.1）
     - xlsb: pyxlsb（需 requirements 裝 pyxlsb）
-    會自動選擇最適合的分頁：
+    分頁策略：
       優先：含『區(溫層)』；其次：含『棚別』；再不行：第一張
     """
     filename = uploaded_file.name
@@ -182,7 +175,10 @@ def _safe_sum(s: pd.Series) -> float:
 
 
 def calc_util_by_zone(df: pd.DataFrame) -> pd.DataFrame:
-    """依『區(溫層)』『有效貨位』『已使用貨位』計算大/中/小"""
+    """
+    依『區(溫層)』『有效貨位』『已使用貨位』計算大/中/小/總計
+    回傳欄位：儲位類型 / 有效貨位 / 已使用貨位 / 未使用貨位 / 使用率(%)
+    """
     if "區(溫層)" not in df.columns:
         return pd.DataFrame()
 
@@ -201,23 +197,39 @@ def calc_util_by_zone(df: pd.DataFrame) -> pd.DataFrame:
         part = df2[df2["區碼3"].isin(zones)]
         eff = _safe_sum(part["有效貨位"])
         used = _safe_sum(part["已使用貨位"])
+        remain = max(eff - used, 0)
         rate = (used / eff * 100.0) if eff else 0.0
-        return {"儲位類型": kind, "有效貨位": eff, "已使用貨位": used, "使用率(%)": round(rate, 2)}
+        return {
+            "儲位類型": kind,
+            "有效貨位": eff,
+            "已使用貨位": used,
+            "未使用貨位": remain,
+            "使用率(%)": round(rate, 2),
+        }
 
     out = [
         _row("大儲位", LARGE),
         _row("中儲位", MID),
         _row("小儲位", SMALL),
     ]
+
     eff_total = sum(r["有效貨位"] for r in out)
     used_total = sum(r["已使用貨位"] for r in out)
+    remain_total = max(eff_total - used_total, 0)
     out.append({
         "儲位類型": "總計",
         "有效貨位": eff_total,
         "已使用貨位": used_total,
+        "未使用貨位": remain_total,
         "使用率(%)": round((used_total / eff_total * 100.0) if eff_total else 0.0, 2)
     })
-    return pd.DataFrame(out)
+
+    df_out = pd.DataFrame(out)
+    # 轉整數欄位（顯示好看）
+    for c in ["有效貨位", "已使用貨位", "未使用貨位"]:
+        df_out[c] = pd.to_numeric(df_out[c], errors="coerce").fillna(0).astype(int)
+    df_out["使用率(%)"] = pd.to_numeric(df_out["使用率(%)"], errors="coerce").fillna(0).round(2)
+    return df_out
 
 
 def build_output_excel_bytes(
@@ -231,7 +243,7 @@ def build_output_excel_bytes(
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
         if not df_util.empty:
-            df_util.to_excel(writer, sheet_name="儲位使用率", index=False)
+            df_util.to_excel(writer, sheet_name="各類儲區使用率", index=False)
         df_detail.to_excel(writer, sheet_name="明細(含分類)", index=False)
         df_shelf.to_excel(writer, sheet_name="棚別統計", index=False)
         df_type.to_excel(writer, sheet_name="儲位類型統計", index=False)
@@ -257,7 +269,10 @@ _spacer(8)
 
 if HAS_COMMON_UI:
     card_open("📤 上傳檔案")
-uploaded = st.file_uploader("請上傳 Excel（.xlsx / .xls / .xlsm / .xlsb）", type=["xlsx", "xls", "xlsm", "xlsb"])
+uploaded = st.file_uploader(
+    "請上傳 Excel（.xlsx / .xls / .xlsm / .xlsb）",
+    type=["xlsx", "xls", "xlsm", "xlsb"],
+)
 if HAS_COMMON_UI:
     card_close()
 
@@ -286,6 +301,7 @@ if "棚別" in df_detail.columns:
 else:
     df_detail["儲位類型"] = "未知"
 
+# 棚別統計
 if "棚別" in df_detail.columns:
     df_shelf = (
         df_detail.groupby(["棚別"], dropna=False)
@@ -296,6 +312,7 @@ if "棚別" in df_detail.columns:
 else:
     df_shelf = pd.DataFrame([{"棚別": "（無棚別欄位）", "筆數": len(df_detail)}])
 
+# 儲位類型統計
 df_type = (
     df_detail.groupby(["儲位類型"], dropna=False)
     .size()
@@ -305,22 +322,39 @@ df_type = (
 
 _spacer(12)
 
+# =========================
+# 顯示區塊：左右兩欄（每個儲區直向列出）
+# =========================
 left, right = st.columns([1, 1], gap="large")
 
 with left:
     if HAS_COMMON_UI:
-        card_open("📊 大/中/小儲區使用率")
+        card_open("📊 大/中/小儲區使用率（明細）")
     else:
-        st.subheader("📊 大/中/小儲區使用率")
+        st.subheader("📊 大/中/小儲區使用率（明細）")
 
     if df_util.empty:
         st.warning("此檔案沒有『區(溫層)』欄位，無法計算使用率。")
     else:
         util_map = {r["儲位類型"]: r for _, r in df_util.iterrows()}
+
+        def render_zone_block(zone_name: str):
+            r = util_map.get(zone_name, {})
+            eff = int(r.get("有效貨位", 0))
+            used = int(r.get("已使用貨位", 0))
+            remain = int(r.get("未使用貨位", max(eff - used, 0)))
+            rate = float(r.get("使用率(%)", 0.0))
+
+            st.markdown(f"### {zone_name}")
+            st.markdown(f"**有效貨位：** {eff:,}")
+            st.markdown(f"**已使用貨位：** {used:,}")
+            st.markdown(f"**未使用貨位：** {remain:,}")
+            st.markdown(f"**使用率(%)：** {rate:.2f}")
+            _spacer(6)
+
+        # ✅ 依你指定的順序：大/中/小/總計
         for k in ["大儲位", "中儲位", "小儲位", "總計"]:
-            r = util_map.get(k, {"有效貨位": 0, "已使用貨位": 0, "使用率(%)": 0})
-            st.metric(f"{k}｜使用率(%)", f"{float(r['使用率(%)']):.2f}")
-            st.caption(f"有效貨位：{int(r['有效貨位'])}｜已使用貨位：{int(r['已使用貨位'])}")
+            render_zone_block(k)
 
     if HAS_COMMON_UI:
         card_close()
@@ -340,6 +374,7 @@ with right:
 
 _spacer(12)
 
+# 棚別統計（表格）
 if HAS_COMMON_UI:
     card_open("📋 棚別統計（Top 50）")
 st.dataframe(df_shelf.head(50), use_container_width=True, hide_index=True)
@@ -348,6 +383,7 @@ if HAS_COMMON_UI:
 
 _spacer(10)
 
+# 下載
 base = os.path.splitext(uploaded.name)[0]
 download_name, excel_bytes = build_output_excel_bytes(
     base_name=base,
