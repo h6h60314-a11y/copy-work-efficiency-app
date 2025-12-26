@@ -1,15 +1,5 @@
 # pages/20_進貨課驗收量體.py
 # -*- coding: utf-8 -*-
-"""
-功能：
-1) 只保留欄位「到」=「QC」的資料（多工作表支援）
-2) 計算不重複的商品數（各工作表與全檔合計）
-3) 輸出新檔：各表過濾後明細 +「過濾統計」+「唯一商品統計」
-
-部署版使用方式：
-- 上傳 Excel/CSV/TXT → 產出 → 下載
-"""
-
 from __future__ import annotations
 
 import os
@@ -23,7 +13,6 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 pd.options.display.max_columns = 200
 
-# 你常見的商品欄位名稱候選（依序嘗試）
 PRODUCT_COL_CANDIDATES = ["商品", "商品代號", "商品編號", "品號", "品名", "品號品名"]
 
 
@@ -37,7 +26,6 @@ def find_product_col(columns) -> Optional[str]:
     for cand in PRODUCT_COL_CANDIDATES:
         if cand in cols:
             return cand
-    # 寬鬆：找含「商品」「品號」關鍵字
     for c in cols:
         if ("商品" in c) or ("品號" in c):
             return c
@@ -45,9 +33,6 @@ def find_product_col(columns) -> Optional[str]:
 
 
 def _read_excel_sheets_from_bytes(file_bytes: bytes, ext: str) -> Dict[str, pd.DataFrame]:
-    """
-    回傳：{sheet_name: DataFrame}
-    """
     bio = BytesIO(file_bytes)
 
     if ext in (".xlsx", ".xlsm", ".xltx", ".xltm"):
@@ -58,13 +43,11 @@ def _read_excel_sheets_from_bytes(file_bytes: bytes, ext: str) -> Dict[str, pd.D
             return pd.read_excel(bio, sheet_name=None)
 
     if ext == ".xls":
-        # 部署環境常見沒有 xlrd；給清楚提示
         try:
             return pd.read_excel(bio, sheet_name=None, engine="xlrd")
         except Exception as e:
             raise RuntimeError("目前環境可能未安裝 xlrd，導致 .xls 無法讀取；請先另存為 .xlsx 再上傳。") from e
 
-    # 其他就先當 excel 試
     try:
         return pd.read_excel(bio, sheet_name=None, engine="openpyxl")
     except Exception:
@@ -73,30 +56,18 @@ def _read_excel_sheets_from_bytes(file_bytes: bytes, ext: str) -> Dict[str, pd.D
 
 
 def _read_csv_from_bytes_auto(file_bytes: bytes) -> pd.DataFrame:
-    """
-    不顯示編碼選擇，改用自動嘗試常見編碼。
-    """
     last_err = None
     for enc in ("utf-8-sig", "utf-8", "cp950", "big5"):
         try:
             return pd.read_csv(BytesIO(file_bytes), encoding=enc, low_memory=False)
         except Exception as e:
             last_err = e
-            continue
     raise RuntimeError(f"CSV/TXT 讀取失敗，已嘗試 utf-8-sig/utf-8/cp950/big5：{last_err}")
 
 
 def process_tables(
     tables: Dict[str, pd.DataFrame]
 ) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame, pd.DataFrame, dict]:
-    """
-    tables: {sheet_name: df}
-    回傳：
-      filtered_tables: {sheet_name: filtered_df}
-      summary_df: 過濾統計
-      per_sheet_df: 唯一商品統計
-      stats: dict(total_before, total_after, overall_unique_products)
-    """
     filtered: Dict[str, pd.DataFrame] = {}
 
     total_before = 0
@@ -109,7 +80,6 @@ def process_tables(
         df = df.copy()
         df.columns = [str(c).strip() for c in df.columns]
 
-        # 沒有「到」欄位：當作 0 筆（仍輸出同欄位的空表）
         if "到" not in df.columns:
             filtered[name] = df.iloc[0:0].copy()
             per_sheet_unique.append(
@@ -184,14 +154,10 @@ def build_output_excel_bytes(
     summary_df: pd.DataFrame,
     per_sheet_df: pd.DataFrame,
 ) -> bytes:
-    """
-    產出 Excel bytes（各sheet過濾後 + 過濾統計 + 唯一商品統計）
-    """
     out = BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
         for name, fdf in filtered_tables.items():
             safe_name = _safe_sheet_name(name)
-
             orig_cols = list(original_tables[name].columns) if name in original_tables else list(fdf.columns)
             if fdf.empty:
                 pd.DataFrame(columns=orig_cols).to_excel(writer, sheet_name=safe_name, index=False)
@@ -228,7 +194,7 @@ def _kpi_stack(title: str, value: int):
 
 
 # =========================
-# Page UI
+# UI
 # =========================
 inject_logistics_theme()
 set_page("進貨課｜驗收量體", icon="✅", subtitle="只保留「到=QC」｜SKU(唯一商品)｜ITEM(筆數)｜輸出Excel")
@@ -252,17 +218,17 @@ filename = up.name
 base, ext = os.path.splitext(filename)
 ext = ext.lower()
 
-run = st.button("開始產出", type="primary")  # ✅ 改字
+run = st.button("開始產出", type="primary")
 
 if not run:
     card_close()
     st.stop()
 
-# 1) 讀檔
+# 讀檔
 try:
     file_bytes = up.getvalue()
     if ext in (".csv", ".txt"):
-        df = _read_csv_from_bytes_auto(file_bytes)  # ✅ 自動編碼，不顯示選擇
+        df = _read_csv_from_bytes_auto(file_bytes)
         tables = {"CSV": df}
     else:
         tables = _read_excel_sheets_from_bytes(file_bytes, ext)
@@ -271,7 +237,7 @@ except Exception as e:
     card_close()
     st.stop()
 
-# 2) 處理
+# 處理
 try:
     filtered, summary_df, per_sheet_df, stats = process_tables(tables)
 except Exception as e:
@@ -279,7 +245,8 @@ except Exception as e:
     card_close()
     st.stop()
 
-# 3) KPI 直向顯示（你要的樣式）
+# ✅ KPI 區塊：改成你要的順序與標題
+st.markdown("### 驗收量體")
 _kpi_stack("SKU（全檔唯一商品）", stats["overall_unique_products"])
 _kpi_stack("ITEM（到=QC 筆數）", stats["total_after"])
 _kpi_stack("原始總筆數", stats["total_before"])
@@ -295,7 +262,7 @@ with st.expander("🔎 預覽：過濾後明細（每張表前 200 筆）", expa
         st.markdown(f"**{_safe_sheet_name(sheet_name)}**（{len(df):,} 筆）")
         st.dataframe(df.head(200), use_container_width=True, hide_index=True)
 
-# 4) 產出 Excel
+# 輸出
 try:
     out_bytes = build_output_excel_bytes(tables, filtered, summary_df, per_sheet_df)
 except Exception as e:
