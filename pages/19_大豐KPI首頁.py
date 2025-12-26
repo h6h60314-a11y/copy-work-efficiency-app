@@ -9,7 +9,7 @@ inject_logistics_theme()
 
 ALLOW_PAGES = {
     "pages/20_進貨課 - 驗收量體.py",  # ✅ 新增：驗收量體（到=QC）
-    "pages/21_進貨課上架量體.py", 
+    "pages/21_進貨課 - 上架量體.py", 
 }
 
 
