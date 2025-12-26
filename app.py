@@ -1,5 +1,6 @@
 # app.py
 import os
+import ast
 import streamlit as st
 
 st.set_page_config(
@@ -8,6 +9,9 @@ st.set_page_config(
     layout="wide",
 )
 
+# =========================
+# Sidebar CSS + JS
+# =========================
 st.markdown(
     r"""
 <style>
@@ -55,9 +59,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h4{
   letter-spacing: .9px !important;
   margin: 14px 0 6px !important;
 }
-section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]{
-  gap: 8px !important;
-}
+section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]{ gap: 8px !important; }
 
 /* 隱藏群組首頁 */
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="outbound-home"]){ display:none !important; }
@@ -107,21 +109,43 @@ section[data-testid="stSidebar"] li:has(span[label="大樹KPI首頁"]){ display:
     unsafe_allow_html=True,
 )
 
+# =========================
+# ✅ Preflight: 語法/縮排檢查（避免某頁壞掉整站掛）
+# =========================
+BROKEN_PAGES: list[tuple[str, str]] = []
+
+def _syntax_ok(path: str) -> bool:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            src = f.read()
+        ast.parse(src, filename=path)
+        return True
+    except Exception as e:
+        # e 會包含 IndentationError / SyntaxError 的行號訊息
+        BROKEN_PAGES.append((path, repr(e)))
+        return False
 
 def page_if_exists(path: str, title: str, icon: str, **kwargs):
     if not os.path.exists(path):
         return None
-    return st.Page(path, title=title, icon=icon, **kwargs)
+    if not _syntax_ok(path):
+        return None
+    try:
+        return st.Page(path, title=title, icon=icon, **kwargs)
+    except Exception as e:
+        BROKEN_PAGES.append((path, f"st.Page 建立失敗：{repr(e)}"))
+        return None
 
-
-# ✅ 首頁
+# =========================
+# ✅ Pages
+# =========================
 home_page = page_if_exists("pages/0_首頁.py", "首頁", "🏠", default=True, url_path="home")
 
-# ✅ 出貨課（群組首頁：要隱藏）
+# 出貨課
 outbound_home = page_if_exists("pages/7_出貨課首頁.py", "出貨課首頁", "📦", url_path="outbound-home")
 transfer_diff_page = page_if_exists("pages/6_撥貨差異.py", "撥貨差異", "📦", url_path="outbound-transfer-diff")
 
-# ✅ 進貨課（群組首頁：要隱藏）
+# 進貨課
 inbound_home = page_if_exists("pages/8_進貨課首頁.py", "進貨課首頁", "🚚", url_path="inbound-home")
 qc_page = page_if_exists("pages/1_驗收作業效能.py", "驗收作業效能", "✅", url_path="inbound-qc")
 putaway_page = page_if_exists("pages/2_上架作業效能.py", "上架作業效能", "📦", url_path="inbound-putaway")
@@ -129,7 +153,7 @@ pick_page = page_if_exists("pages/3_總揀作業效能.py", "總揀作業效能"
 slot_page = page_if_exists("pages/4_儲位使用率.py", "儲位使用率", "🧊", url_path="inbound-slot-util")
 diff_page = page_if_exists("pages/5_揀貨差異代庫存.py", "揀貨差異代庫存", "🔎", url_path="inbound-pick-diff")
 
-# ✅ 大樹KPI（群組首頁：要隱藏）
+# 大樹KPI
 gt_kpi_home = page_if_exists("pages/9_大樹KPI首頁.py", "大樹KPI首頁", "📈", url_path="gt-kpi-home")
 gt_inbound_receipt = page_if_exists("pages/10_進貨驗收量.py", "進貨驗收量", "📥", url_path="gt-inbound-receipt")
 gt_ship_should = page_if_exists("pages/11_庫存訂單應出量分析.py", "庫存訂單應出量分析", "📦", url_path="gt-ship-should")
@@ -140,14 +164,26 @@ gt_inv_accuracy = page_if_exists("pages/15_庫存盤點正確率.py", "庫存盤
 gt_store_arrival_abn = page_if_exists("pages/16_門市到貨異常率.py", "門市到貨異常率", "🏪", url_path="gt-store-arrival-abn")
 gt_daily_attendance = page_if_exists("pages/17_每日出勤工時分析.py", "每日出勤工時分析", "🕒", url_path="gt-daily-attendance")
 
-# ✅ 18_儲位使用率（KPI 入口）
+# 18_各類儲區使用率（KPI 入口）
 slot_util_page = page_if_exists(
     "pages/18_各類儲區使用率.py",
     "各類儲區使用率",
     "🧊",
-    url_path="slot-zone-util-18"
+    url_path="slot-zone-util-18",
 )
 
+# =========================
+# ✅ Sidebar 顯示「壞頁」清單（不讓整站掛）
+# =========================
+if BROKEN_PAGES:
+    with st.sidebar.expander("⚠️ 已停用頁面（語法/縮排錯）", expanded=True):
+        st.caption("以下檔案有 IndentationError / SyntaxError，已自動略過避免整站掛掉：")
+        for p, err in BROKEN_PAGES:
+            st.code(f"{p}\n{err}")
+
+# =========================
+# ✅ Navigation
+# =========================
 pg = st.navigation(
     {
         "": [p for p in [home_page] if p],
@@ -163,5 +199,3 @@ pg = st.navigation(
 )
 
 pg.run()
-
-
