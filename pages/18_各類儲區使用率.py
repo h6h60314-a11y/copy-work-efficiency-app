@@ -7,6 +7,7 @@ A) 依「區(溫層)」統計：大/中/小儲位 有效貨位、已使用貨位
 B) 依「棚別」分類：大型/中型/小型/未知，並輸出：明細(含分類)、棚別統計、儲位類型統計
 
 ✅ 支援 .xlsb（pyxlsb）
+✅ 顯示方式：兩欄換列（大/中｜小/總計）
 """
 
 import warnings
@@ -201,9 +202,9 @@ def calc_util_by_zone(df: pd.DataFrame) -> pd.DataFrame:
         rate = (used / eff * 100.0) if eff else 0.0
         return {
             "儲位類型": kind,
-            "有效貨位": eff,
-            "已使用貨位": used,
-            "未使用貨位": remain,
+            "有效貨位": int(eff),
+            "已使用貨位": int(used),
+            "未使用貨位": int(remain),
             "使用率(%)": round(rate, 2),
         }
 
@@ -216,20 +217,16 @@ def calc_util_by_zone(df: pd.DataFrame) -> pd.DataFrame:
     eff_total = sum(r["有效貨位"] for r in out)
     used_total = sum(r["已使用貨位"] for r in out)
     remain_total = max(eff_total - used_total, 0)
+
     out.append({
         "儲位類型": "總計",
-        "有效貨位": eff_total,
-        "已使用貨位": used_total,
-        "未使用貨位": remain_total,
-        "使用率(%)": round((used_total / eff_total * 100.0) if eff_total else 0.0, 2)
+        "有效貨位": int(eff_total),
+        "已使用貨位": int(used_total),
+        "未使用貨位": int(remain_total),
+        "使用率(%)": round((used_total / eff_total * 100.0) if eff_total else 0.0, 2),
     })
 
-    df_out = pd.DataFrame(out)
-    # 轉整數欄位（顯示好看）
-    for c in ["有效貨位", "已使用貨位", "未使用貨位"]:
-        df_out[c] = pd.to_numeric(df_out[c], errors="coerce").fillna(0).astype(int)
-    df_out["使用率(%)"] = pd.to_numeric(df_out["使用率(%)"], errors="coerce").fillna(0).round(2)
-    return df_out
+    return pd.DataFrame(out)
 
 
 def build_output_excel_bytes(
@@ -323,7 +320,7 @@ df_type = (
 _spacer(12)
 
 # =========================
-# 顯示區塊：左右兩欄（每個儲區直向列出）
+# 顯示區塊：左右兩欄
 # =========================
 left, right = st.columns([1, 1], gap="large")
 
@@ -350,11 +347,21 @@ with left:
             st.markdown(f"**已使用貨位：** {used:,}")
             st.markdown(f"**未使用貨位：** {remain:,}")
             st.markdown(f"**使用率(%)：** {rate:.2f}")
-            _spacer(6)
 
-        # ✅ 依你指定的順序：大/中/小/總計
-        for k in ["大儲位", "中儲位", "小儲位", "總計"]:
-            render_zone_block(k)
+        # ✅ 兩欄換列：大/中｜小/總計
+        r1c1, r1c2 = st.columns(2, gap="large")
+        with r1c1:
+            render_zone_block("大儲位")
+        with r1c2:
+            render_zone_block("中儲位")
+
+        _spacer(10)
+
+        r2c1, r2c2 = st.columns(2, gap="large")
+        with r2c1:
+            render_zone_block("小儲位")
+        with r2c2:
+            render_zone_block("總計")
 
     if HAS_COMMON_UI:
         card_close()
