@@ -1,4 +1,4 @@
-# pages/20_進貨課驗收量體.py
+# pages/20_進貨課 - 驗收量體.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
