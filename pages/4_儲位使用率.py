@@ -251,7 +251,7 @@ def _category_card_html(item: dict, warn_threshold: float) -> str:
     '042','043','051','052','053','054','055','056',
     '057','301','302','303','304','305','306','311',
     '312','313','314','081','401','402','061','014',
-    '057','058','059','015'
+    '057','058','059','015','403'
 ]
 中型儲位 = ['011','012','013','031','032','033','034','035','036','037','038']
 小型儲位 = ['001','002','003','017','016']
@@ -367,7 +367,7 @@ def main():
     inject_logistics_theme()
     _inject_responsive_grid_css()
 
-    set_page("儲位使用率", icon="🧊", subtitle="區(溫層)分類 + 棚別分類（未知明細全寬）｜支援 xlsb")
+    set_page("儲位使用率", icon="🧊", subtitle="區(溫層)分類 + 棚別分類（Top50 全寬 + 未知明細全寬）｜支援 xlsb")
 
     # Sidebar
     with st.sidebar:
@@ -389,9 +389,6 @@ def main():
         warn_threshold = st.number_input(
             "紅卡門檻（使用率 %）", min_value=0.0, max_value=100.0, value=90.0, step=1.0, key="card_warn_threshold"
         )
-
-        st.divider()
-        shelf_table_full_width = st.checkbox("棚別統計 Top50 改成全寬顯示", value=False, key="shelf_full_width")
 
     categories = sidebar_category_editor()
 
@@ -419,7 +416,7 @@ def main():
     df.columns = df.columns.astype(str).str.strip()
     st.caption(f"使用分頁：{sheet_used}")
 
-    # Prepare shelf side outputs first (for full-width section)
+    # Prepare shelf outputs
     shelf_ok = "棚別" in df.columns
     df_shelf_detail = None
     df_shelf = None
@@ -448,7 +445,7 @@ def main():
         df_unknown = pd.DataFrame()
 
     # =====================================================
-    # ✅ 兩欄：左 區(溫層)分類｜右 棚別分類統計
+    # ✅ 兩欄：左 區(溫層)分類｜右 棚別分類統計（不含 Top50）
     # =====================================================
     left_col, right_col = st.columns([1, 1], gap="large")
 
@@ -540,13 +537,7 @@ def main():
                 st.markdown("### 未知")
                 st.markdown(f"**{type_map.get('未知', 0):,} 筆**")
 
-            # ✅ Top50：預設留右欄；若勾選則移到下方全寬
-            if not shelf_table_full_width:
-                st.divider()
-                st.subheader("📋 棚別統計（Top 50）")
-                st.dataframe(df_shelf.head(50), use_container_width=True, hide_index=True)
-
-            # 右欄保留匯出按鈕（棚別分類）
+            # 匯出（棚別分類）
             base = os.path.splitext(uploaded.name)[0]
             shelf_filename, shelf_bytes = build_shelf_output_excel_bytes(
                 base_name=base,
@@ -567,18 +558,15 @@ def main():
             card_close()
 
     # =====================================================
-    # ✅ 全寬區塊（同等寬）：棚別統計 Top50（可選） + 未知明細
+    # ✅ 全寬：棚別統計 Top50（固定全寬） + 未知明細（固定全寬）
     # =====================================================
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
-    # Top50 改全寬（使用者勾選才顯示）
-    if shelf_ok and shelf_table_full_width:
+    if shelf_ok:
         card_open("📋 棚別統計（Top 50）")
         st.dataframe(df_shelf.head(50), use_container_width=True, hide_index=True)
         card_close()
 
-    # ✅ 未知明細：永遠全寬（你要的同等寬）
-    if shelf_ok:
         if df_unknown is None or len(df_unknown) == 0:
             card_open("📌 未知明細")
             st.info("未知：0 筆（無需列明細）")
