@@ -171,26 +171,10 @@ def build_output_excel_bytes(
     return out.read()
 
 
-def _kpi_stack(title: str, value: int):
-    st.markdown(
-        f"""
-<div style="
-  padding: 10px 12px;
-  border: 1px solid rgba(15,23,42,0.12);
-  border-radius: 12px;
-  background: rgba(255,255,255,0.75);
-  margin: 8px 0;
-">
-  <div style="font-weight: 850; color: rgba(15,23,42,0.70); font-size: 13px; line-height: 1.2;">
-    {title}
-  </div>
-  <div style="font-weight: 950; color: rgba(15,23,42,0.92); font-size: 22px; margin-top: 6px; line-height: 1;">
-    {value:,}
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+def _kpi_text(title: str, value: int):
+    # ✅ 純文字、無卡片、直向
+    st.markdown(f"**{title}**")
+    st.markdown(f"<div style='font-size:24px; font-weight:900; line-height:1.1; margin-top:2px; margin-bottom:12px;'>{value:,}</div>", unsafe_allow_html=True)
 
 
 # =========================
@@ -245,11 +229,11 @@ except Exception as e:
     card_close()
     st.stop()
 
-# ✅ KPI 區塊：改成你要的順序與標題
+# ✅ KPI：不要卡片模式，純文字直向
 st.markdown("### 驗收量體")
-_kpi_stack("SKU（全檔唯一商品）", stats["overall_unique_products"])
-_kpi_stack("ITEM（到=QC 筆數）", stats["total_after"])
-_kpi_stack("原始總筆數", stats["total_before"])
+_kpi_text("SKU（全檔唯一商品）", stats["overall_unique_products"])
+_kpi_text("ITEM（到=QC 筆數）", stats["total_after"])
+_kpi_text("原始總筆數", stats["total_before"])
 
 st.markdown("### 過濾統計")
 st.dataframe(summary_df, use_container_width=True, hide_index=True)
