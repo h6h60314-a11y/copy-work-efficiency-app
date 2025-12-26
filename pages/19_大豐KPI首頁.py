@@ -7,9 +7,9 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 st.set_page_config(page_title="大豐KPI", page_icon="📊", layout="wide")
 inject_logistics_theme()
 
-# ✅ 允許從 KPI 首頁導頁的模組清單（安全白名單）
-# 先清空：你之後再把 pages/xx_xxx.py 逐一加進來
-ALLOW_PAGES = set()
+ALLOW_PAGES = {
+    "pages/20_進貨課驗收量體.py",  # ✅ 新增：驗收量體（到=QC）
+}
 
 
 def _route_by_query():
@@ -131,9 +131,12 @@ def main():
 
     st.markdown('<div class="kpi-list">', unsafe_allow_html=True)
 
-    # ✅ 模組先清空：你之後在這裡一條條加入 _nav_item(...)
-    # 例：
-    # _nav_item("📥", "xxx", "pages/xx_xxx.py", "描述...")
+    _nav_item(
+        "✅",
+        "進貨課驗收量體",
+        "pages/20_進貨課驗收量體.py",
+        "只保留「到=QC」｜SKU（唯一商品）｜ITEM（筆數）｜輸出Excel",
+    )
 
     st.markdown("</div>", unsafe_allow_html=True)
     card_close()
