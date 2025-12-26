@@ -157,58 +157,69 @@ def process_subset(df_raw: pd.DataFrame, df_map: pd.DataFrame, subset_tag: str, 
     return subset_tag, pivot2, total_count, group_keys
 
 
-def build_single_sheet_excel_bytes(df_type_total: pd.DataFrame, df_summary: pd.DataFrame, df_detail_all: pd.DataFrame) -> bytes:
+def build_single_sheet_excel_bytes(df_type_total: pd.DataFrame, df_detail_all: pd.DataFrame, df_summary: pd.DataFrame) -> bytes:
     """
-    單一工作表：
-      1) 儲位類型總儲位筆數（最上方）
-      2) 彙總總表
-      3) 明細表（合併）
+    單一工作表（依需求順序）：
+      1) 總揀筆數（最上方）
+      2) 明細表（合併）
+      3) 彙總總表
     """
     out = BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
         sheet = "結果"
         r = 0
 
-        # 1) 儲位類型總表
-        pd.DataFrame({"": ["儲位類型總儲位筆數"]}).to_excel(
+        # 1) 總揀筆數（依儲位類型加總）
+        pd.DataFrame({"": ["總揀筆數"]}).to_excel(
             writer, sheet_name=sheet, index=False, header=False, startrow=r, startcol=0
         )
         r += 1
         df_type_total.to_excel(writer, sheet_name=sheet, index=False, startrow=r, startcol=0)
         r += len(df_type_total) + 2
 
-        # 2) 彙總總表
-        pd.DataFrame({"": ["彙總總表"]}).to_excel(
-            writer, sheet_name=sheet, index=False, header=False, startrow=r, startcol=0
-        )
-        r += 1
-        df_summary.to_excel(writer, sheet_name=sheet, index=False, startrow=r, startcol=0)
-        r += len(df_summary) + 2
-
-        # 3) 明細表（合併）
+        # 2) 明細表（合併）
         pd.DataFrame({"": ["明細表（合併）"]}).to_excel(
             writer, sheet_name=sheet, index=False, header=False, startrow=r, startcol=0
         )
         r += 1
         df_detail_all.to_excel(writer, sheet_name=sheet, index=False, startrow=r, startcol=0)
+        r += len(df_detail_all) + 2
+
+        # 3) 彙總總表
+        pd.DataFrame({"": ["彙總總表"]}).to_excel(
+            writer, sheet_name=sheet, index=False, header=False, startrow=r, startcol=0
+        )
+        r += 1
+        df_summary.to_excel(writer, sheet_name=sheet, index=False, startrow=r, startcol=0)
 
     out.seek(0)
     return out.read()
 
 
+def _label_type_as_pick(type_name: str) -> str:
+    t = str(type_name).strip()
+    if t == "低空":
+        return "低空總揀筆數"
+    if t == "高空":
+        return "高空總揀筆數"
+    if t.upper() == "GM":
+        return "GM總揀筆數"
+    return f"{t}總揀筆數"
+
+
 def show_type_totals_as_text(df_type_total: pd.DataFrame):
-    """✅ 不用表格：純文字直向顯示"""
-    st.markdown("### 儲位類型總儲位筆數")
+    """✅ 不用表格：純文字直向顯示（標題與名稱依需求）"""
+    st.markdown("### 總揀筆數")
     if df_type_total is None or df_type_total.empty:
         st.caption("（無資料）")
         return
 
     for _, r in df_type_total.iterrows():
         t = r.get("儲位類型", "")
-        v = r.get("總儲位筆數", 0)
-        st.markdown(f"**{t}**")
+        v = r.get("總揀筆數", 0)
+        st.markdown(f"**{_label_type_as_pick(t)}**")
         st.markdown(
-            f"<div style='font-size:26px; font-weight:900; line-height:1.1; margin-top:2px; margin-bottom:12px;'>{int(v):,}</div>",
+            f"<div style='font-size:28px; font-weight:900; line-height:1.1; margin-top:2px; margin-bottom:14px;'>{int(v):,}</div>",
             unsafe_allow_html=True,
         )
 
@@ -331,34 +342,34 @@ if detail_frames:
 else:
     df_detail_all = pd.DataFrame(columns=["來源檔名", "子集", "儲位類型", "儲位_筆數"])
 
-# ✅ 儲位類型總儲位筆數（儲位_筆數 sum）
-if not df_detail_all.empty and ("儲位類型" in df_detail_all.columns) and ("儲位_筆數" in df_detail_all.columns):
+# ✅ 依儲位類型加總「總揀筆數」（儲位_筆數 sum）
+if (not df_detail_all.empty) and ("儲位類型" in df_detail_all.columns) and ("儲位_筆數" in df_detail_all.columns):
     df_type_total = (
         df_detail_all.groupby("儲位類型", dropna=False)["儲位_筆數"]
         .sum()
-        .reset_index(name="總儲位筆數")
-        .sort_values("總儲位筆數", ascending=False, kind="mergesort")
+        .reset_index(name="總揀筆數")
+        .sort_values("總揀筆數", ascending=False, kind="mergesort")
         .reset_index(drop=True)
     )
 else:
-    df_type_total = pd.DataFrame(columns=["儲位類型", "總儲位筆數"])
+    df_type_total = pd.DataFrame(columns=["儲位類型", "總揀筆數"])
 
-# ✅ 顯示：不要表格（純文字直向）
+# ✅ 顯示（不要表格）
 show_type_totals_as_text(df_type_total)
 
-# 其餘仍保留表格（你若也想改掉，我再幫你做純文字版）
-st.markdown("### 彙總總表")
-st.dataframe(df_summary, use_container_width=True, hide_index=True)
-
+# ✅ 你要的順序：明細表（合併）在彙總總表上
 st.markdown("### 明細表（合併）")
 st.dataframe(df_detail_all, use_container_width=True, hide_index=True)
 
+st.markdown("### 彙總總表")
+st.dataframe(df_summary, use_container_width=True, hide_index=True)
+
 st.caption(f"成功：{ok} 檔；失敗：{fail} 檔")
 
-# 下載（Excel：同一張工作表，最上方含 儲位類型總表）
+# 下載（Excel：同一張工作表，順序同畫面）
 try:
-    out_bytes = build_single_sheet_excel_bytes(df_type_total, df_summary, df_detail_all)
-    out_name = "批次_樞紐_儲位類型_單頁輸出.xlsx"
+    out_bytes = build_single_sheet_excel_bytes(df_type_total, df_detail_all, df_summary)
+    out_name = "批次_總揀筆數_單頁輸出.xlsx"
 except Exception as e:
     st.error(f"輸出失敗：{e}")
     card_close()
