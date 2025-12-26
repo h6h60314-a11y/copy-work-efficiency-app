@@ -294,9 +294,9 @@ if not all_df.empty and LOC_TYPE_COL in all_df.columns:
 
 # 顯示 KPI（純文字、直向）
 st.markdown("### 上架量體")
-_kpi_text("ITEM（由=QC 且 到通過排除）", totals["ITEM"])
-_kpi_text("高空", totals["高空"])
 _kpi_text("低空", totals["低空"])
+_kpi_text("高空", totals["高空"])
+_kpi_text("ITEM（由=QC 且 到通過排除）", totals["ITEM"])
 _kpi_text("未知", totals["未知"])
 _kpi_text("無法對應", totals["無法對應"])
 
