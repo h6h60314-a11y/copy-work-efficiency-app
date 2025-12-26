@@ -151,7 +151,6 @@ inbound_home = page_if_exists("pages/8_進貨課首頁.py", "進貨課首頁", "
 qc_page = page_if_exists("pages/1_驗收作業效能.py", "驗收作業效能", "✅", url_path="inbound-qc")
 putaway_page = page_if_exists("pages/2_上架作業效能.py", "上架作業效能", "📦", url_path="inbound-putaway")
 pick_page = page_if_exists("pages/3_總揀作業效能.py", "總揀作業效能", "🎯", url_path="inbound-pick")
-slot_page = page_if_exists("pages/4_儲位使用率.py", "儲位使用率", "🧊", url_path="inbound-slot-util")
 diff_page = page_if_exists("pages/5_揀貨差異代庫存.py", "揀貨差異代庫存", "🔎", url_path="inbound-pick-diff")
 
 # 大樹KPI
@@ -177,6 +176,7 @@ slot_util_page = page_if_exists(
 df_kpi_home = page_if_exists("pages/19_大豐KPI首頁.py", "大豐KPI首頁", "📊", url_path="df-kpi-home")
 df_qc_volume = page_if_exists("pages/20_進貨課 - 驗收量體.py", "進貨課 - 驗收量體", "✅", url_path="df-qc-volume")
 df_putaway_volume = page_if_exists("pages/21_進貨課 - 上架量體.py","進貨課 - 上架量體","📦",url_path="df-putaway-volume")
+slot_page = page_if_exists("pages/4_儲位使用率.py", "儲位使用率", "🧊", url_path="inbound-slot-util")
 
 # =========================
 # ✅ Sidebar 顯示「壞頁」清單（不讓整站掛）
@@ -194,18 +194,19 @@ pg = st.navigation(
     {
         "": [p for p in [home_page] if p],
         "出貨課": [p for p in [outbound_home, transfer_diff_page] if p],
-        "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, slot_page, diff_page] if p],
+        "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, diff_page] if p],
         "大樹KPI": [p for p in [
             gt_kpi_home, gt_inbound_receipt, gt_ship_should, gt_xdock, gt_ship_actual,
             gt_putaway_daily, gt_inv_accuracy, gt_store_arrival_abn, gt_daily_attendance,
             slot_util_page
         ] if p],
-        "大豐KPI": [p for p in [df_kpi_home, df_qc_volume,df_putaway_volume] if p],
+        "大豐KPI": [p for p in [df_kpi_home, df_qc_volume,df_putaway_volume,slot_page] if p],
     },
     expanded=False,
 )
 
 pg.run()
+
 
 
 
