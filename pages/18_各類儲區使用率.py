@@ -7,7 +7,9 @@ A) 依「區(溫層)」統計：大/中/小儲位 有效貨位、已使用貨位
 B) 依「棚別」分類：大型/中型/小型/未知，並輸出：明細(含分類)、棚別統計、儲位類型統計
 
 ✅ 支援 .xlsb（pyxlsb）
-✅ 顯示方式：兩欄換列（大/中｜小/總計）
+✅ 顯示方式：
+   - 左欄（使用率明細）：兩欄換列（大/中｜小/總計）
+   - 右欄（棚別分類統計）：兩欄換列（大型/中型｜小型/未知）
 """
 
 import warnings
@@ -257,7 +259,7 @@ st.set_page_config(page_title="各類儲區使用率", page_icon="🧊", layout=
 
 if HAS_COMMON_UI:
     inject_logistics_theme()
-    set_page("各類儲區使用率", icon="🧊", subtitle="大/中/小儲區｜使用率｜棚別統計｜Excel匯出")
+    set_page("各類儲區使用率", icon="🧊", subtitle="大/中/小儲區｜使用率｜棚別分類統計｜Excel匯出")
 else:
     st.title("🧊 各類儲區使用率")
 
@@ -314,8 +316,9 @@ df_type = (
     df_detail.groupby(["儲位類型"], dropna=False)
     .size()
     .reset_index(name="筆數")
-    .sort_values(["筆數", "儲位類型"], ascending=[False, True])
 )
+
+type_map = {str(r["儲位類型"]): int(r["筆數"]) for _, r in df_type.iterrows()}
 
 _spacer(12)
 
@@ -324,6 +327,7 @@ _spacer(12)
 # =========================
 left, right = st.columns([1, 1], gap="large")
 
+# ---------- 左：使用率明細（兩欄換列） ----------
 with left:
     if HAS_COMMON_UI:
         card_open("📊 大/中/小儲區使用率（明細）")
@@ -348,7 +352,6 @@ with left:
             st.markdown(f"**未使用貨位：** {remain:,}")
             st.markdown(f"**使用率(%)：** {rate:.2f}")
 
-        # ✅ 兩欄換列：大/中｜小/總計
         r1c1, r1c2 = st.columns(2, gap="large")
         with r1c1:
             render_zone_block("大儲位")
@@ -366,15 +369,31 @@ with left:
     if HAS_COMMON_UI:
         card_close()
 
+# ---------- 右：棚別分類統計（兩欄換列） ----------
 with right:
     if HAS_COMMON_UI:
         card_open("🏷️ 儲位類型統計（依棚別分類）")
     else:
         st.subheader("🏷️ 儲位類型統計（依棚別分類）")
 
-    type_map = {r["儲位類型"]: int(r["筆數"]) for _, r in df_type.iterrows()}
-    for k in ["大型儲位", "中型儲位", "小型儲位", "未知"]:
-        st.metric(k, f"{type_map.get(k, 0):,} 筆")
+    def render_type_block(label: str, value: int):
+        st.markdown(f"### {label}")
+        st.markdown(f"**{value:,} 筆**")
+
+    # 兩欄換列：大型/中型｜小型/未知
+    t1c1, t1c2 = st.columns(2, gap="large")
+    with t1c1:
+        render_type_block("大型儲位", type_map.get("大型儲位", 0))
+    with t1c2:
+        render_type_block("中型儲位", type_map.get("中型儲位", 0))
+
+    _spacer(10)
+
+    t2c1, t2c2 = st.columns(2, gap="large")
+    with t2c1:
+        render_type_block("小型儲位", type_map.get("小型儲位", 0))
+    with t2c2:
+        render_type_block("未知", type_map.get("未知", 0))
 
     if HAS_COMMON_UI:
         card_close()
@@ -384,7 +403,11 @@ _spacer(12)
 # 棚別統計（表格）
 if HAS_COMMON_UI:
     card_open("📋 棚別統計（Top 50）")
-st.dataframe(df_shelf.head(50), use_container_width=True, hide_index=True)
+st.dataframe(
+    df_shelf.head(50),
+    use_container_width=True,
+    hide_index=True
+)
 if HAS_COMMON_UI:
     card_close()
 
