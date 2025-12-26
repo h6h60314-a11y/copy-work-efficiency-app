@@ -9,6 +9,7 @@ inject_logistics_theme()
 
 ALLOW_PAGES = {
     "pages/20_進貨課 - 驗收量體.py",  # ✅ 新增：驗收量體（到=QC）
+    "pages/21_進貨課上架量體.py", 
 }
 
 
@@ -136,6 +137,13 @@ def main():
         "進貨課 - 驗收量體",
         "pages/20_進貨課 - 驗收量體.py",
         "只保留「到=QC」｜SKU（唯一商品）｜ITEM（筆數）｜輸出Excel",
+
+    _nav_item(
+        "📦",
+        "進貨課上架量體",
+        "pages/21_進貨課 - 上架量體.py",
+        "由=QC｜到排除關鍵字｜對應儲位類型｜高低空統計｜輸出Excel",
+        
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
