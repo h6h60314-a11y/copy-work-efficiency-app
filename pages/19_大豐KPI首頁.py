@@ -12,6 +12,7 @@ ALLOW_PAGES = {
     "pages/20_進貨課 - 驗收量體.py",
     "pages/21_進貨課 - 上架量體.py",  # ✅ 新增：上架量體
     "pages/4_儲位使用率.py",
+    "pages/22_進貨課 - 總揀筆數.py",
 }
 
 
@@ -155,6 +156,13 @@ def main():
         "儲位使用率分析",
         "pages/4_儲位使用率.py",
         "依區(溫層)分類統計、使用率門檻提示、分類可調整、KPI圖格呈現",
+    )
+
+    _nav_item(
+    "🎯",
+    "進貨課 - 總揀筆數",
+    "pages/22_進貨課 - 總揀筆數.py",
+    "多檔批次｜成箱/零散(或ALL)｜排除儲位｜回填儲位類型｜單頁Excel輸出",
     )
     
     st.markdown("</div>", unsafe_allow_html=True)
