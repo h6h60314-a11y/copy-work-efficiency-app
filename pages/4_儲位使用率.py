@@ -20,7 +20,7 @@ except Exception:
 
 
 # =========================
-# ✅ 你的分區清單（大/中/小）
+# ✅ 區(溫層) 大/中/小（左欄使用率）
 # =========================
 LARGE_ZONES = [
     '010','018','019','020','021','022','023','041',
@@ -38,13 +38,32 @@ SMALL = set(SMALL_ZONES)
 
 
 # =========================
+# ✅ 棚別分類（右欄統計）— 同步你的新邏輯
+# =========================
+SHELF_BUCKETS = {
+    "輕型料架": ["001", "002", "003", "017", "016"],
+    "落地儲":   ["014", "018", "019", "020", "010", "081", "401", "402", "403", "015"],
+    "重型低空": ["011", "012", "013", "031", "032", "033", "034", "035", "036", "037", "038"],
+    "高空儲": [
+        "021", "022", "023",
+        "041", "042", "043",
+        "051", "052", "053", "054", "055", "056", "057",
+        "301", "302", "303", "304", "305", "306",
+        "311", "312", "313", "314",
+        "061",
+    ],
+}
+SHELF_BUCKET_SETS = {k: set(v) for k, v in SHELF_BUCKETS.items()}
+SHELF_BUCKET_ORDER = ["輕型料架", "落地儲", "重型低空", "高空儲", "未知"]
+
+
+# =========================
 # UI：縮小版面（比照 18）
 # =========================
 def inject_compact_css():
     st.markdown(
         r"""
 <style>
-/* 整體字級、間距更緊湊 */
 html, body, [class*="css"] { font-size: 14px !important; }
 .block-container { padding-top: 0.9rem !important; padding-bottom: 1.2rem !important; }
 h1 { font-size: 1.55rem !important; margin-bottom: .35rem !important; }
@@ -52,15 +71,10 @@ h2 { font-size: 1.15rem !important; margin: .35rem 0 .25rem !important; }
 h3 { font-size: 1.0rem !important; margin: .25rem 0 .15rem !important; }
 p, li { line-height: 1.45 !important; }
 
-/* 卡片內容縮小（common_ui card_open 包起來的容器也會受影響） */
-div[data-testid="stVerticalBlock"] > div:has(> div[data-testid="stMarkdownContainer"]) { margin-bottom: .35rem !important; }
-
-/* metric 區塊縮小 */
 div[data-testid="stMetric"] { padding: 6px 10px !important; }
 div[data-testid="stMetric"] label { font-size: 12px !important; }
 div[data-testid="stMetric"] div { font-size: 20px !important; }
 
-/* dataframe 表格上方空隙縮小 */
 div[data-testid="stDataFrame"] { margin-top: .2rem !important; }
 </style>
 """,
@@ -94,7 +108,6 @@ def robust_read_uploaded(uploaded) -> tuple[pd.DataFrame, str]:
 
     if ext == ".xlsb":
         xls = pd.ExcelFile(bio, engine="pyxlsb")
-        # 優先找：區(溫層) → 棚別 → 第一張
         sheet = None
         for key in ["區(溫層)", "棚別"]:
             candidate = detect_sheet_for_column(xls, key)
@@ -190,34 +203,31 @@ def calc_util_by_zone(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =========================
-# 棚別分類：大型/中型/小型/未知（同步 18）
+# 棚別分類（同步新 bucket）
 # =========================
 def _to_zone3(x) -> str:
     if x is None or (isinstance(x, float) and pd.isna(x)):
         return ""
     s = str(x).strip()
-    m = re.search(r"\d{3}", s)
+    m = re.search(r"\d{3}", s)  # 抓第一個 3 位數
     if m:
         return m.group(0)
-    s = re.sub(r"\D", "", s)
+    s = re.sub(r"\D", "", s)   # 退而求其次：只留數字後補 0
     return s.zfill(3) if s else ""
 
 
-def classify_from_shelf(x) -> str:
+def classify_from_shelf_bucket(x) -> str:
     z = _to_zone3(x)
     if not z:
         return "未知"
-    if z in LARGE:
-        return "大型儲位"
-    if z in MID:
-        return "中型儲位"
-    if z in SMALL:
-        return "小型儲位"
+    for bucket, zset in SHELF_BUCKET_SETS.items():
+        if z in zset:
+            return bucket
     return "未知"
 
 
 # =========================
-# 顯示：小卡（文字版，緊湊）
+# 顯示：使用率小卡（文字版）
 # =========================
 def render_util_block(title: str, r: dict):
     st.markdown(f"### {title}")
@@ -244,15 +254,12 @@ def build_output_excel_bytes(base_name: str,
     return f"{base_name}_4_儲位使用率_輸出.xlsx", out.getvalue()
 
 
-# =========================
-# MAIN
-# =========================
 def main():
     st.set_page_config(page_title="儲位使用率", page_icon="🧊", layout="wide")
 
     if HAS_COMMON_UI:
         inject_logistics_theme()
-        set_page("儲位使用率", icon="🧊", subtitle="區(溫層)分類 + 棚別分類（Top50 全寬 + 未知明細）｜支援 xlsb")
+        set_page("儲位使用率", icon="🧊", subtitle="區(溫層)使用率 + 棚別分類（輕型料架/落地儲/重型低空/高空儲/未知）｜支援 xlsb")
     else:
         st.title("🧊 儲位使用率")
 
@@ -283,24 +290,19 @@ def main():
     df.columns = df.columns.astype(str).str.strip()
     st.caption(f"使用分頁：{sheet_used}")
 
-    # =========================
-    # 左：區(溫層)使用率（大/中｜小/總計）
-    # =========================
-    # 右：棚別分類統計（大型/中型｜小型/未知）
-    # =========================
     left, right = st.columns(2, gap="large")
 
-    # ---------- LEFT ----------
+    # ---------- LEFT：使用率 ----------
     with left:
         if HAS_COMMON_UI:
             card_open("📌 區(溫層)分類（使用率明細）")
+
         need = ["區(溫層)", "有效貨位", "已使用貨位"]
         miss = [c for c in need if c not in df.columns]
 
         if miss:
             st.warning("⚠️ 此檔案缺少『區(溫層)分類』必要欄位，已跳過此段。")
             st.write("缺少欄位：", miss)
-            util_rows = {}
             df_util = pd.DataFrame()
         else:
             df_util = calc_util_by_zone(df)
@@ -324,25 +326,24 @@ def main():
         if HAS_COMMON_UI:
             card_close()
 
-    # ---------- RIGHT ----------
+    # ---------- RIGHT：棚別分類 ----------
     with right:
         if HAS_COMMON_UI:
-            card_open("🏷️ 棚別分類統計（大型/中型/小型/未知）")
+            card_open("🏷️ 棚別分類統計（輕型料架/落地儲/重型低空/高空儲/未知）")
 
         if "棚別" not in df.columns:
             st.error("❌ 找不到欄位『棚別』，無法進行棚別分類統計。")
             st.write("目前欄位：", list(df.columns))
-            shelf_ok = False
             df_detail = df.copy()
             df_detail["儲位類型"] = "未知"
             df_shelf = pd.DataFrame()
             df_type = pd.DataFrame()
             df_unknown = df_detail.copy()
-            type_map = {"大型儲位": 0, "中型儲位": 0, "小型儲位": 0, "未知": len(df_unknown)}
+            type_map = {k: 0 for k in SHELF_BUCKET_ORDER}
+            type_map["未知"] = len(df_unknown)
         else:
-            shelf_ok = True
             df_detail = df.copy()
-            df_detail["儲位類型"] = df_detail["棚別"].apply(classify_from_shelf)
+            df_detail["儲位類型"] = df_detail["棚別"].apply(classify_from_shelf_bucket)
 
             df_shelf = (
                 df_detail.groupby(["棚別"], dropna=False)
@@ -358,36 +359,42 @@ def main():
             )
 
             # 固定順序
-            order = ["大型儲位", "中型儲位", "小型儲位", "未知"]
-            df_type["__ord"] = df_type["儲位類型"].apply(lambda x: order.index(x) if x in order else 999)
+            df_type["__ord"] = df_type["儲位類型"].apply(lambda x: SHELF_BUCKET_ORDER.index(x) if x in SHELF_BUCKET_ORDER else 999)
             df_type = df_type.sort_values(["__ord", "儲位類型"]).drop(columns="__ord")
 
-            type_map = {str(r["儲位類型"]): int(r["筆數"]) for _, r in df_type.iterrows()}
+            type_map = {k: 0 for k in SHELF_BUCKET_ORDER}
+            for _, r in df_type.iterrows():
+                type_map[str(r["儲位類型"])] = int(r["筆數"])
+
             df_unknown = df_detail[df_detail["儲位類型"] == "未知"].copy()
 
-            # ✅ 兩欄換列：大型/中型｜小型/未知
+            # ✅ 兩欄換列：輕型料架/落地儲｜重型低空/高空儲
             r1c1, r1c2 = st.columns(2, gap="large")
             with r1c1:
-                st.markdown("### 大型儲位")
-                st.markdown(f"**{type_map.get('大型儲位', 0):,} 筆**")
+                st.markdown("### 輕型料架")
+                st.markdown(f"**{type_map.get('輕型料架', 0):,} 筆**")
             with r1c2:
-                st.markdown("### 中型儲位")
-                st.markdown(f"**{type_map.get('中型儲位', 0):,} 筆**")
+                st.markdown("### 落地儲")
+                st.markdown(f"**{type_map.get('落地儲', 0):,} 筆**")
 
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
             r2c1, r2c2 = st.columns(2, gap="large")
             with r2c1:
-                st.markdown("### 小型儲位")
-                st.markdown(f"**{type_map.get('小型儲位', 0):,} 筆**")
+                st.markdown("### 重型低空")
+                st.markdown(f"**{type_map.get('重型低空', 0):,} 筆**")
             with r2c2:
-                st.markdown("### 未知")
-                st.markdown(f"**{type_map.get('未知', 0):,} 筆**")
+                st.markdown("### 高空儲")
+                st.markdown(f"**{type_map.get('高空儲', 0):,} 筆**")
 
-        # 匯出（右欄用）
+            # 未知（放在卡片內，靠下，清楚但不佔版）
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            st.markdown("### 未知")
+            st.markdown(f"**{type_map.get('未知', 0):,} 筆**")
+
+        # 匯出
         base = os.path.splitext(uploaded.name)[0]
         if df_util is None or df_util.empty:
-            # 沒有區(溫層)也能匯出棚別統計
             df_util_export = pd.DataFrame([{"儲區": "（缺少區(溫層)欄位）", "有效貨位": 0, "已使用貨位": 0, "未使用貨位": 0, "使用率(%)": 0}])
         else:
             df_util_export = df_util
@@ -396,9 +403,9 @@ def main():
             base_name=base,
             df_util=df_util_export,
             df_detail=df_detail,
-            df_shelf=df_shelf if shelf_ok else pd.DataFrame(),
-            df_type=df_type if shelf_ok else pd.DataFrame(),
-            df_unknown=df_unknown if shelf_ok else pd.DataFrame(),
+            df_shelf=df_shelf if isinstance(df_shelf, pd.DataFrame) else pd.DataFrame(),
+            df_type=df_type if isinstance(df_type, pd.DataFrame) else pd.DataFrame(),
+            df_unknown=df_unknown if isinstance(df_unknown, pd.DataFrame) else pd.DataFrame(),
         )
 
         st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
@@ -413,20 +420,16 @@ def main():
         if HAS_COMMON_UI:
             card_close()
 
-    # =========================
     # ✅ 全寬：棚別統計 Top50（一定全寬）
-    # =========================
-    if "棚別" in df.columns and not df_shelf.empty:
+    if "棚別" in df.columns and isinstance(df_shelf, pd.DataFrame) and (not df_shelf.empty):
         if HAS_COMMON_UI:
             card_open("📋 棚別統計（Top 50）")
         st.dataframe(df_shelf.head(50), use_container_width=True, hide_index=True)
         if HAS_COMMON_UI:
             card_close()
 
-    # =========================
     # ✅ 全寬：未知明細（可展開）
-    # =========================
-    if "棚別" in df.columns:
+    if "棚別" in df.columns and isinstance(df_unknown, pd.DataFrame):
         unknown_cnt = int(type_map.get("未知", 0)) if isinstance(type_map, dict) else 0
         with st.expander(f"📌 未知明細（{unknown_cnt:,} 筆）", expanded=False):
             if unknown_cnt == 0:
