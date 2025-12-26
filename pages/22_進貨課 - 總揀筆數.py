@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from io import BytesIO
-from typing import Dict, List, Optional, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -15,18 +15,13 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 pd.options.display.max_columns = 200
 
-# 需要排除的儲位關鍵字（子字串比對，不分大小寫）
 EXCLUDE_SUBSTRINGS = ["CGS", "JCPL", "QC99", "GREAT0001X", "GX010", "PD99"]
 EXCLUDE_PATTERN = re.compile("|".join(map(re.escape, EXCLUDE_SUBSTRINGS)), re.IGNORECASE)
 
-# 樞紐#1 的列階層（中繼用，動態擇用）
-PIVOT1_BASE_ROWS = ["儲位類型", "儲位", "商品"]  # 一定會用
-PIVOT1_OPTIONAL = ["揀貨批次號"]               # 若存在才用
+PIVOT1_BASE_ROWS = ["儲位類型", "儲位", "商品"]
+PIVOT1_OPTIONAL = ["揀貨批次號"]
 
-# 供樞紐#1 內部加總（若欄位存在才會合計）
 NUM_COL_CANDIDATES = ["數量", "件數", "出貨量", "配貨量", "應揀量", "RF揀貨量", "差異量"]
-
-# 商品欄位容錯（若沒有商品就補一欄）
 PRODUCT_FALLBACK_COL = "商品"
 
 
@@ -37,7 +32,6 @@ def normalize_loc(s):
 
 
 def unit_mask_equal_2(series: pd.Series) -> pd.Series:
-    """成箱：=2（字面 '2' 或數值 2/2.0）"""
     s = series.astype(str).str.strip()
     mask_str = s.eq("2")
     s_num = pd.to_numeric(s, errors="coerce")
@@ -46,7 +40,6 @@ def unit_mask_equal_2(series: pd.Series) -> pd.Series:
 
 
 def unit_mask_contains_3_or_6(series: pd.Series) -> pd.Series:
-    """零散：字串含 3 或 6（含全形 ３／６），任意位置"""
     s = series.astype(str)
     pat = re.compile(r"[3３]|[6６]")
     return s.str.contains(pat, na=False)
@@ -63,7 +56,6 @@ def _read_csv_auto(file_bytes: bytes) -> pd.DataFrame:
 
 
 def read_excel_or_csv(uploaded) -> pd.DataFrame:
-    """只讀單一表（你原本也是 read_excel 不指定 sheet），部署版用 bytes。"""
     name = uploaded.name
     _, ext = os.path.splitext(name)
     ext = ext.lower()
@@ -97,14 +89,8 @@ def read_excel_or_csv(uploaded) -> pd.DataFrame:
 
 
 def build_pivot2(df_source: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    回傳 (#2 DataFrame, 實際分組鍵清單)
-    - 若有「揀貨批次號」：["儲位類型","揀貨批次號"]
-    - 若無「揀貨批次號」：["儲位類型"]
-    """
     df_tmp = df_source.copy()
 
-    # 數值欄轉型（若存在才轉）— 供 pivot1 合計，不影響筆數
     for c in [c for c in NUM_COL_CANDIDATES if c in df_tmp.columns]:
         df_tmp[c] = pd.to_numeric(df_tmp[c], errors="coerce")
 
@@ -112,22 +98,20 @@ def build_pivot2(df_source: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     if ("儲位類型" not in gb1) or ("儲位" not in gb1):
         raise ValueError("樞紐所需欄位不足，至少要有：儲位、儲位類型。")
 
-    # pivot1：按（批次號可選）+ 儲位類型 + 儲位 + 商品 做去重/彙整的中繼
     pivot1 = (
         df_tmp.groupby(gb1, dropna=False)
-              .size()
-              .reset_index(name="筆數")
+        .size()
+        .reset_index(name="筆數")
     )
 
     group_keys = ["儲位類型"] + (["揀貨批次號"] if "揀貨批次號" in pivot1.columns else [])
 
-    # pivot2：每組計算「儲位_筆數（含重複）」= pivot1 裡儲位的 count
     pivot2 = (
         pivot1.groupby(group_keys, dropna=False)["儲位"]
-              .count()
-              .reset_index(name="儲位_筆數")
-              .sort_values(group_keys, kind="mergesort")
-              .reset_index(drop=True)
+        .count()
+        .reset_index(name="儲位_筆數")
+        .sort_values(group_keys, kind="mergesort")
+        .reset_index(drop=True)
     )
     pivot2["儲位_筆數"] = pivot2["儲位_筆數"].fillna(0).astype(int)
     return pivot2, group_keys
@@ -138,17 +122,15 @@ def process_subset(df_raw: pd.DataFrame, df_map: pd.DataFrame, subset_tag: str, 
     if df_work.empty:
         return subset_tag, None, 0, None
 
-    # 排除儲位
     df_work = df_work[~df_work["儲位"].astype(str).str.contains(EXCLUDE_PATTERN, na=False)].copy()
     if df_work.empty:
         return subset_tag, None, 0, None
 
-    # 回填儲位類型（以 normalize 儲位 key 合併）
     df_work["儲位_norm"] = df_work["儲位"].map(normalize_loc)
     map_first = (
         df_map.assign(儲位_norm=df_map["儲位"].map(normalize_loc))
-              .sort_values(["儲位_norm"])
-              .drop_duplicates(subset=["儲位_norm"], keep="first")[["儲位_norm", "儲位類型"]]
+        .sort_values(["儲位_norm"])
+        .drop_duplicates(subset=["儲位_norm"], keep="first")[["儲位_norm", "儲位類型"]]
     )
     df_out = df_work.merge(map_first, on="儲位_norm", how="left").drop(columns=["儲位_norm"])
 
@@ -157,20 +139,40 @@ def process_subset(df_raw: pd.DataFrame, df_map: pd.DataFrame, subset_tag: str, 
     return subset_tag, pivot2, total_count, group_keys
 
 
-def build_single_sheet_excel_bytes(df_summary: pd.DataFrame, df_detail_all: pd.DataFrame) -> bytes:
+def build_single_sheet_excel_bytes(df_type_total: pd.DataFrame, df_summary: pd.DataFrame, df_detail_all: pd.DataFrame) -> bytes:
     """
-    輸出單一工作表：上方彙總總表，下方合併明細
+    單一工作表：
+      1) 儲位類型總儲位筆數（最上方）
+      2) 彙總總表
+      3) 明細表（合併）
     """
     out = BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
         sheet = "結果"
-        df_summary.to_excel(writer, sheet_name=sheet, index=False, startrow=0, startcol=0)
 
-        start_row = len(df_summary) + 2 + 1  # +1 表頭
-        pd.DataFrame({"": ["明細表（合併）"]}).to_excel(
-            writer, sheet_name=sheet, index=False, header=False, startrow=start_row, startcol=0
+        r = 0
+        # 1) 儲位類型總表
+        pd.DataFrame({"": ["儲位類型總儲位筆數"]}).to_excel(
+            writer, sheet_name=sheet, index=False, header=False, startrow=r, startcol=0
         )
-        df_detail_all.to_excel(writer, sheet_name=sheet, index=False, startrow=start_row + 2, startcol=0)
+        r += 1
+        df_type_total.to_excel(writer, sheet_name=sheet, index=False, startrow=r, startcol=0)
+        r += len(df_type_total) + 2  # 空一行
+
+        # 2) 彙總總表
+        pd.DataFrame({"": ["彙總總表"]}).to_excel(
+            writer, sheet_name=sheet, index=False, header=False, startrow=r, startcol=0
+        )
+        r += 1
+        df_summary.to_excel(writer, sheet_name=sheet, index=False, startrow=r, startcol=0)
+        r += len(df_summary) + 2  # 空一行
+
+        # 3) 明細表
+        pd.DataFrame({"": ["明細表（合併）"]}).to_excel(
+            writer, sheet_name=sheet, index=False, header=False, startrow=r, startcol=0
+        )
+        r += 1
+        df_detail_all.to_excel(writer, sheet_name=sheet, index=False, startrow=r, startcol=0)
 
     out.seek(0)
     return out.read()
@@ -225,7 +227,6 @@ for c in ["儲位", "儲位類型"]:
 
 summary_rows: List[dict] = []
 detail_frames: List[pd.DataFrame] = []
-
 ok, fail = 0, 0
 
 for up in batch_files:
@@ -235,7 +236,7 @@ for up in batch_files:
     try:
         df_raw = read_excel_or_csv(up)
         df_raw.columns = [str(c).strip() for c in df_raw.columns]
-    except Exception as e:
+    except Exception:
         summary_rows.append({"來源檔名": name_noext, "子集": "讀檔失敗", "分組鍵": "無", "加總筆數": 0, "資料筆數": 0})
         fail += 1
         continue
@@ -250,7 +251,6 @@ for up in batch_files:
         df_raw = df_raw.rename(columns={PRODUCT_FALLBACK_COL: "商品"})
 
     has_unit_col = "計量單位" in df_raw.columns
-
     masks = (
         [("成箱", unit_mask_equal_2(df_raw["計量單位"])),
          ("零散", unit_mask_contains_3_or_6(df_raw["計量單位"]))]
@@ -274,20 +274,12 @@ for up in batch_files:
         detail_frames.append(df_detail)
 
         summary_rows.append(
-            {
-                "來源檔名": name_noext,
-                "子集": tag,
-                "分組鍵": grp_desc,
-                "加總筆數": int(total_count),
-                "資料筆數": int(len(pivot2)),
-            }
+            {"來源檔名": name_noext, "子集": tag, "分組鍵": grp_desc, "加總筆數": int(total_count), "資料筆數": int(len(pivot2))}
         )
         any_ok = True
 
-    if any_ok:
-        ok += 1
-    else:
-        fail += 1
+    ok += 1 if any_ok else 0
+    fail += 0 if any_ok else 1
 
 df_summary = pd.DataFrame(summary_rows) if summary_rows else pd.DataFrame(columns=["來源檔名", "子集", "分組鍵", "加總筆數", "資料筆數"])
 if not df_summary.empty:
@@ -302,7 +294,22 @@ if detail_frames:
 else:
     df_detail_all = pd.DataFrame(columns=["來源檔名", "子集", "儲位類型", "儲位_筆數"])
 
-# 頁面顯示
+# ✅ 你要的：依儲位類型加總「總儲位筆數」(儲位_筆數 sum)
+if not df_detail_all.empty and ("儲位類型" in df_detail_all.columns) and ("儲位_筆數" in df_detail_all.columns):
+    df_type_total = (
+        df_detail_all.groupby("儲位類型", dropna=False)["儲位_筆數"]
+        .sum()
+        .reset_index(name="總儲位筆數")
+        .sort_values("總儲位筆數", ascending=False, kind="mergesort")
+        .reset_index(drop=True)
+    )
+else:
+    df_type_total = pd.DataFrame(columns=["儲位類型", "總儲位筆數"])
+
+# 頁面顯示（先儲位類型總表 → 再彙總總表 → 明細）
+st.markdown("### 儲位類型總儲位筆數")
+st.dataframe(df_type_total, use_container_width=True, hide_index=True)
+
 st.markdown("### 彙總總表")
 st.dataframe(df_summary, use_container_width=True, hide_index=True)
 
@@ -311,9 +318,9 @@ st.dataframe(df_detail_all, use_container_width=True, hide_index=True)
 
 st.caption(f"成功：{ok} 檔；失敗：{fail} 檔")
 
-# 下載
+# 下載（Excel 同一張工作表，最上面也會先放儲位類型總表）
 try:
-    out_bytes = build_single_sheet_excel_bytes(df_summary, df_detail_all)
+    out_bytes = build_single_sheet_excel_bytes(df_type_total, df_summary, df_detail_all)
     out_name = "批次_樞紐_儲位類型_單頁輸出.xlsx"
 except Exception as e:
     st.error(f"輸出失敗：{e}")
