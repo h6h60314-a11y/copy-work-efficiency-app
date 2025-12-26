@@ -132,12 +132,14 @@ def main():
 
     st.markdown('<div class="kpi-list">', unsafe_allow_html=True)
 
+    # ✅ 20_進貨課 - 驗收量體
     _nav_item(
         "✅",
         "進貨課 - 驗收量體",
         "pages/20_進貨課 - 驗收量體.py",
         "只保留「到=QC」｜SKU（唯一商品）｜ITEM（筆數）｜輸出Excel",
-
+        
+     # ✅ 21_進貨課 - 上架量體
     _nav_item(
         "📦",
         "進貨課上架量體",
