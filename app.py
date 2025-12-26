@@ -68,13 +68,14 @@ section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*=
 section[data-testid="stSidebar"] li:has(span[label="出貨課首頁"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(span[label="進貨課首頁"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(span[label="大樹KPI首頁"]){ display:none !important; }
+section[data-testid="stSidebar"] li:has(span[label="大豐KPI首頁"]){ display:none !important; }
 </style>
 
 <script>
 (function () {
-  const HIDE_LABELS = ["出貨課首頁", "進貨課首頁", "大樹KPI首頁"];
-  const HIDE_KEYS   = ["outbound-home", "inbound-home", "gt-kpi-home"];
-
+  const HIDE_LABELS = ["出貨課首頁", "進貨課首頁", "大樹KPI首頁", "大豐KPI首頁"];
+  const HIDE_KEYS   = ["outbound-home", "inbound-home", "gt-kpi-home", "df-kpi-home"];
+  
   function hideByHrefAndLabel(){
     const sidebar = document.querySelector('section[data-testid="stSidebar"]');
     if(!sidebar) return;
@@ -204,4 +205,5 @@ pg = st.navigation(
 )
 
 pg.run()
+
 
