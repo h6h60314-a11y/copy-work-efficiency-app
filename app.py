@@ -221,8 +221,7 @@ if BROKEN_PAGES:
 pg = st.navigation(
     {
         "": [p for p in [home_page] if p],
-        "出貨課": [p for p in [outbound_home, transfer_diff_page, outbound_vendor_store_diff] if p],
-        "出貨課KPI": [p for p in [outbound_line_productivity] if p],  # ✅ 新增到出貨課KPI下
+        "出貨課": [p for p in [outbound_home, transfer_diff_page, outbound_vendor_store_diff,outbound_line_productivity] if p],
         "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, diff_page] if p],
         "大樹KPI": [
             p
@@ -246,3 +245,4 @@ pg = st.navigation(
 )
 
 pg.run()
+
