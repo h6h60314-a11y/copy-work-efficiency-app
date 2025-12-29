@@ -11,10 +11,10 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 # ============================
 # 模板位置（UNC + 本機備援）
 # ============================
-TEMPLATE_FILENAME = "採品門市差異量空白檔.xlsx"
+TEMPLATE_FILENAME = "2採品門市差異量.xlsx"
 
 # 你的 SMB UNC 路徑（模板放在這裡就不用再上傳）
-UNC_TEMPLATE_PATH = r"\\smb.fengtien.com.tw\hlsc-fsd\SMB\GREAT_TREE\Ａ.個人資料夾\採品門市差異量空白檔.xlsx"
+UNC_TEMPLATE_PATH = r"\\smb.fengtien.com.tw\hlsc-fsd\SMB\GREAT_TREE\Ａ.個人資料夾\2採品門市差異量.xlsx"
 
 TEMPLATE_CANDIDATES = [
     UNC_TEMPLATE_PATH,
