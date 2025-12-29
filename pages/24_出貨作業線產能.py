@@ -24,11 +24,14 @@ except Exception:
 
 
 # =========================
-# 設定區（沿用原檔）
+# 設定區
 # =========================
 TARGET_PER_MANHOUR = 790
 AM_HOURS = list(range(8, 13))     # 8-12
 PM_HOURS = list(range(13, 19))    # 13-18
+
+# ✅ 排除的 Line ID（不計算/不輸出）
+EXCLUDE_LINEIDS = {"F0026", "FUBOX", "SORT"}
 
 BASE_FONT_NAME = "微軟正黑體"
 BASE_FONT_SIZE = 12
@@ -51,7 +54,7 @@ QCB_LIST = ["GT-A", "GT-J", "GT-K"]
 
 
 # =========================
-# robust reader（支援假xls）—改成 bytes 版本
+# robust reader（支援假xls）— bytes 版本
 # =========================
 OLE_HEADER = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 ZIP_HEADER = b"PK\x03\x04"
@@ -82,26 +85,21 @@ def robust_read_bytes(raw: bytes, filename: str) -> pd.DataFrame:
     is_ole = head.startswith(OLE_HEADER)
     is_zip = head.startswith(ZIP_HEADER)
 
-    # xlsx/xlsm
     if is_zip or ext in (".xlsx", ".xlsm", ".xltx", ".xltm"):
         return pd.read_excel(BytesIO(raw), engine="openpyxl")
 
-    # 真 xls（OLE）
     if is_ole:
-        # xlrd 讀 bytes（多數環境可行），不行就 fallback
         try:
             return pd.read_excel(BytesIO(raw), engine="xlrd")
         except Exception:
             try:
                 return pd.read_excel(BytesIO(raw), engine="openpyxl")
             except Exception:
-                # 假 xls / html / text
                 try:
                     return _try_read_html(raw)
                 except Exception:
                     return _try_read_text_like(raw)
 
-    # csv
     if ext == ".csv":
         for enc in ("utf-8-sig", "utf-8", "big5", "cp950", "latin1"):
             try:
@@ -110,7 +108,6 @@ def robust_read_bytes(raw: bytes, filename: str) -> pd.DataFrame:
                 continue
         return pd.read_csv(BytesIO(raw), encoding="utf-8", errors="replace")
 
-    # 其他：試 html -> text
     try:
         return _try_read_html(raw)
     except Exception:
@@ -118,7 +115,7 @@ def robust_read_bytes(raw: bytes, filename: str) -> pd.DataFrame:
 
 
 # =========================
-# Excel style helpers（沿用原檔）
+# Excel style helpers
 # =========================
 def _clone_font(cell_font: Font, *, name=None, size=None, bold=None, color=None):
     if cell_font is None:
@@ -157,7 +154,7 @@ def _set_row_height(ws, r):
 
 
 # =========================
-# 欄位對照（沿用原檔）
+# 欄位對照
 # =========================
 def normalize_columns(df: pd.DataFrame):
     df = df.copy()
@@ -191,7 +188,7 @@ def normalize_columns(df: pd.DataFrame):
 
 
 # =========================
-# 產出每小時彙整資料（沿用原檔）
+# 產出每小時彙整資料
 # =========================
 def build_hourly_metrics(df, c_pickdate, c_packqty, c_cweight, c_lineid, c_stotype):
     df = df.copy()
@@ -221,7 +218,7 @@ def build_hourly_metrics(df, c_pickdate, c_packqty, c_cweight, c_lineid, c_stoty
 
 
 # =========================
-# manpower helpers（沿用原檔核心）
+# manpower helpers
 # =========================
 def _as_float(v):
     if v is None or v == "":
@@ -254,7 +251,7 @@ def _manpower_cell_value_and_format(raw):
 
 
 # =========================
-# 寫入每小時戰情表（日期工作表）（沿用原檔）
+# 寫入每小時戰情表（日期工作表）
 # =========================
 def write_hourly_sheet(
     wb, sheet_name, date_value, hours, lineids,
@@ -267,8 +264,6 @@ def write_hourly_sheet(
 
     black_fill = PatternFill("solid", fgColor="111111")
     head_fill = PatternFill("solid", fgColor="F2F2F2")
-    manpower_fill = PatternFill("solid", fgColor="FFF2CC")
-
     thin = Side(style="thin", color="D0D0D0")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
@@ -307,18 +302,15 @@ def write_hourly_sheet(
     r = 3
     pcs_weight_rows = []
 
-    def write_row(label, values_by_hour=None, style_black=True, fill=None, is_manpower=False):
+    def write_row(label, values_by_hour=None, fill=None, is_manpower=False):
         nonlocal r
         _set_row_height(ws, r)
 
         a = ws.cell(row=r, column=1, value=label)
-        a.fill = black_fill if style_black else (fill or None)
+        a.fill = black_fill
         a.alignment = left
         a.border = border
-        if style_black:
-            _set_base_font(a, force_bold=True, force_color="FFFFFF")
-        else:
-            _set_base_font(a, force_bold=True)
+        _set_base_font(a, force_bold=True, force_color="FFFFFF")
 
         for j, h in enumerate(hours, start=2):
             raw = "" if values_by_hour is None else values_by_hour.get(int(h), "")
@@ -369,6 +361,7 @@ def write_hourly_sheet(
 
         r += 1
 
+    # ✅ 已在上游排除 EXCLUDE_LINEIDS，這裡直接寫入即可
     for lid in lineids:
         lid = str(lid)
 
@@ -393,17 +386,22 @@ def write_hourly_sheet(
         gso = split_map.get((lid, "GSO", "PCS"), {})
         gxso = split_map.get((lid, "GXSO", "PCS"), {})
 
-        row_pcs_w = write_row(f"{lid}（PCS）加權", pcs_weight_map, is_manpower=False)
+        row_pcs_w = write_row(f"{lid}（PCS）加權", pcs_weight_map)
         pcs_weight_rows.append(row_pcs_w)
 
-        write_row(f"{lid}（PCS）", pcs_map, is_manpower=False)
-        write_row("GSO(加權)", gso_w, is_manpower=False)
-        write_row("GXSO(加權)", gxso_w, is_manpower=False)
-        write_row("GSO", gso, is_manpower=False)
-        write_row("GXSO", gxso, is_manpower=False)
+        write_row(f"{lid}（PCS）", pcs_map)
+        write_row("GSO(加權)", gso_w)
+        write_row("GXSO(加權)", gxso_w)
+        write_row("GSO", gso)
+        write_row("GXSO", gxso)
 
         man_map = {int(h): manpower_map.get((date_value, lid, int(h)), "") for h in hours}
-        row_man = write_row(f"{lid}（人數）", man_map, fill=PatternFill("solid", fgColor="FFF2CC"), is_manpower=True)
+        row_man = write_row(
+            f"{lid}（人數）",
+            man_map,
+            fill=PatternFill("solid", fgColor="FFF2CC"),
+            is_manpower=True
+        )
 
         write_formula_row("平均產力(加權) 4", numerator_row=row_pcs_w, denom_row=row_man, number_format=NUM_FMT_4_HIDE0)
         write_formula_row("平均產力(加權)", numerator_row=row_pcs_w, denom_row=row_man, number_format=NUM_FMT_2_HIDE0)
@@ -419,8 +417,8 @@ def write_hourly_sheet(
     # 撿貨(已撿數量) = 各 Line 的（PCS）加權加總
     for j in range(2, 2 + len(hours)):
         col = get_column_letter(j)
-        refs = ",".join([f"{col}{rr}" for rr in pcs_weight_rows])
-        c = ws.cell(row=2, column=j, value=f'=IF(SUM({refs})=0,"",SUM({refs}))')
+        refs = ",".join([f"{col}{rr}" for rr in pcs_weight_rows]) if pcs_weight_rows else ""
+        c = ws.cell(row=2, column=j, value=(f'=IF(SUM({refs})=0,"",SUM({refs}))' if refs else '""'))
         c.number_format = NUM_FMT_2_HIDE0
         c.alignment = Alignment(horizontal="right", vertical="center")
         _set_base_font(c)
@@ -434,7 +432,7 @@ def write_hourly_sheet(
 
 
 # =========================
-# ✅ 達標計算（沿用原檔）
+# ✅ 達標計算
 # =========================
 def compute_achievers(date_value, lineids, hours, line_base_map, manpower_map):
     am_ach, pm_ach = [], []
@@ -462,7 +460,7 @@ def compute_achievers(date_value, lineids, hours, line_base_map, manpower_map):
 
 
 # =========================
-# 彙總解析 helpers（沿用原檔）
+# 彙總解析 helpers
 # =========================
 def _is_hour(v):
     try:
@@ -522,7 +520,7 @@ def countif_sum(range_a1: str, items: list[str]) -> str:
 
 
 # =========================
-# 彙總分頁（沿用原檔）
+# 彙總分頁
 # =========================
 def build_summary_sheet_with_achievers(
     wb, summary_name, date_ws, line_map, am_cols, pm_cols,
@@ -587,7 +585,9 @@ def build_summary_sheet_with_achievers(
         t = f'TEXT({expr},"#,##0.##")'
         return f'IF(RIGHT({t},1)=".",LEFT({t},LEN({t})-1),{t})'
 
-    for i, (lid, rows) in enumerate(line_map.items()):
+    items = list(line_map.items())
+
+    for i, (lid, rows) in enumerate(items):
         r = r0 + i
         _set_row_height(ws, r)
 
@@ -620,11 +620,11 @@ def build_summary_sheet_with_achievers(
         ws.cell(r, 6, f'=IF(OR($D{r}="",$E{r}=""),"",TRUNC($E{r}-$D{r},0))').number_format = NUM_FMT_INT_HIDE0
         ws.cell(r, 10, f'=IF(OR($H{r}="",$I{r}=""),"",TRUNC($I{r}-$H{r},0))').number_format = NUM_FMT_INT_HIDE0
 
-    last_row = r0 + len(line_map) - 1
+    last_row = r0 + len(items) - 1
     if last_row < r0:
         last_row = r0
 
-    if last_row >= r0:
+    if last_row >= r0 and items:
         red_fill = PatternFill(fill_type="solid", start_color="FFC7CE", end_color="FFC7CE")
         green_fill = PatternFill(fill_type="solid", start_color="C6EFCE", end_color="C6EFCE")
         dxf_red = DifferentialStyle(font=Font(color="9C0006"), fill=red_fill)
@@ -704,6 +704,7 @@ def build_summary_sheet_with_achievers(
         else:
             _write_row("（無）", "")
 
+        # ✅ open_rng / ach_rng 都只會包含「已排除後」的 lineid
         open_rng = f"$A$2:$A${last_row}"
         ach_rng = f"$L${first_list_row}:$L${rr-1}"
 
@@ -762,40 +763,71 @@ def parse_source_file(raw: bytes, filename: str):
 
     date_to_hours = {}
     date_to_lineids = {}
+
     for d in dates:
         hours = sorted(df2.loc[df2["PICK_DATE"] == d, "HOUR"].dropna().unique().tolist())
-        date_to_hours[d] = [int(x) for x in hours]
-        lineids = sorted(df2.loc[df2["PICK_DATE"] == d, c_lineid].dropna().astype(str).unique().tolist())
-        date_to_lineids[d] = [str(x) for x in lineids]
+        hours = [int(x) for x in hours]
+        date_to_hours[d] = hours
+
+        lineids = sorted(df2.loc[df2["PICK_DATE"] == d, c_lineid].dropna().astype(str).str.strip().unique().tolist())
+        # ✅ 排除指定 Line ID
+        lineids = [lid for lid in lineids if lid not in EXCLUDE_LINEIDS]
+        date_to_lineids[d] = lineids
 
     return df2, line_base, split, dates, date_to_hours, date_to_lineids, c_lineid, c_stotype
 
 
-def build_default_manpower_df(lineids, hours):
-    # 空白代表不填（後續視為 0）
-    df = pd.DataFrame(index=lineids, columns=[int(h) for h in hours], data="")
-    df.index.name = "Line ID"
-    return df
+# =========================
+# ✅ 人力輸入：改成「表格直接存在 session_state」避免被清空
+# =========================
+def build_default_manpower_table(lineids, hours):
+    # columns 用字串，Streamlit 的 data_editor 比較穩
+    cols = ["Line ID"] + [str(int(h)) for h in hours]
+    data = {"Line ID": list(lineids)}
+    for h in hours:
+        data[str(int(h))] = [""] * len(lineids)
+    return pd.DataFrame(data, columns=cols)
 
 
-def manpower_df_to_map(d, mp_df: pd.DataFrame):
+def manpower_table_to_map(d, table_df: pd.DataFrame):
     mp = {}
-    for lid in mp_df.index.astype(str):
-        for h in mp_df.columns:
-            v = mp_df.loc[lid, h]
-            v = "" if (v is None or (isinstance(v, float) and pd.isna(v))) else v
+    if table_df is None or table_df.empty:
+        return mp
+
+    # 確保有 Line ID
+    if "Line ID" not in table_df.columns:
+        return mp
+
+    hours_cols = [c for c in table_df.columns if c != "Line ID"]
+
+    for _, row in table_df.iterrows():
+        lid = str(row["Line ID"]).strip()
+        if not lid or lid in EXCLUDE_LINEIDS:
+            continue
+        for hc in hours_cols:
+            try:
+                hour = int(str(hc).strip())
+            except Exception:
+                continue
+            v = row.get(hc, "")
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                v = ""
             if isinstance(v, str):
                 v = v.strip()
-            mp[(d, str(lid), int(h))] = v
+            mp[(d, lid, hour)] = v
+
     return mp
 
 
+# =========================
+# 產出 Excel bytes
+# =========================
 def excel_bytes_from_inputs(
     in_filename: str,
     df2, line_base, split,
     dates, date_to_hours, date_to_lineids,
     c_lineid, c_stotype,
-    manpower_by_date: dict
+    manpower_table_by_date: dict
 ) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)
@@ -806,13 +838,16 @@ def excel_bytes_from_inputs(
         hours = date_to_hours[d]
         if not hours:
             continue
+
         lineids = date_to_lineids[d]
+        if not lineids:
+            continue
 
         # 人力 map
-        mp_df = manpower_by_date.get(d)
-        manpower_map = manpower_df_to_map(d, mp_df) if mp_df is not None else {}
+        mp_table = manpower_table_by_date.get(d)
+        manpower_map = manpower_table_to_map(d, mp_table)
 
-        # 每日彙整 map
+        # 每日彙整 map（只做 lineids 內的）
         sub_base = line_base[line_base["PICK_DATE"] == d]
         line_base_map = {}
         for lid in lineids:
@@ -842,7 +877,7 @@ def excel_bytes_from_inputs(
             manpower_map=manpower_map,
         )
 
-        # 達標名單（用於列出名單區）
+        # 達標名單
         am_ach, pm_ach = compute_achievers(d, lineids, hours, line_base_map, manpower_map)
 
         # 彙總需要 mapping
@@ -910,18 +945,22 @@ filename = up.name
 with st.spinner("解析檔案中..."):
     df2, line_base, split, dates, date_to_hours, date_to_lineids, c_lineid, c_stotype = parse_source_file(raw, filename)
 
-st.success(f"讀取完成：共 {len(dates)} 天")
+st.success(f"讀取完成：共 {len(dates)} 天（已排除：{', '.join(sorted(EXCLUDE_LINEIDS))}）")
 
-# 初始化 session_state manpower
-if "mp_store_v1" not in st.session_state:
-    st.session_state.mp_store_v1 = {}
+# ✅ session_state：存「可直接丟 data_editor 的表格」
+if "mp_table_store_v2" not in st.session_state:
+    st.session_state.mp_table_store_v2 = {}
 
+# 初始化每個日期表格
 for d in dates:
-    if d not in st.session_state.mp_store_v1:
-        st.session_state.mp_store_v1[d] = build_default_manpower_df(date_to_lineids[d], date_to_hours[d])
+    if d not in st.session_state.mp_table_store_v2:
+        st.session_state.mp_table_store_v2[d] = build_default_manpower_table(
+            lineids=date_to_lineids[d],
+            hours=date_to_hours[d]
+        )
 
 card_open("手動輸入人力（每小時 / 可小數）")
-st.caption("空白=不填（視為 0）。欄位為小時（依檔案實際出現的小時）。")
+st.caption("空白=不填（視為 0）。現在輸入不會跳下一格就被清掉。")
 
 tabs = st.tabs([str(d) for d in dates])
 
@@ -929,60 +968,66 @@ for i, d in enumerate(dates):
     with tabs[i]:
         hours = date_to_hours[d]
         lineids = date_to_lineids[d]
+
         if not hours or not lineids:
-            st.warning("此日期沒有可用的 Hour/Line 資料")
+            st.warning("此日期沒有可用的 Hour/Line（或全部被排除）")
             continue
 
-        mp_df = st.session_state.mp_store_v1[d].copy()
+        editor_key = f"mp_editor_{str(d)}"
+
+        # ✅ 直接拿 session_state 的表格（不要 reset_index / copy）
+        mp_table = st.session_state.mp_table_store_v2[d]
 
         c1, c2, c3 = st.columns([1, 1, 2])
         with c1:
-            am_fill = st.text_input(f"上午快速填入（{d}，套用 8-12）", value="", key=f"am_fill_{d}")
+            am_fill = st.text_input(f"上午快速填入（{d}，套用 8-12）", value="", key=f"am_fill_{str(d)}")
         with c2:
-            pm_fill = st.text_input(f"下午快速填入（{d}，套用 13-18）", value="", key=f"pm_fill_{d}")
+            pm_fill = st.text_input(f"下午快速填入（{d}，套用 13-18）", value="", key=f"pm_fill_{str(d)}")
         with c3:
             st.caption("快速填入：輸入數字後按下方按鈕，可一鍵填滿該時段所有 Line。")
 
         b1, b2, b3 = st.columns([1, 1, 1])
+
+        def _apply_fill(target_hours, val: str):
+            val = (val or "").strip()
+            if val == "":
+                return
+            for h in target_hours:
+                hs = str(int(h))
+                if hs in mp_table.columns:
+                    mp_table.loc[:, hs] = val
+
         with b1:
-            if st.button("套用上午快速填入", key=f"btn_am_{d}", use_container_width=True):
-                if am_fill.strip() != "":
-                    for lid in lineids:
-                        for h in hours:
-                            if int(h) in AM_HOURS:
-                                mp_df.loc[lid, int(h)] = am_fill.strip()
-                    st.session_state.mp_store_v1[d] = mp_df
-                    st.rerun()
+            if st.button("套用上午快速填入", key=f"btn_am_{str(d)}", use_container_width=True):
+                _apply_fill(AM_HOURS, am_fill)
+                st.session_state.mp_table_store_v2[d] = mp_table
+
         with b2:
-            if st.button("套用下午快速填入", key=f"btn_pm_{d}", use_container_width=True):
-                if pm_fill.strip() != "":
-                    for lid in lineids:
-                        for h in hours:
-                            if int(h) in PM_HOURS:
-                                mp_df.loc[lid, int(h)] = pm_fill.strip()
-                    st.session_state.mp_store_v1[d] = mp_df
-                    st.rerun()
+            if st.button("套用下午快速填入", key=f"btn_pm_{str(d)}", use_container_width=True):
+                _apply_fill(PM_HOURS, pm_fill)
+                st.session_state.mp_table_store_v2[d] = mp_table
+
         with b3:
-            if st.button("全部清空", key=f"btn_clear_{d}", use_container_width=True):
-                st.session_state.mp_store_v1[d] = build_default_manpower_df(lineids, hours)
-                st.rerun()
+            if st.button("全部清空", key=f"btn_clear_{str(d)}", use_container_width=True):
+                st.session_state.mp_table_store_v2[d] = build_default_manpower_table(lineids, hours)
+                mp_table = st.session_state.mp_table_store_v2[d]
+
+        # ✅ 建 column_config（欄位名全部用字串）
+        col_cfg = {"Line ID": st.column_config.TextColumn("Line ID", disabled=True)}
+        for h in hours:
+            col_cfg[str(int(h))] = st.column_config.TextColumn(str(int(h)))
 
         edited = st.data_editor(
-            mp_df.reset_index(),
+            mp_table,
             use_container_width=True,
             hide_index=True,
             num_rows="fixed",
-            column_config={
-                "Line ID": st.column_config.TextColumn("Line ID", disabled=True),
-                **{int(h): st.column_config.TextColumn(str(int(h))) for h in hours}
-            },
-            key=f"editor_{d}"
+            column_config=col_cfg,
+            key=editor_key
         )
 
-        # 回寫（保持 index/columns）
-        new_df = edited.set_index("Line ID")
-        new_df.columns = [int(c) for c in new_df.columns]
-        st.session_state.mp_store_v1[d] = new_df
+        # ✅ 回存：讓下一次 rerun 直接用「剛剛編輯後的資料」，不會清掉
+        st.session_state.mp_table_store_v2[d] = edited
 
 card_close()
 
@@ -997,7 +1042,7 @@ if st.button("✅ 產出 Excel", type="primary", use_container_width=True):
             df2=df2, line_base=line_base, split=split,
             dates=dates, date_to_hours=date_to_hours, date_to_lineids=date_to_lineids,
             c_lineid=c_lineid, c_stotype=c_stotype,
-            manpower_by_date=st.session_state.mp_store_v1
+            manpower_table_by_date=st.session_state.mp_table_store_v2
         )
     st.success("Excel 已產出，可直接下載。")
     st.download_button(
