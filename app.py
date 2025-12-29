@@ -114,6 +114,7 @@ section[data-testid="stSidebar"] li:has(span[label="大豐KPI首頁"]){ display:
 # ✅ Preflight: 語法/縮排檢查（避免某頁壞掉整站掛）
 # =========================
 BROKEN_PAGES: list[tuple[str, str]] = []
+MISSING_PAGES: list[str] = []
 
 
 def _syntax_ok(path: str) -> bool:
@@ -129,6 +130,7 @@ def _syntax_ok(path: str) -> bool:
 
 def page_if_exists(path: str, title: str, icon: str, **kwargs):
     if not os.path.exists(path):
+        MISSING_PAGES.append(path)
         return None
     if not _syntax_ok(path):
         return None
@@ -147,13 +149,18 @@ home_page = page_if_exists("pages/0_首頁.py", "首頁", "🏠", default=True, 
 # 出貨課
 outbound_home = page_if_exists("pages/7_出貨課首頁.py", "出貨課首頁", "📦", url_path="outbound-home")
 transfer_diff_page = page_if_exists("pages/6_撥貨差異.py", "撥貨差異", "📦", url_path="outbound-transfer-diff")
-outbound_vendor_store_diff = page_if_exists("pages/23_採品門市差異量.py", "採品門市差異量", "📄", url_path="outbound-vendor-store-diff-23")
+outbound_vendor_store_diff = page_if_exists(
+    "pages/23_採品門市差異量.py",
+    "採品門市差異量",
+    "📄",
+    url_path="outbound-vendor-store-diff-23",
+)
 
-# ✅ 24_出貨作業線產能（新增到「出貨課」底下）
+# ✅ 24_出貨作業線產能（放在「出貨課」底下）
 outbound_line_productivity = page_if_exists(
     "pages/24_出貨作業線產能.py",
     "出貨作業線產能",
-    "📈",
+    "📦",
     url_path="outbound-line-productivity-24",
 )
 
@@ -175,7 +182,6 @@ gt_inv_accuracy = page_if_exists("pages/15_庫存盤點正確率.py", "庫存盤
 gt_store_arrival_abn = page_if_exists("pages/16_門市到貨異常率.py", "門市到貨異常率", "🏪", url_path="gt-store-arrival-abn")
 gt_daily_attendance = page_if_exists("pages/17_每日出勤工時分析.py", "每日出勤工時分析", "🕒", url_path="gt-daily-attendance")
 
-# 18_各類儲區使用率（KPI 入口）
 slot_util_page = page_if_exists(
     "pages/18_各類儲區使用率.py",
     "各類儲區使用率",
@@ -191,8 +197,14 @@ slot_page = page_if_exists("pages/4_儲位使用率.py", "儲位使用率", "�
 df_pick_volume = page_if_exists("pages/22_進貨課 - 總揀筆數.py", "進貨課 - 總揀筆數", "🎯", url_path="df-pick-volume")
 
 # =========================
-# ✅ Sidebar 顯示「壞頁」清單（不讓整站掛）
+# ✅ Sidebar 顯示「壞頁 / 缺檔」清單
 # =========================
+if MISSING_PAGES:
+    with st.sidebar.expander("⚠️ 找不到檔案（未載入）", expanded=False):
+        st.caption("下列 pages 檔案不存在，所以不會出現在左側選單：")
+        for p in MISSING_PAGES:
+            st.code(p)
+
 if BROKEN_PAGES:
     with st.sidebar.expander("⚠️ 已停用頁面（語法/縮排錯）", expanded=True):
         st.caption("以下檔案有 IndentationError / SyntaxError，已自動略過避免整站掛掉：")
@@ -205,7 +217,14 @@ if BROKEN_PAGES:
 pg = st.navigation(
     {
         "": [p for p in [home_page] if p],
-        "出貨課": [p for p in [outbound_home, transfer_diff_page, outbound_vendor_store_diff, outbound_line_productivity] if p],  # ✅ 放在出貨課下
+        "出貨課": [
+            p for p in [
+                outbound_home,
+                transfer_diff_page,
+                outbound_vendor_store_diff,
+                outbound_line_productivity,   # ✅ 24 放在出貨課下
+            ] if p
+        ],
         "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, diff_page] if p],
         "大樹KPI": [p for p in [
             gt_kpi_home, gt_inbound_receipt, gt_ship_should, gt_xdock, gt_ship_actual,
