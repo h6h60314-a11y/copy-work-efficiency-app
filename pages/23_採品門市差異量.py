@@ -148,7 +148,7 @@ if template_path:
     st.code(template_path)
 else:
     st.error(
-        "找不到模板檔：採品門市差異量空白檔.xlsx\n\n"
+        "找不到模板檔：2採品門市差異量.xlsx\n\n"
         "請確認 Streamlit 伺服器主機能存取該 UNC 路徑，且檔案存在：\n"
         f"{UNC_TEMPLATE_PATH}"
     )
