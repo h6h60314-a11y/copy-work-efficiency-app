@@ -123,7 +123,6 @@ def _syntax_ok(path: str) -> bool:
         ast.parse(src, filename=path)
         return True
     except Exception as e:
-        # e 會包含 IndentationError / SyntaxError 的行號訊息
         BROKEN_PAGES.append((path, repr(e)))
         return False
 
@@ -148,19 +147,14 @@ home_page = page_if_exists("pages/0_首頁.py", "首頁", "🏠", default=True, 
 # 出貨課
 outbound_home = page_if_exists("pages/7_出貨課首頁.py", "出貨課首頁", "📦", url_path="outbound-home")
 transfer_diff_page = page_if_exists("pages/6_撥貨差異.py", "撥貨差異", "📦", url_path="outbound-transfer-diff")
-outbound_vendor_store_diff = page_if_exists(
-    "pages/23_採品門市差異量.py",
-    "採品門市差異量",
-    "📄",
-    url_path="outbound-vendor-store-diff-23",
-)
+outbound_vendor_store_diff = page_if_exists("pages/23_採品門市差異量.py", "採品門市差異量", "📄", url_path="outbound-vendor-store-diff-23")
 
-# ✅ 出貨課KPI（新增）
+# ✅ 24_出貨作業線產能（新增到「出貨課」底下）
 outbound_line_productivity = page_if_exists(
     "pages/24_出貨作業線產能.py",
     "出貨作業線產能",
     "📈",
-    url_path="outbound-kpi-line-productivity-24",
+    url_path="outbound-line-productivity-24",
 )
 
 # 進貨課
@@ -189,22 +183,12 @@ slot_util_page = page_if_exists(
     url_path="slot-zone-util-18",
 )
 
-# 大豐KPI（新增）
+# 大豐KPI
 df_kpi_home = page_if_exists("pages/19_大豐KPI首頁.py", "大豐KPI首頁", "📊", url_path="df-kpi-home")
 df_qc_volume = page_if_exists("pages/20_進貨課 - 驗收量體.py", "進貨課 - 驗收量體", "✅", url_path="df-qc-volume")
-df_putaway_volume = page_if_exists(
-    "pages/21_進貨課 - 上架量體.py",
-    "進貨課 - 上架量體",
-    "📦",
-    url_path="df-putaway-volume",
-)
+df_putaway_volume = page_if_exists("pages/21_進貨課 - 上架量體.py", "進貨課 - 上架量體", "📦", url_path="df-putaway-volume")
 slot_page = page_if_exists("pages/4_儲位使用率.py", "儲位使用率", "🧊", url_path="inbound-slot-util")
-df_pick_volume = page_if_exists(
-    "pages/22_進貨課 - 總揀筆數.py",
-    "進貨課 - 總揀筆數",
-    "🎯",
-    url_path="df-pick-volume",
-)
+df_pick_volume = page_if_exists("pages/22_進貨課 - 總揀筆數.py", "進貨課 - 總揀筆數", "🎯", url_path="df-pick-volume")
 
 # =========================
 # ✅ Sidebar 顯示「壞頁」清單（不讓整站掛）
@@ -221,28 +205,16 @@ if BROKEN_PAGES:
 pg = st.navigation(
     {
         "": [p for p in [home_page] if p],
-        "出貨課": [p for p in [outbound_home, transfer_diff_page, outbound_vendor_store_diff,outbound_line_productivity] if p],
+        "出貨課": [p for p in [outbound_home, transfer_diff_page, outbound_vendor_store_diff, outbound_line_productivity] if p],  # ✅ 放在出貨課下
         "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, diff_page] if p],
-        "大樹KPI": [
-            p
-            for p in [
-                gt_kpi_home,
-                gt_inbound_receipt,
-                gt_ship_should,
-                gt_xdock,
-                gt_ship_actual,
-                gt_putaway_daily,
-                gt_inv_accuracy,
-                gt_store_arrival_abn,
-                gt_daily_attendance,
-                slot_util_page,
-            ]
-            if p
-        ],
+        "大樹KPI": [p for p in [
+            gt_kpi_home, gt_inbound_receipt, gt_ship_should, gt_xdock, gt_ship_actual,
+            gt_putaway_daily, gt_inv_accuracy, gt_store_arrival_abn, gt_daily_attendance,
+            slot_util_page
+        ] if p],
         "大豐KPI": [p for p in [df_kpi_home, df_qc_volume, df_putaway_volume, slot_page, df_pick_volume] if p],
     },
     expanded=False,
 )
 
 pg.run()
-
