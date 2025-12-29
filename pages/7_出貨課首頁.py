@@ -9,7 +9,7 @@ inject_logistics_theme()
 
 ALLOW_PAGES = {
     "pages/6_撥貨差異.py",
-    "pages/23_採品門市差異量.py
+    "pages/23_採品門市差異量.py"
 }
 
 
