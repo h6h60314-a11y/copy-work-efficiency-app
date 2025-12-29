@@ -229,6 +229,147 @@ def _as_blank_if_zero(val):
 
 
 # =========================
+# ✅ 人力：穩定快速貼上解析（取代 data_editor）
+# =========================
+def _init_manpower_table(lineids, hours):
+    cols = [str(int(h)) for h in hours]
+    idx = [str(x) for x in lineids]
+    return pd.DataFrame(pd.NA, index=idx, columns=cols, dtype="Float64")
+
+
+def _apply_fill(df: pd.DataFrame, line_id: str, hours: list[int], value: float, which: str):
+    df2 = df.copy()
+    if line_id not in df2.index:
+        return df2
+
+    if which == "整天":
+        tgt_hours = hours
+    elif which == "上午":
+        tgt_hours = [h for h in hours if h in AM_HOURS]
+    else:
+        tgt_hours = [h for h in hours if h in PM_HOURS]
+
+    for h in tgt_hours:
+        c = str(int(h))
+        if c in df2.columns:
+            df2.loc[line_id, c] = value
+    return df2
+
+
+def _parse_paste(text: str, lineids: list[str], hours: list[int]) -> pd.DataFrame:
+    """
+    支援 3 種貼法（最穩）：
+    A) 含表頭：第一列=小時，第一欄=Line ID
+       Line ID\t8\t9\t10...
+       GT-A\t1\t1...
+    B) 不含表頭：純數字矩陣，依 lineids 順序、hours 順序套用
+       1\t1\t1...
+       0\t1\t1...
+    C) 一列一個 line：Line ID 在第一欄，後面直接數字（不一定有表頭）
+       GT-A\t1\t1\t...
+    """
+    text = (text or "").strip()
+    if not text:
+        return pd.DataFrame()
+
+    rows = [r for r in text.splitlines() if r.strip() != ""]
+    grid = [r.split("\t") for r in rows]
+    if len(grid) == 0:
+        return pd.DataFrame()
+
+    # 判斷第一列是否是 hour header
+    def _is_hour_token(x: str) -> bool:
+        x = str(x).strip()
+        if x == "":
+            return False
+        try:
+            v = int(float(x))
+            return 0 <= v <= 23
+        except Exception:
+            return False
+
+    header_like = False
+    if len(grid[0]) >= 2:
+        # 第一列第二格以後大多是 hour
+        tokens = grid[0][1:]
+        hour_hits = sum(_is_hour_token(t) for t in tokens)
+        if hour_hits >= max(2, len(tokens) // 2):
+            header_like = True
+
+    base = _init_manpower_table(lineids, hours)
+    base.index = [str(x) for x in base.index]
+    base.columns = [str(c) for c in base.columns]
+
+    # A) 有表頭
+    if header_like:
+        hdr = [str(x).strip() for x in grid[0]]
+        cols = [str(int(float(x))) for x in hdr[1:] if _is_hour_token(x)]
+        data = grid[1:]
+        for r in data:
+            if not r:
+                continue
+            rid = str(r[0]).strip()
+            if rid not in base.index:
+                continue
+            for j, col in enumerate(cols, start=1):
+                if col not in base.columns:
+                    continue
+                if j >= len(r):
+                    continue
+                v = str(r[j]).strip()
+                if v == "":
+                    continue
+                try:
+                    base.loc[rid, col] = float(v)
+                except Exception:
+                    continue
+        return base
+
+    # B/C) 無表頭：若第一欄像 Line ID（包含 GT-），當作 C；否則當作 B
+    first_col_is_line = any(str(r[0]).strip().upper().startswith("GT-") for r in grid if r and len(r) >= 1)
+
+    if first_col_is_line:
+        # C) 每列第一欄是 line id
+        cols = [str(int(h)) for h in hours]
+        for r in grid:
+            if not r:
+                continue
+            rid = str(r[0]).strip()
+            if rid not in base.index:
+                continue
+            for j, col in enumerate(cols, start=1):
+                if j >= len(r):
+                    continue
+                v = str(r[j]).strip()
+                if v == "":
+                    continue
+                try:
+                    base.loc[rid, col] = float(v)
+                except Exception:
+                    continue
+        return base
+
+    # B) 純矩陣：依 lineids / hours 順序套
+    cols = [str(int(h)) for h in hours]
+    for i, rid in enumerate(lineids):
+        if i >= len(grid):
+            break
+        r = grid[i]
+        for j, col in enumerate(cols):
+            if j >= len(r):
+                break
+            v = str(r[j]).strip()
+            if v == "":
+                continue
+            try:
+                base.loc[str(rid), col] = float(v)
+            except Exception:
+                continue
+
+    return base
+
+
+# =========================
 # 寫入每小時戰情表（日期工作表）
 # =========================
 def write_hourly_sheet(
@@ -386,7 +527,6 @@ def write_hourly_sheet(
         man_map = {int(h): manpower_map.get((date_value, lid, int(h)), np.nan) for h in hours}
         write_row(f"{lid}（人數）", man_map, fill=manpower_fill, is_manpower=True)
 
-        # 這兩列會在彙總用到
         write_formula_row("平均產力(加權) 4", numerator_row=row_pcs_w, denom_row=row_pcs_w + 6, number_format=NUM_FMT_4_HIDE0)
         write_formula_row("平均產力(加權)", numerator_row=row_pcs_w, denom_row=row_pcs_w + 6, number_format=NUM_FMT_2_HIDE0)
 
@@ -398,7 +538,6 @@ def write_hourly_sheet(
             _set_base_font(c)
         r += 1
 
-    # 撿貨(已撿數量) = 各 Line 的（PCS）加權加總
     for j in range(2, 2 + len(hours)):
         col = get_column_letter(j)
         refs = ",".join([f"{col}{rr}" for rr in pcs_weight_rows])
@@ -444,7 +583,7 @@ def compute_achievers(date_value, lineids, hours, line_base_map, manpower_map, t
 
 
 # =========================
-# 彙總 sheet（沿用你原本邏輯）
+# 彙總 sheet helpers（略：保留你既有邏輯）
 # =========================
 def _is_hour(v):
     try:
@@ -506,6 +645,7 @@ def build_summary_sheet_with_achievers(
     wb, summary_name, date_ws, line_map, am_cols, pm_cols,
     am_achievers, pm_achievers, target_per_mh: int
 ):
+    # 這段沿用你先前版本（我保留核心輸出邏輯）
     if summary_name in wb.sheetnames:
         wb.remove(wb[summary_name])
     ws = wb.create_sheet(summary_name)
@@ -595,7 +735,6 @@ def build_summary_sheet_with_achievers(
     if last_row < r0:
         last_row = r0
 
-    # 條件格式：E / I 欄達標/未達標
     if last_row >= r0:
         red_fill = PatternFill(fill_type="solid", start_color="FFC7CE", end_color="FFC7CE")
         green_fill = PatternFill(fill_type="solid", start_color="C6EFCE", end_color="C6EFCE")
@@ -618,11 +757,10 @@ def build_summary_sheet_with_achievers(
         rule_i_green.formula = [f'AND($H{r0}<>"",I{r0}<>"",I{r0}>=$H{r0})']
         ws.conditional_formatting.add(f"I{r0}:I{last_row}", rule_i_green)
 
-    # 達標名單（含金額可輸入）
     def draw_achiever_block(start_row, title, achievers, default_money, qc_mult, restock_mult):
-        col_line = 12  # L
-        col_name = 13  # M
-        col_money = 14 # N
+        col_line = 12
+        col_name = 13
+        col_money = 14
 
         _set_row_height(ws, start_row)
         tcell = ws.cell(start_row, col_line, title)
@@ -694,22 +832,8 @@ def build_summary_sheet_with_achievers(
         return rr
 
     start = last_row + 3
-    next_row = draw_achiever_block(
-        start_row=start,
-        title="上午達標名單（PCS≥上午應達成）",
-        achievers=am_achievers,
-        default_money=AM_DEFAULT_MONEY,
-        qc_mult=50,
-        restock_mult=100,
-    )
-    draw_achiever_block(
-        start_row=next_row,
-        title="下午達標名單（PCS≥下午目標）",
-        achievers=pm_achievers,
-        default_money=PM_DEFAULT_MONEY,
-        qc_mult=100,
-        restock_mult=50,
-    )
+    next_row = draw_achiever_block(start, "上午達標名單（PCS≥上午應達成）", am_achievers, AM_DEFAULT_MONEY, 50, 100)
+    draw_achiever_block(next_row, "下午達標名單（PCS≥下午目標）", pm_achievers, PM_DEFAULT_MONEY, 100, 50)
 
     ws.freeze_panes = "A2"
     return ws
@@ -719,14 +843,10 @@ def build_summary_sheet_with_achievers(
 # KPI 圖表 sheet（新增）
 # =========================
 def add_kpi_chart_sheet(wb: Workbook, kpi_df: pd.DataFrame):
-    """
-    kpi_df 欄位：
-      日期, 上午達標率, 下午達標率, 上午平均產力, 下午平均產力, 上午總PCS加權, 下午總PCS加權
-    """
     name = "KPI圖表"
     if name in wb.sheetnames:
         wb.remove(wb[name])
-    ws = wb.create_sheet(name, 0)  # 放最前面
+    ws = wb.create_sheet(name, 0)
 
     header_fill = PatternFill("solid", fgColor="D9E1F2")
     thin = Side(style="thin", color="D0D0D0")
@@ -737,7 +857,7 @@ def add_kpi_chart_sheet(wb: Workbook, kpi_df: pd.DataFrame):
     cols = list(kpi_df.columns)
     ws.append(cols)
     _set_row_height(ws, 1)
-    for j, c in enumerate(cols, start=1):
+    for j in range(1, len(cols) + 1):
         cell = ws.cell(1, j)
         cell.fill = header_fill
         cell.border = border
@@ -755,61 +875,45 @@ def add_kpi_chart_sheet(wb: Workbook, kpi_df: pd.DataFrame):
             cell.alignment = right if j >= 2 else center
             _set_base_font(cell)
 
-    # 欄寬
     ws.column_dimensions["A"].width = 14
     for col_letter in "BCDEFG":
         ws.column_dimensions[col_letter].width = 16
 
-    # 數字格式
-    # B,C (達標率) -> %
     for col in ("B", "C"):
         for r in range(2, ws.max_row + 1):
             ws[f"{col}{r}"].number_format = "0.0%"
 
-    # D,E (平均產力) -> 0.00
     for col in ("D", "E"):
         for r in range(2, ws.max_row + 1):
             ws[f"{col}{r}"].number_format = "#,##0.00"
 
-    # F,G (總PCS加權) -> 整數
     for col in ("F", "G"):
         for r in range(2, ws.max_row + 1):
             ws[f"{col}{r}"].number_format = "#,##0"
 
-    # ===== 圖表1：達標率（B/C）
+    cats = Reference(ws, min_col=1, min_row=2, max_row=ws.max_row)
+
     bar1 = BarChart()
     bar1.type = "col"
     bar1.title = "達標率（上午/下午）"
     bar1.y_axis.title = "達標率"
-    bar1.dataLabels = DataLabelList()
-    bar1.dataLabels.showVal = False
-
     data = Reference(ws, min_col=2, max_col=3, min_row=1, max_row=ws.max_row)
-    cats = Reference(ws, min_col=1, min_row=2, max_row=ws.max_row)
     bar1.add_data(data, titles_from_data=True)
     bar1.set_categories(cats)
     ws.add_chart(bar1, "I2")
 
-    # ===== 圖表2：平均產力（D/E）
     line = LineChart()
     line.title = "平均產力（加權PCS/人力）"
     line.y_axis.title = "平均產力"
-    line.dataLabels = DataLabelList()
-    line.dataLabels.showVal = False
-
     data2 = Reference(ws, min_col=4, max_col=5, min_row=1, max_row=ws.max_row)
     line.add_data(data2, titles_from_data=True)
     line.set_categories(cats)
     ws.add_chart(line, "I18")
 
-    # ===== 圖表3：總PCS加權（F/G）
     bar2 = BarChart()
     bar2.type = "col"
     bar2.title = "總PCS(加權)（上午/下午）"
     bar2.y_axis.title = "總PCS(加權)"
-    bar2.dataLabels = DataLabelList()
-    bar2.dataLabels.showVal = False
-
     data3 = Reference(ws, min_col=6, max_col=7, min_row=1, max_row=ws.max_row)
     bar2.add_data(data3, titles_from_data=True)
     bar2.set_categories(cats)
@@ -838,7 +942,6 @@ def build_output_excel_bytes(df_raw: pd.DataFrame, target_per_mh: int, manpower_
         lineids = sorted(df2.loc[df2["PICK_DATE"] == d, c_lineid].dropna().astype(str).unique().tolist())
         date_to_lineids[d] = [str(x) for x in lineids]
 
-    # manpower map (date, lineid, hour) -> value
     manpower_map = {}
     for d in dates:
         hours = date_to_hours.get(d, [])
@@ -847,7 +950,6 @@ def build_output_excel_bytes(df_raw: pd.DataFrame, target_per_mh: int, manpower_
         if table is None:
             continue
 
-        # 確保是數字
         table2 = table.copy()
         for col in table2.columns:
             table2[col] = pd.to_numeric(table2[col], errors="coerce")
@@ -858,10 +960,7 @@ def build_output_excel_bytes(df_raw: pd.DataFrame, target_per_mh: int, manpower_
                 try:
                     v = table2.loc[str(lid), str(h)]
                 except Exception:
-                    try:
-                        v = table2.loc[str(lid), h]
-                    except Exception:
-                        v = np.nan
+                    v = np.nan
                 manpower_map[(d, str(lid), int(h))] = v
 
     wb = Workbook()
@@ -892,10 +991,9 @@ def build_output_excel_bytes(df_raw: pd.DataFrame, target_per_mh: int, manpower_
                 split_map[(str(lid), t, "PCS")] = {int(r["HOUR"]): r["PCS"] for _, r in tmpT.iterrows()}
                 split_map[(str(lid), t, "加權PCS")] = {int(r["HOUR"]): r["加權PCS"] for _, r in tmpT.iterrows()}
 
-        sname = str(d)
         date_ws = write_hourly_sheet(
             wb=wb,
-            sheet_name=sname,
+            sheet_name=str(d),
             date_value=d,
             hours=hours,
             lineids=lineids,
@@ -906,7 +1004,6 @@ def build_output_excel_bytes(df_raw: pd.DataFrame, target_per_mh: int, manpower_
 
         am_ach, pm_ach = compute_achievers(d, lineids, hours, line_base_map, manpower_map, target_per_mh=target_per_mh)
 
-        # KPI 總表用資料（Python 直接算，不靠公式）
         def _period_metrics(period_hours, achievers):
             total_man = 0.0
             total_pcs = 0.0
@@ -943,32 +1040,25 @@ def build_output_excel_bytes(df_raw: pd.DataFrame, target_per_mh: int, manpower_
 
         _, hour_to_col = find_hour_header_row(date_ws)
         line_map2 = parse_line_rows(date_ws)
-
         am_cols = [hour_to_col[h] for h in AM_HOURS if h in hour_to_col]
         pm_cols = [hour_to_col[h] for h in PM_HOURS if h in hour_to_col]
 
         summary_inputs[d] = (date_ws, line_map2, am_cols, pm_cols, am_ach, pm_ach)
 
-    # KPI圖表 sheet
     kpi_df = pd.DataFrame(kpi_rows)
     if not kpi_df.empty:
         add_kpi_chart_sheet(wb, kpi_df)
 
-    # 建彙總 sheet
     for d in dates:
-        date_sheet = str(d)
-        if date_sheet not in wb.sheetnames:
-            continue
         pack = summary_inputs.get(d)
         if not pack:
             continue
         date_ws, line_map2, am_cols, pm_cols, am_ach, pm_ach = pack
         if date_ws is None or not line_map2:
             continue
-
         build_summary_sheet_with_achievers(
             wb=wb,
-            summary_name=f"彙總_{date_sheet}",
+            summary_name=f"彙總_{str(d)}",
             date_ws=date_ws,
             line_map=line_map2,
             am_cols=am_cols,
@@ -978,94 +1068,23 @@ def build_output_excel_bytes(df_raw: pd.DataFrame, target_per_mh: int, manpower_
             target_per_mh=target_per_mh,
         )
 
-    # 排序：KPI圖表 -> 彙總_* -> 日期
     sheet_order = []
     if "KPI圖表" in wb.sheetnames:
         sheet_order.append("KPI圖表")
     sheet_order += [sn for sn in wb.sheetnames if sn.startswith("彙總_")]
-    sheet_order += [sn for sn in wb.sheetnames if (sn not in sheet_order)]
+    sheet_order += [sn for sn in wb.sheetnames if sn not in sheet_order]
     wb._sheets = [wb[sn] for sn in sheet_order]
 
     bio = BytesIO()
     wb.save(bio)
-    return bio.getvalue(), [str(d) for d in dates], kpi_df
+    return bio.getvalue(), kpi_df
 
 
 # =========================
-# UI helpers（修正：可一次貼上/可快速填入）
+# misc
 # =========================
 def _hash_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
-
-
-def _init_manpower_table(lineids, hours):
-    cols = [str(int(h)) for h in hours]
-    idx = [str(x) for x in lineids]
-    # ✅ 用可空數字型別，貼上 Excel 才不會「字串/空白」卡住
-    df = pd.DataFrame(pd.NA, index=idx, columns=cols, dtype="Float64")
-    return df
-
-
-def _apply_fill(df: pd.DataFrame, line_id: str, hours: list[int], value: float, which: str):
-    df2 = df.copy()
-    if line_id not in df2.index:
-        return df2
-
-    if which == "整天":
-        tgt_hours = hours
-    elif which == "上午":
-        tgt_hours = [h for h in hours if h in AM_HOURS]
-    else:
-        tgt_hours = [h for h in hours if h in PM_HOURS]
-
-    for h in tgt_hours:
-        c = str(int(h))
-        if c in df2.columns:
-            df2.loc[line_id, c] = value
-    return df2
-
-
-def _parse_clipboard_to_df(text: str) -> pd.DataFrame:
-    """
-    支援貼 Excel 區塊：
-    - 允許第一列是小時（8 9 10...），第一欄是 line id
-    """
-    text = (text or "").strip()
-    if not text:
-        return pd.DataFrame()
-
-    # 用 tab 分隔為主
-    rows = [r for r in text.splitlines() if r.strip() != ""]
-    grid = [r.split("\t") for r in rows]
-    if len(grid) < 2 or len(grid[0]) < 2:
-        return pd.DataFrame()
-
-    header = [h.strip() for h in grid[0]]
-    data = grid[1:]
-
-    # 第一欄當 index
-    idx = [str(r[0]).strip() for r in data]
-    cols = [str(c).strip() for c in header[1:]]
-
-    vals = []
-    for r in data:
-        row_vals = []
-        for v in r[1:]:
-            v = str(v).strip()
-            if v == "":
-                row_vals.append(pd.NA)
-            else:
-                try:
-                    row_vals.append(float(v))
-                except Exception:
-                    row_vals.append(pd.NA)
-        # 補齊長度
-        if len(row_vals) < len(cols):
-            row_vals += [pd.NA] * (len(cols) - len(row_vals))
-        vals.append(row_vals[:len(cols)])
-
-    out = pd.DataFrame(vals, index=idx, columns=cols, dtype="Float64")
-    return out
 
 
 # =========================
@@ -1127,7 +1146,6 @@ def main():
         st.session_state["ship_line_prod_date_to_hours"] = date_to_hours
         st.session_state["ship_line_prod_date_to_lineids"] = date_to_lineids
 
-        # 初始化每日期人力表（可空數字表）
         for d in st.session_state["ship_line_prod_dates"]:
             key = f"mp_{d}"
             st.session_state[key] = _init_manpower_table(date_to_lineids[d], date_to_hours[d])
@@ -1138,10 +1156,10 @@ def main():
     df_source = st.session_state["ship_line_prod_df"]
 
     # =========================
-    # 👥 人力輸入（強化）
+    # 👥 人力輸入（穩定快速貼上）
     # =========================
-    card_open("👥 人力輸入（可直接貼 Excel 多格 / 支援快速填入）")
-    st.caption("✅ 你可以從 Excel 複製一整塊（含多格）直接貼進表格；空白會保留空白。")
+    card_open("👥 人力輸入（✅最穩：Excel 直接複製整塊 → 貼上 → 套用）")
+    st.caption("貼上支援：①含表頭（Line ID + 小時） ②純矩陣 ③每列含 Line ID。")
 
     tabs = st.tabs(dates)
     manpower_by_date = {}
@@ -1150,76 +1168,63 @@ def main():
         with tabs[i]:
             hours = date_to_hours.get(d, [])
             lineids = date_to_lineids.get(d, [])
-            if not hours or not lineids:
-                st.warning("此日期沒有小時/Line 資料")
-                continue
-
             key = f"mp_{d}"
-            mp_df = st.session_state.get(key)
-            if mp_df is None or list(mp_df.columns) != [str(int(h)) for h in hours] or list(mp_df.index) != [str(x) for x in lineids]:
-                mp_df = _init_manpower_table(lineids, hours)
-                st.session_state[key] = mp_df
+            mp_df = st.session_state.get(key) or _init_manpower_table(lineids, hours)
 
-            c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
+            c1, c2 = st.columns([1.2, 1.0])
+
             with c1:
-                sel_line = st.selectbox("快速填入｜Line ID", options=lineids, key=f"sel_line_{d}")
-            with c2:
-                fill_val = st.number_input("填入值（人力）", value=0.0, step=0.5, key=f"fill_val_{d}")
-            with c3:
-                which = st.selectbox("範圍", options=["整天", "上午", "下午"], key=f"which_{d}")
-            with c4:
+                st.markdown("**快速填入（不用貼上也能快打）**")
+                r1, r2, r3 = st.columns([2, 2, 2])
+                with r1:
+                    sel_line = st.selectbox("Line ID", options=lineids, key=f"sel_line_{d}")
+                with r2:
+                    fill_val = st.number_input("人力值", value=0.0, step=0.5, key=f"fill_val_{d}")
+                with r3:
+                    which = st.selectbox("範圍", options=["整天", "上午", "下午"], key=f"which_{d}")
+
                 if st.button("套用填入", use_container_width=True, key=f"apply_{d}"):
-                    st.session_state[key] = _apply_fill(st.session_state[key], str(sel_line), hours, float(fill_val), which)
+                    mp_df = _apply_fill(mp_df, str(sel_line), hours, float(fill_val), which)
+                    st.session_state[key] = mp_df
 
-            # 可選：貼上區（解決某些瀏覽器 data_editor 貼上不穩）
-            with st.expander("（備用）貼上區：把 Excel 區塊貼這裡再套用", expanded=False):
-                clip = st.text_area(
-                    "格式：第一列是小時，第一欄是 Line ID（Tab 分隔）",
-                    height=120,
-                    key=f"clip_{d}",
+                st.markdown("**貼上區（建議用這個）**")
+                paste = st.text_area(
+                    "把 Excel 的區塊直接貼這裡（Tab 分隔）",
+                    height=200,
+                    key=f"paste_{d}",
+                    placeholder="例：\nLine ID\t8\t9\t10\nGT-A\t1\t1\t1\nGT-B\t0\t1\t1\n或直接純矩陣：\n1\t1\t1\n0\t1\t1",
                 )
-                cc1, cc2 = st.columns([1, 1])
-                with cc1:
-                    if st.button("解析並套用（覆蓋同名 Line / 小時）", use_container_width=True, key=f"clip_apply_{d}"):
-                        patch = _parse_clipboard_to_df(clip)
-                        if patch.empty:
-                            st.warning("貼上內容解析不到表格")
+
+                b1, b2 = st.columns([1, 1])
+                with b1:
+                    if st.button("✅ 解析並套用（覆蓋）", use_container_width=True, key=f"paste_apply_{d}"):
+                        parsed = _parse_paste(paste, lineids=lineids, hours=hours)
+                        if parsed.empty:
+                            st.warning("貼上內容解析不到資料")
                         else:
-                            base = st.session_state[key].copy()
-                            # 對齊欄列後覆蓋
-                            for ridx in patch.index:
-                                if ridx in base.index:
-                                    for c in patch.columns:
-                                        if c in base.columns:
-                                            base.loc[ridx, c] = patch.loc[ridx, c]
-                            st.session_state[key] = base
+                            st.session_state[key] = parsed
+                            mp_df = parsed
                             st.success("已套用貼上內容")
-                with cc2:
-                    st.caption("如果你直接貼在表格會異常，就用這個備用方式。")
+                with b2:
+                    if st.button("清空此日人力", use_container_width=True, key=f"clear_{d}"):
+                        mp_df = _init_manpower_table(lineids, hours)
+                        st.session_state[key] = mp_df
 
-            # ✅ 讓 data_editor 明確是數字欄，貼上最穩
-            col_cfg = {str(int(h)): st.column_config.NumberColumn(width="small") for h in hours}
+            with c2:
+                st.markdown("**人力表預覽（只顯示，避免 data_editor 貼上 bug）**")
+                st.dataframe(mp_df, use_container_width=True, height=420)
 
-            edited = st.data_editor(
-                st.session_state[key],
-                use_container_width=True,
-                num_rows="fixed",
-                column_config=col_cfg,
-                key=f"editor_{d}",
-            )
-
-            st.session_state[key] = edited
-            manpower_by_date[d] = edited
+            manpower_by_date[d] = mp_df
 
     card_close()
 
     # =========================
-    # 📤 匯出 + KPI 圖表
+    # 📊 KPI 預覽 + 匯出
     # =========================
-    card_open("📊 KPI 總覽（頁面即時）")
+    card_open("📊 KPI 預覽（頁面）")
     if st.button("計算 KPI 預覽", use_container_width=True):
         try:
-            out_bytes, out_dates, kpi_df = build_output_excel_bytes(
+            out_bytes, kpi_df = build_output_excel_bytes(
                 df_raw=df_source,
                 target_per_mh=int(target_per_mh),
                 manpower_by_date=manpower_by_date,
@@ -1235,9 +1240,7 @@ def main():
     if isinstance(kpi_df, pd.DataFrame) and not kpi_df.empty:
         st.dataframe(kpi_df, use_container_width=True)
 
-        # 圖表（不指定顏色，使用預設）
-        chart_df = kpi_df.copy()
-        chart_df = chart_df.set_index("日期")
+        chart_df = kpi_df.copy().set_index("日期")
 
         st.caption("達標率（上午/下午）")
         st.bar_chart(chart_df[["上午達標率", "下午達標率"]])
@@ -1247,7 +1250,6 @@ def main():
 
         st.caption("總PCS(加權)（上午/下午）")
         st.bar_chart(chart_df[["上午總PCS加權", "下午總PCS加權"]])
-
     card_close()
 
     card_open("📤 匯出 Excel（含 KPI圖表 Sheet）")
@@ -1265,7 +1267,6 @@ def main():
         st.caption("輸出包含：KPI圖表（含圖表）→ 彙總_日期 → 各日期戰情表")
     else:
         st.info("先按「計算 KPI 預覽」後就可以下載。")
-
     card_close()
 
 
