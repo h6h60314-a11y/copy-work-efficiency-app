@@ -1,7 +1,8 @@
+# pages/23_採品門市差異量.py
 # -*- coding: utf-8 -*-
 import pandas as pd
 import streamlit as st
-from io import BytesIO
+from io import BytesIO, StringIO
 
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
@@ -27,7 +28,6 @@ REQUIRED_COLS = [
 def _as_text(x):
     if x is None:
         return ""
-    # 避免 NaN
     try:
         if pd.isna(x):
             return ""
@@ -37,7 +37,6 @@ def _as_text(x):
 
 
 def _read_excel(uploaded_file, sheet_name=0) -> pd.DataFrame:
-    # uploaded_file: streamlit UploadedFile
     return pd.read_excel(uploaded_file, sheet_name=sheet_name, engine="openpyxl")
 
 
@@ -49,7 +48,6 @@ def _ensure_cols(df: pd.DataFrame, cols: list) -> pd.DataFrame:
     for c in cols:
         if c not in df.columns:
             df[c] = ""
-    # 依指定欄位順序排前面（其餘欄位保留在後面）
     front = [c for c in cols if c in df.columns]
     tail = [c for c in df.columns if c not in front]
     return df[front + tail]
@@ -59,11 +57,45 @@ def _build_output_bytes(sheets: dict) -> bytes:
     bio = BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         for name, df in sheets.items():
-            # Excel 分頁名限制 31 字，保險處理
             safe_name = str(name)[:31]
             df.to_excel(writer, sheet_name=safe_name, index=False)
     bio.seek(0)
     return bio.getvalue()
+
+
+def _read_pasted_table(text: str) -> pd.DataFrame:
+    """
+    支援從 Excel 複製貼上：
+    - 通常是 TAB 分隔（\t）
+    - 若是 CSV 也可（,）
+    """
+    raw = (text or "").strip("\n").strip()
+    if not raw:
+        raise ValueError("貼上的內容是空的。請從 Excel 複製整段（含表頭）再貼上。")
+
+    # 先猜 TAB（Excel 最常見）
+    try:
+        df = pd.read_csv(StringIO(raw), sep="\t", dtype=str)
+        if df.shape[1] <= 1:
+            raise ValueError("not tab")
+        return df
+    except Exception:
+        pass
+
+    # 再猜 CSV
+    try:
+        df = pd.read_csv(StringIO(raw), sep=",", dtype=str)
+        if df.shape[1] <= 1:
+            raise ValueError("not csv")
+        return df
+    except Exception:
+        pass
+
+    # 最後：嘗試用任意空白（很少見）
+    df = pd.read_csv(StringIO(raw), sep=r"\s+", dtype=str)
+    if df.shape[1] <= 1:
+        raise ValueError("無法解析貼上內容：請確認是『含表頭』且有分隔符（Excel 複製通常為 TAB）。")
+    return df
 
 
 # ----------------------------
@@ -76,43 +108,90 @@ set_page("📄 採品門市差異量（依未配出原因回填分頁）", "出�
 card_open("操作說明")
 st.markdown(
     """
-- 上傳 **2 個 Excel 檔**：  
-  1) **採品明細**（含欄位：`未配出原因` 等）  
-  2) **採品門市差異量**（多分頁，分頁名稱 = 未配出原因）
+- 準備 **2 個來源**：  
+  1) **採品明細**：請直接在平台用「複製貼上」（從 Excel 複製整塊資料 *含表頭*）  
+  2) **採品門市差異量**：上傳多分頁 Excel（分頁名稱 = `未配出原因`）
 - 系統會把「採品明細」逐筆依 `未配出原因` 追加到對應分頁。
 - 僅當 `未配出原因` **有對應分頁名稱** 時才會寫入；找不到分頁的會列在「未對應清單」。
 """
 )
 card_close()
 
-col1, col2 = st.columns(2)
-with col1:
-    f_detail = st.file_uploader("① 上傳：採品明細（.xlsx）", type=["xlsx"], accept_multiple_files=False)
-with col2:
-    f_book = st.file_uploader("② 上傳：採品門市差異量（多分頁 .xlsx）", type=["xlsx"], accept_multiple_files=False)
+st.divider()
+
+# ----------- 採品明細輸入方式 -----------
+card_open("① 採品明細來源")
+mode = st.radio(
+    "選擇輸入方式",
+    ["複製貼上（推薦）", "上傳 Excel（備用）"],
+    horizontal=True,
+)
+
+df_detail = None
+
+if mode == "複製貼上（推薦）":
+    pasted = st.text_area(
+        "把採品明細從 Excel 複製後貼在這裡（請包含表頭）",
+        height=220,
+        placeholder="在 Excel 選取含表頭的整段資料 → Ctrl+C → 這裡 Ctrl+V",
+    )
+    parse_btn = st.button("解析貼上內容", type="primary", use_container_width=False)
+
+    if parse_btn:
+        try:
+            df_detail = _read_pasted_table(pasted)
+            st.session_state["df_detail_pasted"] = df_detail
+            st.success(f"解析成功：{df_detail.shape[0]:,} 筆 × {df_detail.shape[1]} 欄")
+        except Exception as e:
+            st.error(f"解析失敗：{e}")
+
+    # 若已解析過，沿用 session_state
+    if "df_detail_pasted" in st.session_state and df_detail is None:
+        df_detail = st.session_state["df_detail_pasted"]
+
+else:
+    f_detail = st.file_uploader("上傳：採品明細（.xlsx）", type=["xlsx"], accept_multiple_files=False)
+    if f_detail:
+        try:
+            df_detail = _read_excel(f_detail, sheet_name=0)
+            st.success(f"讀取成功：{df_detail.shape[0]:,} 筆 × {df_detail.shape[1]} 欄")
+        except Exception as e:
+            st.error(f"採品明細讀取失敗：{e}")
+
+card_close()
 
 st.divider()
 
-if not f_detail or not f_book:
-    st.info("請先完成兩個檔案上傳。")
+# ----------- 上傳差異量活頁簿 -----------
+card_open("② 採品門市差異量（多分頁 Excel）")
+f_book = st.file_uploader(
+    "上傳：採品門市差異量（多分頁 .xlsx）",
+    type=["xlsx"],
+    accept_multiple_files=False,
+)
+card_close()
+
+st.divider()
+
+# 必要輸入檢查
+if df_detail is None:
+    st.info("請先完成『① 採品明細』貼上解析或上傳。")
     st.stop()
 
-# 讀檔
-try:
-    df_detail = _read_excel(f_detail, sheet_name=0)
-except Exception as e:
-    st.error(f"採品明細讀取失敗：{e}")
+if not f_book:
+    st.info("請上傳『② 採品門市差異量（多分頁 Excel）』。")
     st.stop()
 
+# 讀取多分頁
 try:
-    sheets = _read_excel_all_sheets(f_book)  # dict[sheet_name] = DataFrame
+    sheets = _read_excel_all_sheets(f_book)
 except Exception as e:
     st.error(f"採品門市差異量（多分頁）讀取失敗：{e}")
     st.stop()
 
 # 檢查必要欄位（至少要有 未配出原因）
 if "未配出原因" not in df_detail.columns:
-    st.error("採品明細缺少必要欄位：未配出原因")
+    st.error("採品明細缺少必要欄位：未配出原因（請確認貼上/上傳資料的表頭名稱）")
     st.stop()
 
 # 若採品明細沒有「備註」，也先補一個空欄
@@ -120,14 +199,13 @@ if "備註" not in df_detail.columns:
     df_detail["備註"] = ""
 
 # 統一欄位
-df_detail = _ensure_cols(df_detail, REQUIRED_COLS)
+df_detail = _ensure_cols(df_detail.copy(), REQUIRED_COLS)
 
-# 先把各分頁也補齊欄位（避免原本分頁缺欄導致輸出不一致）
+# 各分頁補齊欄位
 for k in list(sheets.keys()):
     try:
         sheets[k] = _ensure_cols(sheets[k].copy(), REQUIRED_COLS)
     except Exception:
-        # 若某分頁是空或異常，也給一個空表
         sheets[k] = pd.DataFrame(columns=REQUIRED_COLS)
 
 # 主邏輯：依未配出原因回填
@@ -173,7 +251,7 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
-# 預覽（可收合）
+# 預覽
 with st.expander("預覽：採品明細（前 200 筆）", expanded=False):
     st.dataframe(df_detail.head(200), use_container_width=True)
 
