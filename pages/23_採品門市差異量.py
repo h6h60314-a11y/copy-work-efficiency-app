@@ -9,13 +9,13 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 
 # ============================
-# ✅ 模板位置（你的 UNC 路徑）
+# ✅ 模板位置（你的本機路徑）
 # ============================
-UNC_TEMPLATE_PATH = r"\\smb.fengtien.com.tw\hlsc-fsd\SMB\GREAT_TREE\Ａ.個人資料夾\2採品門市差異量.xlsx"
+LOCAL_TEMPLATE_PATH = r"C:\Users\User\Desktop\2採品門市差異量.xlsx"
 
 # （可留著做備援，不影響你現在的需求）
 TEMPLATE_CANDIDATES = [
-    UNC_TEMPLATE_PATH,
+    LOCAL_TEMPLATE_PATH,
     os.path.join("assets", "templates", "2採品門市差異量.xlsx"),
     os.path.join("templates", "2採品門市差異量.xlsx"),
     "2採品門市差異量.xlsx",
@@ -146,8 +146,8 @@ if template_path:
     st.code(template_path)
 else:
     st.error(
-        "找不到模板檔，請確認部署主機可存取 UNC 路徑且檔案存在：\n\n"
-        f"{UNC_TEMPLATE_PATH}"
+        "找不到模板檔，請確認檔案存在於：\n\n"
+        f"{LOCAL_TEMPLATE_PATH}"
     )
 card_close()
 
