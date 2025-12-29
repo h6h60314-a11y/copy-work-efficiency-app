@@ -811,10 +811,11 @@ def build_summary_sheet_with_achievers(
         rule_i_green.formula = [f'AND($H{r0}<>"",I{r0}<>"",I{r0}>=$H{r0})']
         ws.conditional_formatting.add(f"I{r0}:I{last_row}", rule_i_green)
 
+    # ✅ 無達標：不顯示 QCA/QCB/補貨
     def draw_achiever_block(start_row, title, achievers, default_money, qc_mult, restock_mult):
-        col_line = 12
-        col_name = 13
-        col_money = 14
+        col_line = 12  # L
+        col_name = 13  # M
+        col_money = 14 # N
 
         _set_row_h(start_row)
         for cc in range(col_line, col_money + 1):
@@ -868,6 +869,7 @@ def build_summary_sheet_with_achievers(
                 _write_row(str(lid), f"={int(default_money)}", names_for_line(str(lid), name_map))
         else:
             _write_row("（無）", "", "")
+            return rr  # ✅ 直接結束，不加 QCA/QCB/補貨
 
         open_rng = f"$A$2:$A${last_row}"
         ach_rng = f"$L${first_list_row}:$L${rr-1}"
@@ -1045,11 +1047,15 @@ filename = up.name
 
 # 檔案變更時清理舊狀態（避免混到上一份）
 sig = hashlib.md5(raw).hexdigest()
-if st.session_state.get("src_sig_v3") != sig:
+if st.session_state.get("src_sig_v4") != sig:
     for k in list(st.session_state.keys()):
-        if k.startswith("mp_store_") or k.startswith("mp_rev_") or k.startswith("mp_schema_") or k.startswith("am_fill_") or k.startswith("pm_fill_"):
+        if (
+            k.startswith("mp_store_") or k.startswith("mp_rev_") or k.startswith("mp_schema_")
+            or k.startswith("am_fill_") or k.startswith("pm_fill_")
+            or k.startswith("excel_hash_v1") or k.startswith("excel_bytes_v1")
+        ):
             del st.session_state[k]
-    st.session_state["src_sig_v3"] = sig
+    st.session_state["src_sig_v4"] = sig
 
 with st.spinner("解析檔案中..."):
     df2, line_base, split, dates, date_to_hours, date_to_lineids_all, c_lineid, c_stotype = parse_source_file(raw, filename)
@@ -1061,7 +1067,7 @@ card_open("設定：不列入計算的 LINE ID（手動輸入）")
 exclude_raw = st.text_input(
     "輸入要排除的 LINE ID（逗號/空白/換行分隔）",
     value="F0026, FUBOX, SORT",
-    key="exclude_lineid_v2"
+    key="exclude_lineid_v3"
 )
 exclude_set = {x.strip() for x in re.split(r"[,\s]+", (exclude_raw or "").strip()) if x.strip()}
 st.caption(f"目前排除：{', '.join(sorted(exclude_set)) if exclude_set else '（無）'}")
@@ -1070,7 +1076,7 @@ card_close()
 # 2) 名單貼上
 card_open("名單貼上：Line ID → 姓名（可自行貼上）")
 st.caption("格式：每行第一欄是 Line ID，後面欄位是姓名（建議用 Tab 分隔）。")
-name_tsv = st.text_area("貼上名單", value=st.session_state.get("name_tsv_v2", DEFAULT_NAME_TSV), height=220, key="name_tsv_v2")
+name_tsv = st.text_area("貼上名單", value=st.session_state.get("name_tsv_v3", DEFAULT_NAME_TSV), height=220, key="name_tsv_v3")
 name_map = parse_name_tsv(name_tsv)
 st.caption(f"已載入名單：{len(name_map)} 個 Key")
 card_close()
@@ -1081,7 +1087,7 @@ for d in dates:
     all_ids = [str(x).strip() for x in date_to_lineids_all.get(d, []) if str(x).strip()]
     date_to_lineids[d] = [lid for lid in all_ids if lid not in exclude_set]
 
-# 3) 人力輸入（✅ 用 rev 改 key 來刷新 widget；不會再寫 widget 的 session_state）
+# 3) 人力輸入（rev 改 key 刷新 widget）
 card_open("手動輸入人力（每小時 / 可小數）")
 st.caption("✅ 已修正：不會再跳格回空白；快速填入/清空/排除變更都能立即刷新。")
 
@@ -1103,20 +1109,20 @@ for i, d in enumerate(dates):
         if rev_key not in st.session_state:
             st.session_state[rev_key] = 0
 
-        # 初始化/對齊
         if store_key not in st.session_state:
             st.session_state[store_key] = build_default_manpower_table(lineids, hours)
         else:
             st.session_state[store_key] = reconcile_manpower_table(st.session_state[store_key], lineids, hours)
 
-        # 如果排除變更造成 shape/欄位變了，強制刷新 widget（改 key）
-        schema_sig = (tuple(st.session_state[store_key]["Line ID"].astype(str).tolist()),
-                      tuple([c for c in st.session_state[store_key].columns if c != "Line ID"]))
+        schema_sig = (
+            tuple(st.session_state[store_key]["Line ID"].astype(str).tolist()),
+            tuple([c for c in st.session_state[store_key].columns if c != "Line ID"])
+        )
         if st.session_state.get(schema_key) != schema_sig:
             st.session_state[schema_key] = schema_sig
             st.session_state[rev_key] += 1
 
-        editor_key = f"mp_editor_{str(d)}_{st.session_state[rev_key]}"  # ✅ 版本化 widget key
+        editor_key = f"mp_editor_{str(d)}_{st.session_state[rev_key]}"
 
         c1, c2, c3 = st.columns([1, 1, 2])
         with c1:
@@ -1136,7 +1142,7 @@ for i, d in enumerate(dates):
                 if hs in dfm.columns:
                     dfm.loc[:, hs] = val
             st.session_state[store_key] = dfm
-            st.session_state[rev_key] += 1  # ✅ 改 key 讓 editor 立即吃新值
+            st.session_state[rev_key] += 1
             st.rerun()
 
         b1, b2, b3 = st.columns([1, 1, 1])
@@ -1164,13 +1170,11 @@ for i, d in enumerate(dates):
             column_config=col_cfg,
             key=editor_key
         )
-
-        # ✅ 編輯結果只回寫到 store_key（不碰 widget key）
         st.session_state[store_key] = edited_df
 
 card_close()
 
-# 4) 即時達標狀況（人力 2 位；更新即修正）
+# 4) 即時達標狀況
 st.markdown("---")
 card_open("✅ Line ID 達標狀況（即時刷新）")
 
@@ -1201,18 +1205,41 @@ for d in dates:
 
 card_close()
 
-# 5) 下載（畫面最下方）
+# =========================
+# ✅ 下載=產出（畫面最下方：單一下載按鈕）
+# =========================
 st.markdown("---")
-card_open("⬇️ 匯出 Excel（下載在最下方）")
+card_open("⬇️ 匯出 Excel（下載=產出，放最下方）")
+
 base = os.path.splitext(os.path.basename(filename))[0]
-out_name = st.text_input("輸出檔名", value=f"{base}_每小時戰情表_含上午下午彙總.xlsx")
+out_name = st.text_input("輸出檔名", value=f"{base}_每小時戰情表_含上午下午彙總.xlsx", key="out_name_v1")
 
 def _get_table_by_date(d):
     return st.session_state.get(f"mp_store_{str(d)}")
 
-if st.button("✅ 產出 Excel", type="primary", use_container_width=True):
-    with st.spinner("產生 Excel 中（含公式/彙總/達標名單＋姓名自動帶入）..."):
-        xbytes = excel_bytes_from_inputs(
+def _build_export_hash() -> str:
+    h = hashlib.md5()
+    h.update(st.session_state.get("src_sig_v4", "").encode("utf-8"))
+    h.update(("EXC|" + (exclude_raw or "")).encode("utf-8"))
+    h.update(("NAM|" + (name_tsv or "")).encode("utf-8"))
+
+    # 人力：每個日期 table 轉 csv 做 hash（確保任一格變動都會更新 Excel）
+    for d in dates:
+        dfm = st.session_state.get(f"mp_store_{str(d)}")
+        if dfm is None:
+            continue
+        b = dfm.fillna("").to_csv(index=False).encode("utf-8")
+        h.update(str(d).encode("utf-8"))
+        h.update(b)
+
+    return h.hexdigest()
+
+export_hash = _build_export_hash()
+
+# 只要 inputs 有變，就自動重建最新 Excel bytes
+if st.session_state.get("excel_hash_v1") != export_hash:
+    with st.spinner("更新下載檔案中（Excel 產生中）..."):
+        st.session_state["excel_bytes_v1"] = excel_bytes_from_inputs(
             line_base=line_base,
             split=split,
             dates=dates,
@@ -1223,12 +1250,15 @@ if st.button("✅ 產出 Excel", type="primary", use_container_width=True):
             get_table_by_date_func=_get_table_by_date,
             name_map=name_map,
         )
-    st.success("Excel 已產出，可直接下載。")
-    st.download_button(
-        "⬇️ 下載 Excel",
-        data=xbytes,
-        file_name=out_name,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
+        st.session_state["excel_hash_v1"] = export_hash
+
+xbytes = st.session_state.get("excel_bytes_v1", b"")
+st.download_button(
+    "⬇️ 下載 Excel（= 產出+下載）",
+    data=xbytes,
+    file_name=out_name,
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    use_container_width=True
+)
+
 card_close()
