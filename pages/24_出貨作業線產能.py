@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import os
-import re
 import math
 import hashlib
 from io import BytesIO
@@ -12,12 +11,9 @@ import streamlit as st
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-from openpyxl.formatting.rule import Rule
-from openpyxl.styles.differential import DifferentialStyle
 from openpyxl.chart import BarChart, Reference
 
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
-
 
 # =========================
 # 設定
@@ -33,8 +29,6 @@ ROW_HEIGHT = 18
 NUM_FMT_2_HIDE0 = "#,##0.00;-#,##0.00;;@"
 NUM_FMT_4_HIDE0 = "#,##0.0000;-#,##0.0000;;@"
 NUM_FMT_INT_HIDE0 = "#,##0;-#,##0;;@"
-NUM_FMT_INT = "#,##0"
-NUM_FMT_MONEY_HIDE0 = "#,##0;-#,##0;;@"
 
 OLE_HEADER = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
 ZIP_HEADER = b"PK\x03\x04"
@@ -206,6 +200,13 @@ def _init_manpower_table(lineids, hours):
     return pd.DataFrame(pd.NA, index=idx, columns=cols, dtype="Float64")
 
 
+def _clear_manpower_table(mp_df: pd.DataFrame) -> pd.DataFrame:
+    cleared = mp_df.copy()
+    for c in cleared.columns:
+        cleared[c] = pd.NA
+    return cleared
+
+
 def _apply_fill(df: pd.DataFrame, line_id: str, hours: list[int], value: float, which: str):
     df2 = df.copy()
     if line_id not in df2.index:
@@ -235,29 +236,82 @@ def _as_float(v):
 
 
 # =========================
-# ✅ 手動輸入表格（穩定）
+# ✅ 手動輸入表格（改格式：更像表格、輸入框更窄、隱藏 -/+）
 # =========================
+def inject_compact_input_css():
+    st.markdown(
+        r"""
+<style>
+/* 讓手動輸入區「像表格」：縮小欄距、縮小輸入框、置中 */
+.mp-grid h3, .mp-grid h4 { margin: 0.2rem 0 0.4rem !important; }
+
+/* number input：縮窄 + 置中 */
+.mp-grid div[data-testid="stNumberInput"] input{
+  width: 78px !important;
+  min-width: 78px !important;
+  padding: 4px 8px !important;
+  min-height: 32px !important;
+  text-align: center !important;
+}
+
+/* 隱藏 - / +（stepper buttons） */
+.mp-grid div[data-testid="stNumberInput"] button{
+  display:none !important;
+}
+
+/* 縮小欄間距 */
+.mp-grid div[data-testid="column"]{
+  padding-left: 0.25rem !important;
+  padding-right: 0.25rem !important;
+}
+
+/* 表頭更像表格 */
+.mp-grid .mp-head{
+  font-weight: 800;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+/* Line ID 欄縮小 */
+.mp-grid .mp-line{
+  font-weight: 800;
+  padding-top: 6px;
+}
+
+/* 讓整列看起來更貼近 */
+.mp-grid .row{
+  margin-bottom: 4px;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
 def render_manual_input_grid(date_str: str, mp_df: pd.DataFrame, lineids: list[str], hours: list[int]) -> pd.DataFrame:
     mp_df = mp_df.copy()
+    inject_compact_input_css()
 
+    st.markdown('<div class="mp-grid">', unsafe_allow_html=True)
+
+    # 快速工具
     st.markdown("### 快速工具")
-    t1, t2, t3, t4 = st.columns([2, 2, 2, 2])
-
+    t1, t2, t3, t4 = st.columns([2, 2, 2, 2], gap="small")
     with t1:
         line_sel = st.selectbox("整列填入：Line ID", options=lineids, key=f"row_line_{date_str}")
     with t2:
-        row_val = st.number_input("整列值", value=0.0, step=0.5, key=f"row_val_{date_str}")
+        row_val = st.number_input("整列值", value=0.0, step=0.5, format="%.1f", key=f"row_val_{date_str}")
     with t3:
         row_scope = st.selectbox("列範圍", ["整天", "上午", "下午"], key=f"row_scope_{date_str}")
     with t4:
         if st.button("套用整列", use_container_width=True, key=f"apply_row_{date_str}"):
             mp_df = _apply_fill(mp_df, str(line_sel), hours, float(row_val), row_scope)
 
-    u1, u2, u3 = st.columns([2, 2, 2])
+    u1, u2, u3 = st.columns([2, 2, 2], gap="small")
     with u1:
         hour_sel = st.selectbox("整欄填入：小時", options=[int(h) for h in hours], key=f"col_hour_{date_str}")
     with u2:
-        col_val = st.number_input("整欄值", value=0.0, step=0.5, key=f"col_val_{date_str}")
+        col_val = st.number_input("整欄值", value=0.0, step=0.5, format="%.1f", key=f"col_val_{date_str}")
     with u3:
         if st.button("套用整欄", use_container_width=True, key=f"apply_col_{date_str}"):
             col = str(int(hour_sel))
@@ -267,14 +321,16 @@ def render_manual_input_grid(date_str: str, mp_df: pd.DataFrame, lineids: list[s
     st.markdown("---")
     st.markdown("### 人力手動輸入（Tab / 方向鍵可快速跳格）")
 
-    header = st.columns([2] + [1] * len(hours))
-    header[0].markdown("**Line ID**")
+    # 表頭
+    header = st.columns([1.6] + [1] * len(hours), gap="small")
+    header[0].markdown('<div class="mp-head">Line ID</div>', unsafe_allow_html=True)
     for j, h in enumerate(hours, start=1):
-        header[j].markdown(f"**{int(h)}**")
+        header[j].markdown(f'<div class="mp-head">{int(h)}</div>', unsafe_allow_html=True)
 
+    # 每列
     for lid in lineids:
-        cols = st.columns([2] + [1] * len(hours))
-        cols[0].markdown(f"**{lid}**")
+        cols = st.columns([1.6] + [1] * len(hours), gap="small")
+        cols[0].markdown(f'<div class="mp-line">{lid}</div>', unsafe_allow_html=True)
 
         for j, h in enumerate(hours, start=1):
             colname = str(int(h))
@@ -285,19 +341,20 @@ def render_manual_input_grid(date_str: str, mp_df: pd.DataFrame, lineids: list[s
                 label=f"{lid}_{colname}",
                 value=float(cur_val),
                 step=0.5,
+                format="%.1f",
                 label_visibility="collapsed",
                 key=f"cell_{date_str}_{lid}_{colname}",
             )
             mp_df.loc[str(lid), colname] = float(v)
 
+    st.markdown("</div>", unsafe_allow_html=True)
     return mp_df
 
 
 # =========================
-# ✅ 我們的輸出 Sheet：戰情表（日期）
+# ✅ 我們的輸出 Sheet：日期戰情表
 # =========================
 def write_hourly_sheet(wb, sheet_name, date_value, hours, lineids, line_base_map, split_map, manpower_map):
-    # 覆蓋同名（但不動原本其他分頁）
     if sheet_name in wb.sheetnames:
         wb.remove(wb[sheet_name])
     ws = wb.create_sheet(sheet_name)
@@ -443,7 +500,6 @@ def write_hourly_sheet(wb, sheet_name, date_value, hours, lineids, line_base_map
         for j in range(1, 2 + len(hours)):
             c = ws.cell(row=r, column=j, value=None)
             c.border = border
-            c.alignment = right if j >= 2 else left
             _set_base_font(c)
         r += 1
 
@@ -452,7 +508,6 @@ def write_hourly_sheet(wb, sheet_name, date_value, hours, lineids, line_base_map
         refs = ",".join([f"{col}{rr}" for rr in pcs_weight_rows])
         c = ws.cell(row=2, column=j, value=f'=IF(SUM({refs})=0,"",SUM({refs}))')
         c.number_format = NUM_FMT_2_HIDE0
-        c.alignment = right
         _set_base_font(c)
 
     ws.column_dimensions["A"].width = 24
@@ -463,14 +518,9 @@ def write_hourly_sheet(wb, sheet_name, date_value, hours, lineids, line_base_map
 
 
 # =========================
-# ✅ 新 KPI 圖表：各 Line 指標（上午應達成/下午目標/總PCS加權）
+# ✅ KPI圖表_日期：各Line（上午應達成/下午目標/總PCS）
 # =========================
 def add_line_kpi_chart_sheet(wb, date_str: str, line_kpi_df: pd.DataFrame):
-    """
-    Sheet: KPI圖表_YYYY-MM-DD
-    欄位：Line ID | 上午應達成(加權) | 下午目標(加權) | 總PCS(加權)
-    圖：Clustered Column（3 series）
-    """
     sheet_name = f"KPI圖表_{date_str}"
     if sheet_name in wb.sheetnames:
         wb.remove(wb[sheet_name])
@@ -484,15 +534,13 @@ def add_line_kpi_chart_sheet(wb, date_str: str, line_kpi_df: pd.DataFrame):
 
     cols = ["Line ID", "上午應達成(加權)", "下午目標(加權)", "總PCS(加權)"]
     ws.append(cols)
-    _set_row_height(ws, 1)
-    for j in range(1, len(cols) + 1):
+    for j in range(1, 5):
         c = ws.cell(1, j)
         c.fill = header_fill
         c.border = border
         c.alignment = center
         _set_base_font(c, force_bold=True)
 
-    # 寫資料
     for _, row in line_kpi_df.iterrows():
         ws.append([
             row.get("Line ID", ""),
@@ -502,13 +550,11 @@ def add_line_kpi_chart_sheet(wb, date_str: str, line_kpi_df: pd.DataFrame):
         ])
 
     for r in range(2, ws.max_row + 1):
-        _set_row_height(ws, r)
         for j in range(1, 5):
             cell = ws.cell(r, j)
             cell.border = border
             cell.alignment = center if j == 1 else right
             _set_base_font(cell)
-        # 數字格式
         for j in (2, 3, 4):
             ws.cell(r, j).number_format = NUM_FMT_INT_HIDE0
 
@@ -517,7 +563,6 @@ def add_line_kpi_chart_sheet(wb, date_str: str, line_kpi_df: pd.DataFrame):
     ws.column_dimensions["C"].width = 18
     ws.column_dimensions["D"].width = 16
 
-    # 圖表
     cats = Reference(ws, min_col=1, min_row=2, max_row=ws.max_row)
     data = Reference(ws, min_col=2, max_col=4, min_row=1, max_row=ws.max_row)
 
@@ -536,10 +581,9 @@ def add_line_kpi_chart_sheet(wb, date_str: str, line_kpi_df: pd.DataFrame):
 
 
 # =========================
-# ✅ 輸出：保留原檔，追加分頁（關鍵修改）
+# ✅ 輸出：保留原檔 + 新增分頁
 # =========================
 def build_output_excel_bytes(original_filename: str, original_bytes: bytes, df_raw: pd.DataFrame, target_per_mh: int, manpower_by_date: dict):
-    # 先做資料彙整
     df_raw, c_pickdate, c_packqty, c_cweight, c_lineid, c_stotype = normalize_columns(df_raw)
     df2, line_base, split = build_hourly_metrics(df_raw, c_pickdate, c_packqty, c_cweight, c_lineid, c_stotype)
 
@@ -555,7 +599,6 @@ def build_output_excel_bytes(original_filename: str, original_bytes: bytes, df_r
         lineids = sorted(df2.loc[df2["PICK_DATE"] == d, c_lineid].dropna().astype(str).unique().tolist())
         date_to_lineids[d] = [str(x) for x in lineids]
 
-    # 將 manpower_by_date 攤平成 map
     manpower_map = {}
     for d in dates:
         hours = date_to_hours.get(d, [])
@@ -577,10 +620,10 @@ def build_output_excel_bytes(original_filename: str, original_bytes: bytes, df_r
                     v = np.nan
                 manpower_map[(d, str(lid), int(h))] = v
 
-    # ✅ 讀取原活頁簿（保留原本內容）
     ext = os.path.splitext(original_filename)[1].lower()
-    wb = None
     preserved = True
+    wb = None
+
     if ext in (".xlsx", ".xlsm", ".xltx", ".xltm"):
         try:
             wb = load_workbook(BytesIO(original_bytes), keep_vba=(ext == ".xlsm"))
@@ -588,14 +631,11 @@ def build_output_excel_bytes(original_filename: str, original_bytes: bytes, df_r
             wb = None
 
     if wb is None:
-        # .xls 或讀取失敗：只能新建
         preserved = False
         wb = Workbook()
-        # 移除預設空白 sheet
         if wb.active and wb.active.title == "Sheet":
             wb.remove(wb.active)
 
-    # 逐日產出：日期戰情表 + KPI圖表_日期
     for d in dates:
         hours = date_to_hours[d]
         if not hours:
@@ -618,7 +658,7 @@ def build_output_excel_bytes(original_filename: str, original_bytes: bytes, df_r
                 split_map[(str(lid), t, "PCS")] = {int(r["HOUR"]): r["PCS"] for _, r in tmpT.iterrows()}
                 split_map[(str(lid), t, "加權PCS")] = {int(r["HOUR"]): r["加權PCS"] for _, r in tmpT.iterrows()}
 
-        # ✅ 1) 日期戰情表（同名覆蓋）
+        # 日期戰情表
         write_hourly_sheet(
             wb=wb,
             sheet_name=str(d),
@@ -630,7 +670,7 @@ def build_output_excel_bytes(original_filename: str, original_bytes: bytes, df_r
             manpower_map=manpower_map,
         )
 
-        # ✅ 2) KPI圖表：各Line（上午應達成/下午目標/總PCS加權）
+        # KPI圖表（各Line）
         rows = []
         for lid in lineids:
             lid = str(lid)
@@ -650,10 +690,8 @@ def build_output_excel_bytes(original_filename: str, original_bytes: bytes, df_r
                 "總PCS(加權)": total_pcs_w,
             })
 
-        line_kpi_df = pd.DataFrame(rows)
-        add_line_kpi_chart_sheet(wb, date_str=str(d), line_kpi_df=line_kpi_df)
+        add_line_kpi_chart_sheet(wb, date_str=str(d), line_kpi_df=pd.DataFrame(rows))
 
-    # 存檔
     bio = BytesIO()
     wb.save(bio)
     return bio.getvalue(), preserved
@@ -668,7 +706,7 @@ def _hash_bytes(b: bytes) -> str:
 # =========================
 def main():
     inject_logistics_theme()
-    set_page("出貨課｜出貨作業線產能", "📦")
+    set_page("出貨課｜出貨作業線產能", "📈")
 
     card_open("📥 來源檔案")
     up = st.file_uploader(
@@ -721,22 +759,19 @@ def main():
         st.session_state["ship_line_prod_date_to_hours"] = date_to_hours
         st.session_state["ship_line_prod_date_to_lineids"] = date_to_lineids
 
-        # 初始化每日期人力表
         for d in st.session_state["ship_line_prod_dates"]:
-            key = f"mp_{d}"
-            st.session_state[key] = _init_manpower_table(date_to_lineids[d], date_to_hours[d])
+            st.session_state[f"mp_{d}"] = _init_manpower_table(date_to_lineids[d], date_to_hours[d])
 
         st.session_state.pop("last_out_bytes", None)
         st.session_state.pop("last_out_name", None)
-        st.session_state.pop("preserve_ok", None)
 
     dates = st.session_state["ship_line_prod_dates"]
     date_to_hours = st.session_state["ship_line_prod_date_to_hours"]
     date_to_lineids = st.session_state["ship_line_prod_date_to_lineids"]
     df_source = st.session_state["ship_line_prod_df"]
 
-    # 人力輸入（手動）
-    card_open("👥 人力輸入（手動輸入 / ✅不會跳格）")
+    # 人力輸入
+    card_open("👥 人力輸入（手動輸入｜已改成表格樣式、隱藏 -/+）")
     tabs = st.tabs(dates)
     manpower_by_date = {}
 
@@ -751,14 +786,38 @@ def main():
                 mp_df = _init_manpower_table(lineids, hours)
                 st.session_state[key] = mp_df
 
+            # ✅ 一鍵清空（保留表格）
+            b1, b2 = st.columns([1.3, 1.7], gap="small")
+            with b1:
+                if st.button("🧹 一鍵清空本日人力", use_container_width=True, key=f"clear_day_{d}"):
+                    st.session_state[key] = _clear_manpower_table(mp_df)
+                    st.session_state.pop("last_out_bytes", None)
+                    st.session_state.pop("last_out_name", None)
+                    st.toast(f"{d} 人力已清空（表格保留）")
+
+            with b2:
+                if st.button("🧹 一鍵清空全部日期人力", use_container_width=True, key="clear_all_days"):
+                    for dd in dates:
+                        k2 = f"mp_{dd}"
+                        if k2 in st.session_state and isinstance(st.session_state[k2], pd.DataFrame):
+                            st.session_state[k2] = _clear_manpower_table(st.session_state[k2])
+                    st.session_state.pop("last_out_bytes", None)
+                    st.session_state.pop("last_out_name", None)
+                    st.toast("全部日期人力已清空（表格保留）")
+
+            st.markdown("---")
+
+            # 表格輸入
+            mp_df = st.session_state[key]
             mp_df_new = render_manual_input_grid(d, mp_df, lineids=lineids, hours=hours)
+
             st.session_state[key] = mp_df_new
             manpower_by_date[d] = mp_df_new
 
     card_close()
 
     # 匯出
-    card_open("📤 匯出 Excel（✅保留原檔分頁 + 新增 KPI圖表_日期 + 日期戰情表）")
+    card_open("📤 匯出 Excel（保留原檔 + 新增 日期戰情表 + KPI圖表_日期）")
     if st.button("產出並準備下載", use_container_width=True):
         try:
             out_bytes, preserved = build_output_excel_bytes(
@@ -769,13 +828,12 @@ def main():
                 manpower_by_date=manpower_by_date,
             )
             st.session_state["last_out_bytes"] = out_bytes
-            st.session_state["preserve_ok"] = preserved
 
             base = os.path.splitext(up.name)[0]
             st.session_state["last_out_name"] = f"{base}_出貨作業線產能_保留原檔.xlsx"
 
             if preserved:
-                st.success("已完成：匯出檔保留原本分頁，並新增 KPI圖表_日期 + 日期戰情表。")
+                st.success("完成：保留原檔分頁，並新增 KPI圖表_日期 + 日期戰情表。")
             else:
                 st.warning("來源檔非 xlsx/xlsm（或讀取失敗），無法保留原活頁簿；已改用新建活頁簿輸出。")
         except Exception as e:
