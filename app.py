@@ -146,6 +146,7 @@ home_page = page_if_exists("pages/0_首頁.py", "首頁", "🏠", default=True, 
 outbound_home = page_if_exists("pages/7_出貨課首頁.py", "出貨課首頁", "📦", url_path="outbound-home")
 transfer_diff_page = page_if_exists("pages/6_撥貨差異.py", "撥貨差異", "📦", url_path="outbound-transfer-diff")
 outbound_vendor_store_diff = page_if_exists("pages/23_採品門市差異量.py","採品門市差異量", "📄", url_path="outbound-vendor-store-diff-23")
+outbound_line_productivity = page_if_exists("pages/24_出貨作業線產能.py","pages/24_出貨作業線產能.py", "📈",url_path="outbound-kpi-line-productivity-24")
 
 # 進貨課
 inbound_home = page_if_exists("pages/8_進貨課首頁.py", "進貨課首頁", "🚚", url_path="inbound-home")
@@ -195,7 +196,7 @@ if BROKEN_PAGES:
 pg = st.navigation(
     {
         "": [p for p in [home_page] if p],
-        "出貨課": [p for p in [outbound_home, transfer_diff_page,outbound_vendor_store_diff] if p],
+        "出貨課": [p for p in [outbound_home, transfer_diff_page,outbound_vendor_store_diff,outbound_line_productivity] if p],
         "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, diff_page] if p],
         "大樹KPI": [p for p in [
             gt_kpi_home, gt_inbound_receipt, gt_ship_should, gt_xdock, gt_ship_actual,
@@ -208,10 +209,3 @@ pg = st.navigation(
 )
 
 pg.run()
-
-
-
-
-
-
-
