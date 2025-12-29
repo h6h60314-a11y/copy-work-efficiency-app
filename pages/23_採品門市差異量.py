@@ -9,18 +9,16 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 
 # ============================
-# 模板位置（UNC + 本機備援）
+# ✅ 模板位置（你的 UNC 路徑）
 # ============================
-TEMPLATE_FILENAME = "2採品門市差異量.xlsx"
-
-# 你的 SMB UNC 路徑（模板放在這裡就不用再上傳）
 UNC_TEMPLATE_PATH = r"\\smb.fengtien.com.tw\hlsc-fsd\SMB\GREAT_TREE\Ａ.個人資料夾\2採品門市差異量.xlsx"
 
+# （可留著做備援，不影響你現在的需求）
 TEMPLATE_CANDIDATES = [
     UNC_TEMPLATE_PATH,
-    os.path.join("assets", "templates", TEMPLATE_FILENAME),
-    os.path.join("templates", TEMPLATE_FILENAME),
-    TEMPLATE_FILENAME,
+    os.path.join("assets", "templates", "2採品門市差異量.xlsx"),
+    os.path.join("templates", "2採品門市差異量.xlsx"),
+    "2採品門市差異量.xlsx",
 ]
 
 REQUIRED_COLS = [
@@ -101,7 +99,7 @@ def _load_template_sheets(template_path: str) -> dict:
 def _read_pasted_table(text: str) -> pd.DataFrame:
     """
     支援從 Excel 複製貼上（含表頭）：
-    - Excel 複製通常是 TAB 分隔（\t）
+    - Excel 複製通常是 TAB 分隔（\\t）
     - 也支援 CSV（,）
     """
     raw = (text or "").strip("\n").strip()
@@ -142,14 +140,13 @@ set_page("📄 採品門市差異量（貼上即更新匯出檔）", "出貨課�
 
 template_path = _find_template_path()
 
-card_open("模板來源")
+card_open("模板來源（不需上傳）")
 if template_path:
-    st.success("模板已找到（不需上傳）。")
+    st.success("模板已找到。")
     st.code(template_path)
 else:
     st.error(
-        "找不到模板檔：2採品門市差異量.xlsx\n\n"
-        "請確認 Streamlit 伺服器主機能存取該 UNC 路徑，且檔案存在：\n"
+        "找不到模板檔，請確認部署主機可存取 UNC 路徑且檔案存在：\n\n"
         f"{UNC_TEMPLATE_PATH}"
     )
 card_close()
@@ -159,7 +156,7 @@ if not template_path:
 
 card_open("貼上採品明細（含表頭）")
 pasted = st.text_area(
-    "從 Excel 複製整段（含表頭）→ 直接貼上。貼上內容一變，就會立即更新匯出檔。",
+    "從 Excel 複製整段（含表頭）→ 直接貼上。內容一變就會更新匯出檔（下載按鈕即時刷新）。",
     height=260,
     placeholder="Excel：選取含表頭資料 → Ctrl+C → 這裡 Ctrl+V",
 )
@@ -167,7 +164,6 @@ card_close()
 
 st.divider()
 
-# 只要有內容，就嘗試解析、產出
 if not (pasted or "").strip():
     st.info("請先貼上採品明細資料（含表頭）。")
     st.stop()
@@ -215,12 +211,11 @@ for _, row in df_detail.iterrows():
         missing_reasons.append(reason)
         skipped += 1
 
-# 匯出 bytes（每次 rerun 都會重新產出，因此內容一變就更新）
+# 每次 rerun 都重新產出 → 內容一變就更新
 out_bytes = _build_output_bytes(sheets)
 out_name = "更新後的採品門市差異量.xlsx"
 
-# 結果區
-card_open("處理結果（已即時更新）")
+card_open("處理結果（即時更新）")
 c1, c2, c3 = st.columns(3)
 c1.metric("寫入筆數", f"{matched:,}")
 c2.metric("略過筆數", f"{skipped:,}")
