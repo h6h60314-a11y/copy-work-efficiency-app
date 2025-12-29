@@ -3,10 +3,12 @@ import os
 import re
 import math
 import hashlib
+import base64
 import pandas as pd
 from io import BytesIO
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -1047,15 +1049,15 @@ filename = up.name
 
 # 檔案變更時清理舊狀態（避免混到上一份）
 sig = hashlib.md5(raw).hexdigest()
-if st.session_state.get("src_sig_v4") != sig:
+if st.session_state.get("src_sig_v5") != sig:
     for k in list(st.session_state.keys()):
         if (
             k.startswith("mp_store_") or k.startswith("mp_rev_") or k.startswith("mp_schema_")
             or k.startswith("am_fill_") or k.startswith("pm_fill_")
-            or k.startswith("excel_hash_v1") or k.startswith("excel_bytes_v1")
+            or k.startswith("excel_bytes_oneclick") or k.startswith("excel_name_oneclick")
         ):
             del st.session_state[k]
-    st.session_state["src_sig_v4"] = sig
+    st.session_state["src_sig_v5"] = sig
 
 with st.spinner("解析檔案中..."):
     df2, line_base, split, dates, date_to_hours, date_to_lineids_all, c_lineid, c_stotype = parse_source_file(raw, filename)
@@ -1067,7 +1069,7 @@ card_open("設定：不列入計算的 LINE ID（手動輸入）")
 exclude_raw = st.text_input(
     "輸入要排除的 LINE ID（逗號/空白/換行分隔）",
     value="F0026, FUBOX, SORT",
-    key="exclude_lineid_v3"
+    key="exclude_lineid_v5"
 )
 exclude_set = {x.strip() for x in re.split(r"[,\s]+", (exclude_raw or "").strip()) if x.strip()}
 st.caption(f"目前排除：{', '.join(sorted(exclude_set)) if exclude_set else '（無）'}")
@@ -1076,7 +1078,7 @@ card_close()
 # 2) 名單貼上
 card_open("名單貼上：Line ID → 姓名（可自行貼上）")
 st.caption("格式：每行第一欄是 Line ID，後面欄位是姓名（建議用 Tab 分隔）。")
-name_tsv = st.text_area("貼上名單", value=st.session_state.get("name_tsv_v3", DEFAULT_NAME_TSV), height=220, key="name_tsv_v3")
+name_tsv = st.text_area("貼上名單", value=st.session_state.get("name_tsv_v5", DEFAULT_NAME_TSV), height=220, key="name_tsv_v5")
 name_map = parse_name_tsv(name_tsv)
 st.caption(f"已載入名單：{len(name_map)} 個 Key")
 card_close()
@@ -1206,40 +1208,24 @@ for d in dates:
 card_close()
 
 # =========================
-# ✅ 下載=產出（畫面最下方：單一下載按鈕）
+# ✅ 真正：產出excel = 下載excel（1-click）
 # =========================
 st.markdown("---")
-card_open("⬇️ 匯出 Excel（下載=產出，放最下方）")
+card_open("⬇️ 匯出 Excel（真正一鍵：產出=下載）")
 
 base = os.path.splitext(os.path.basename(filename))[0]
-out_name = st.text_input("輸出檔名", value=f"{base}_每小時戰情表_含上午下午彙總.xlsx", key="out_name_v1")
+out_name = st.text_input(
+    "輸出檔名",
+    value=f"{base}_每小時戰情表_含上午下午彙總.xlsx",
+    key="out_name_v5"
+)
 
 def _get_table_by_date(d):
     return st.session_state.get(f"mp_store_{str(d)}")
 
-def _build_export_hash() -> str:
-    h = hashlib.md5()
-    h.update(st.session_state.get("src_sig_v4", "").encode("utf-8"))
-    h.update(("EXC|" + (exclude_raw or "")).encode("utf-8"))
-    h.update(("NAM|" + (name_tsv or "")).encode("utf-8"))
-
-    # 人力：每個日期 table 轉 csv 做 hash（確保任一格變動都會更新 Excel）
-    for d in dates:
-        dfm = st.session_state.get(f"mp_store_{str(d)}")
-        if dfm is None:
-            continue
-        b = dfm.fillna("").to_csv(index=False).encode("utf-8")
-        h.update(str(d).encode("utf-8"))
-        h.update(b)
-
-    return h.hexdigest()
-
-export_hash = _build_export_hash()
-
-# 只要 inputs 有變，就自動重建最新 Excel bytes
-if st.session_state.get("excel_hash_v1") != export_hash:
-    with st.spinner("更新下載檔案中（Excel 產生中）..."):
-        st.session_state["excel_bytes_v1"] = excel_bytes_from_inputs(
+if st.button("⬇️ 產出並下載 Excel（1-click）", type="primary", use_container_width=True):
+    with st.spinner("Excel 產生中..."):
+        xbytes = excel_bytes_from_inputs(
             line_base=line_base,
             split=split,
             dates=dates,
@@ -1250,15 +1236,37 @@ if st.session_state.get("excel_hash_v1") != export_hash:
             get_table_by_date_func=_get_table_by_date,
             name_map=name_map,
         )
-        st.session_state["excel_hash_v1"] = export_hash
 
-xbytes = st.session_state.get("excel_bytes_v1", b"")
-st.download_button(
-    "⬇️ 下載 Excel（= 產出+下載）",
-    data=xbytes,
-    file_name=out_name,
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    use_container_width=True
-)
+    st.session_state["excel_bytes_oneclick"] = xbytes
+    st.session_state["excel_name_oneclick"] = out_name
+
+    b64 = base64.b64encode(xbytes).decode("utf-8")
+    safe_name = (out_name or "export.xlsx").replace('"', "").replace("\\", "_").replace("/", "_")
+
+    components.html(
+        f"""
+        <html><body>
+        <a id="dl" download="{safe_name}"
+           href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}">
+        </a>
+        <script>
+          document.getElementById('dl').click();
+        </script>
+        </body></html>
+        """,
+        height=0,
+    )
+
+    st.success("已觸發下載。若瀏覽器阻擋自動下載，請用下方「備援下載」按鈕。")
+
+# 備援下載（瀏覽器策略阻擋自動下載時）
+if st.session_state.get("excel_bytes_oneclick"):
+    st.download_button(
+        "⬇️ 備援下載（瀏覽器阻擋自動下載時使用）",
+        data=st.session_state["excel_bytes_oneclick"],
+        file_name=st.session_state.get("excel_name_oneclick", "export.xlsx"),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
 
 card_close()
