@@ -199,7 +199,7 @@ def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file
 set_page(
     "庫存訂單應出量分析",
     icon="📦",
-    subtitle="支援多檔上傳｜成箱(計量單位=2)加總『數量』｜零散(計量單位=3,6)加總『計量單位數量』｜可一鍵清除重做下一份",
+    subtitle="支援多檔上傳｜成箱(計量單位=2)加總『數量』｜零散(計量單位=3,6)加總『計量單位數量』｜可一鍵🧹清除重做下一份",
 )
 
 # ✅ uploader 清除機制：改 key 讓 uploader 重建
@@ -208,7 +208,7 @@ if "uploader_key_11" not in st.session_state:
 
 card_open("📌 上傳明細檔（可多檔）")
 
-u1, u2 = st.columns([1, 0.22], gap="small")
+u1, u2 = st.columns([1, 0.08], gap="small")  # ✅ 清除欄更小
 with u1:
     uploaded_files = st.file_uploader(
         "請上傳明細檔（Excel / CSV / HTML，可一次多個）",
@@ -218,7 +218,8 @@ with u1:
     )
 with u2:
     st.markdown(" ")
-    if st.button("🧹 清除", use_container_width=True):
+    # ✅ 只顯示 🧹（加 tooltip）
+    if st.button("🧹", help="清除已上傳檔案", use_container_width=True):
         st.session_state["uploader_key_11"] += 1
         st.rerun()
 
