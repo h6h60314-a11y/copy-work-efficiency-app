@@ -208,7 +208,7 @@ if "uploader_key_11" not in st.session_state:
 
 card_open("📌 上傳明細檔（可多檔）")
 
-u1, u2 = st.columns([1, 0.08], gap="small")  # ✅ 清除欄更小
+u1, u2 = st.columns([1, 0.05], gap="small")  # ✅ 清除欄更小
 with u1:
     uploaded_files = st.file_uploader(
         "請上傳明細檔（Excel / CSV / HTML，可一次多個）",
