@@ -80,14 +80,15 @@ def _load_dataframe(uploaded_file, key_prefix: str = "") -> tuple[pd.DataFrame, 
     ext = Path(name).suffix.lower()
     b = uploaded_file.getvalue()
 
+    # CSV / HTML
     if ext == ".csv":
         df = _read_csv_best_effort(b)
         return df, "CSV"
-
     if ext in (".html", ".htm"):
         df = _read_html_best_effort(b)
         return df, "HTML"
 
+    # Excel
     engines = _excel_engines_for_ext(ext)
     if not engines:
         raise ValueError("不支援的檔案格式，請使用 Excel/CSV/HTML")
@@ -99,6 +100,7 @@ def _load_dataframe(uploaded_file, key_prefix: str = "") -> tuple[pd.DataFrame, 
             sheet_names = xf.sheet_names
             sheet = sheet_names[0] if sheet_names else 0
 
+            # 多張 sheet -> 讓使用者選
             if len(sheet_names) > 1:
                 chosen = st.selectbox(
                     f"選擇工作表：{name}",
@@ -119,7 +121,7 @@ def _load_dataframe(uploaded_file, key_prefix: str = "") -> tuple[pd.DataFrame, 
 
 def _compute(df: pd.DataFrame) -> dict:
     """
-    ✅最新邏輯（依你要求）：
+    ✅最終邏輯（依你要求）：
     - 計量單位=2 → 成箱：加總欄位「數量」
     - 計量單位=3、6 → 零散：加總欄位「計量單位數量」
     - 出貨入數：排除（存在就刪）
@@ -156,7 +158,6 @@ def _compute(df: pd.DataFrame) -> dict:
 
     out["應出類型"] = out["計量單位"].apply(_type)
 
-    # ✅重點：兩種加總欄位不同
     成箱 = out.loc[out["計量單位"] == 2, "數量"].sum()
     零散 = out.loc[out["計量單位"].isin([3, 6]), "計量單位數量"].sum()
 
@@ -178,6 +179,7 @@ def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file
         summary_df.to_excel(writer, index=False, sheet_name="彙總")
         combined_df.to_excel(writer, index=False, sheet_name="明細_合併")
 
+        # 每檔一張
         for name, df in per_file_dfs:
             safe = Path(name).stem[:31]
             base = safe
@@ -197,15 +199,29 @@ def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file
 set_page(
     "庫存訂單應出量分析",
     icon="📦",
-    subtitle="支援多檔上傳｜成箱(計量單位=2)加總『數量』｜零散(計量單位=3,6)加總『計量單位數量』",
+    subtitle="支援多檔上傳｜成箱(計量單位=2)加總『數量』｜零散(計量單位=3,6)加總『計量單位數量』｜可一鍵清除重做下一份",
 )
 
+# ✅ uploader 清除機制：改 key 讓 uploader 重建
+if "uploader_key_11" not in st.session_state:
+    st.session_state["uploader_key_11"] = 0
+
 card_open("📌 上傳明細檔（可多檔）")
-uploaded_files = st.file_uploader(
-    "請上傳明細檔（Excel / CSV / HTML，可一次多個）",
-    type=["xlsx", "xls", "xlsb", "xlsm", "csv", "html", "htm"],
-    accept_multiple_files=True,
-)
+
+u1, u2 = st.columns([1, 0.22], gap="small")
+with u1:
+    uploaded_files = st.file_uploader(
+        "請上傳明細檔（Excel / CSV / HTML，可一次多個）",
+        type=["xlsx", "xls", "xlsb", "xlsm", "csv", "html", "htm"],
+        accept_multiple_files=True,
+        key=f"uploader_11_{st.session_state['uploader_key_11']}",
+    )
+with u2:
+    st.markdown(" ")
+    if st.button("🧹 清除", use_container_width=True):
+        st.session_state["uploader_key_11"] += 1
+        st.rerun()
+
 card_close()
 
 if not uploaded_files:
@@ -215,6 +231,7 @@ if not uploaded_files:
 items = []
 errors = []
 
+# 逐檔讀取 + 計算
 for i, uf in enumerate(uploaded_files, start=1):
     try:
         df, read_note = _load_dataframe(uf, key_prefix=f"f{i}")
@@ -236,6 +253,7 @@ for i, uf in enumerate(uploaded_files, start=1):
     except Exception as e:
         errors.append((uf.name, str(e)))
 
+# 顯示錯誤（不中斷）
 if errors:
     with st.expander("⚠️ 部分檔案讀取/計算失敗（點開查看）", expanded=True):
         for fn, msg in errors:
@@ -245,10 +263,12 @@ if not items:
     st.error("沒有任何檔案可成功計算，請確認欄位是否包含：計量單位、數量、計量單位數量。")
     st.stop()
 
+# 合併明細
 combined_df = pd.concat([it["res"]["df"] for it in items], ignore_index=True)
 
-total_loose = sum(it["res"]["零散應出"] for it in items)
-total_box = sum(it["res"]["成箱應出"] for it in items)
+# 彙總指標（全部檔案）
+total_loose = sum(it["res"]["零散應出"] for it in items)  # 零散：計量單位數量
+total_box = sum(it["res"]["成箱應出"] for it in items)    # 成箱：數量
 
 combined_slots = combined_df["儲位"].nunique() if "儲位" in combined_df.columns else None
 combined_items = combined_df["商品"].nunique() if "商品" in combined_df.columns else None
@@ -274,6 +294,7 @@ with right:
     else:
         st.metric("品項數", _fmt_int(combined_items))
 
+# 每檔彙總表
 summary_rows = []
 for it in items:
     r = it["res"]
@@ -295,6 +316,7 @@ card_open("📊 多檔彙總")
 st.dataframe(summary_df, use_container_width=True, height=260)
 card_close()
 
+# 明細預覽 + 下載
 preferred = [
     "來源檔名",
     "計量單位",
@@ -308,11 +330,7 @@ cols = list(combined_df.columns)
 ordered = [c for c in preferred if c in cols] + [c for c in cols if c not in preferred]
 
 card_open("📄 明細預覽（合併）")
-st.dataframe(
-    combined_df[ordered].head(300),
-    use_container_width=True,
-    height=420,
-)
+st.dataframe(combined_df[ordered].head(300), use_container_width=True, height=420)
 card_close()
 
 with st.expander("🔎 各檔明細預覽（點開）", expanded=False):
