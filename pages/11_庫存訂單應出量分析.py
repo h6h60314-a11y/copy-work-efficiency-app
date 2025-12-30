@@ -1,7 +1,7 @@
 # pages/11_出貨訂單應出量分析.py
 import io
-import os
 from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
@@ -23,7 +23,6 @@ def _fmt_qty(x):
         v = float(x)
     except Exception:
         return str(x)
-    # 兩位小數，但尾端 .00 會去掉
     s = f"{v:,.2f}"
     return s[:-3] if s.endswith(".00") else s
 
@@ -36,18 +35,15 @@ def _fmt_int(x):
 
 
 def _read_csv_best_effort(b: bytes) -> pd.DataFrame:
-    # 先 UTF-8，再 BIG5，再 CP950
     for enc in ("utf-8", "utf-8-sig", "big5", "cp950"):
         try:
             return pd.read_csv(io.BytesIO(b), encoding=enc)
         except Exception:
             pass
-    # 最後用 latin-1 兜底
     return pd.read_csv(io.BytesIO(b), encoding="latin-1")
 
 
 def _read_html_best_effort(b: bytes) -> pd.DataFrame:
-    # pandas.read_html 需要 text 或檔案路徑/類檔案
     text = None
     for enc in ("utf-8", "utf-8-sig", "big5", "cp950", "latin-1"):
         try:
@@ -75,28 +71,27 @@ def _excel_engines_for_ext(ext: str):
     return []
 
 
-def _load_dataframe(uploaded_file) -> tuple[pd.DataFrame, str]:
+def _load_dataframe(uploaded_file, key_prefix: str = "") -> tuple[pd.DataFrame, str]:
     """
-    回傳 (df,讀取方式描述)
+    回傳 (df, 讀取方式描述)
+    key_prefix：用於多檔時，避免 selectbox key 衝突
     """
     name = uploaded_file.name
     ext = Path(name).suffix.lower()
     b = uploaded_file.getvalue()
 
-    # CSV / HTML
     if ext == ".csv":
         df = _read_csv_best_effort(b)
         return df, "CSV"
+
     if ext in (".html", ".htm"):
         df = _read_html_best_effort(b)
         return df, "HTML"
 
-    # Excel
     engines = _excel_engines_for_ext(ext)
     if not engines:
         raise ValueError("不支援的檔案格式，請使用 Excel/CSV/HTML")
 
-    # 先嘗試取 sheet 名稱（若失敗就直接讀第一張）
     last_err = None
     for eng in engines:
         try:
@@ -104,9 +99,14 @@ def _load_dataframe(uploaded_file) -> tuple[pd.DataFrame, str]:
             sheet_names = xf.sheet_names
             sheet = sheet_names[0] if sheet_names else 0
 
-            # 讓使用者可選 sheet（如果多張）
+            # 多張 sheet -> 讓使用者選
             if len(sheet_names) > 1:
-                chosen = st.selectbox("選擇工作表", sheet_names, index=0)
+                chosen = st.selectbox(
+                    f"選擇工作表：{name}",
+                    sheet_names,
+                    index=0,
+                    key=f"{key_prefix}__sheet__{name}__{eng}",
+                )
                 sheet = chosen
 
             df = pd.read_excel(io.BytesIO(b), engine=eng, sheet_name=sheet)
@@ -115,7 +115,6 @@ def _load_dataframe(uploaded_file) -> tuple[pd.DataFrame, str]:
             last_err = e
             continue
 
-    # xlsb 沒裝 pyxlsb 常見
     raise ValueError(f"Excel 讀取失敗：{last_err}")
 
 
@@ -148,23 +147,36 @@ def _compute(df: pd.DataFrame) -> dict:
     成箱 = total1 + total2
     零散 = total3
 
-    # 儲位 / 商品（可選）
     儲位數 = out["儲位"].nunique() if "儲位" in out.columns else None
     品項數 = out["商品"].nunique() if "商品" in out.columns else None
 
     return {
         "df": out,
-        "零散應出": 零散,
-        "成箱應出": 成箱,
+        "零散應出": float(零散) if pd.notna(零散) else 0.0,
+        "成箱應出": float(成箱) if pd.notna(成箱) else 0.0,
         "儲位數": 儲位數,
         "品項數": 品項數,
     }
 
 
-def _download_xlsx(df: pd.DataFrame) -> bytes:
+def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file_dfs: list[tuple[str, pd.DataFrame]]) -> bytes:
     bio = io.BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="明細")
+        summary_df.to_excel(writer, index=False, sheet_name="彙總")
+        combined_df.to_excel(writer, index=False, sheet_name="明細_合併")
+
+        # 每個檔案各一張（避免爆 31 字）
+        for name, df in per_file_dfs:
+            safe = Path(name).stem[:31]
+            # 若重複 sheet name，補尾碼
+            base = safe
+            i = 1
+            while safe in writer.book.sheetnames:
+                suffix = f"_{i}"
+                safe = (base[: max(0, 31 - len(suffix))] + suffix)[:31]
+                i += 1
+            df.to_excel(writer, index=False, sheet_name=safe)
+
     return bio.getvalue()
 
 
@@ -174,71 +186,118 @@ def _download_xlsx(df: pd.DataFrame) -> bytes:
 set_page(
     "庫存訂單應出量分析",
     icon="📦",
-    subtitle="自動讀檔｜計算零散/成箱應出｜輸出處理後明細",
+    subtitle="支援多檔上傳｜計算零散/成箱應出｜輸出合併明細 + 彙總",
 )
 
-card_open("📌 上傳明細檔")
-uploaded = st.file_uploader(
-    "請上傳明細檔（Excel / CSV / HTML）",
+card_open("📌 上傳明細檔（可多檔）")
+uploaded_files = st.file_uploader(
+    "請上傳明細檔（Excel / CSV / HTML，可一次多個）",
     type=["xlsx", "xls", "xlsb", "xlsm", "csv", "html", "htm"],
-    accept_multiple_files=False,
+    accept_multiple_files=True,
 )
 card_close()
 
-if not uploaded:
+if not uploaded_files:
     st.info("請先上傳檔案後，系統會自動計算「零散/成箱應出」與「儲位數/品項數」。")
     st.stop()
 
-# 讀檔
-try:
-    df, read_note = _load_dataframe(uploaded)
-except Exception as e:
-    st.error(f"讀檔失敗：{e}")
-    st.stop()
+items = []
+errors = []
 
-st.success(f"已讀取：{uploaded.name}（{len(df):,} 筆 / {len(df.columns):,} 欄）")
-st.caption(f"讀取方式：{read_note}")
+# 逐檔讀取 + 計算
+for i, uf in enumerate(uploaded_files, start=1):
+    try:
+        df, read_note = _load_dataframe(uf, key_prefix=f"f{i}")
+        res = _compute(df)
 
-# 計算
-try:
-    result = _compute(df)
-except Exception as e:
-    st.error(f"計算失敗：{e}")
+        # 加來源檔欄位（合併時好追）
+        df_out = res["df"].copy()
+        df_out.insert(0, "來源檔名", uf.name)
+        res["df"] = df_out
+
+        items.append(
+            {
+                "name": uf.name,
+                "read_note": read_note,
+                "rows": len(df),
+                "cols": len(df.columns),
+                "res": res,
+            }
+        )
+    except Exception as e:
+        errors.append((uf.name, str(e)))
+
+# 顯示錯誤（不中斷，能算的先算）
+if errors:
+    with st.expander("⚠️ 部分檔案讀取/計算失敗（點開查看）", expanded=True):
+        for fn, msg in errors:
+            st.error(f"{fn}：{msg}")
+
+if not items:
+    st.error("沒有任何檔案可成功計算，請確認欄位是否包含：原始配庫存量、出貨入數、計量單位。")
     st.stop()
 
 # ----------------------------
-# ✅ 指標呈現：兩大區塊 + 直向 metrics
+# 彙總指標（全部檔案）
 # ----------------------------
+combined_df = pd.concat([it["res"]["df"] for it in items], ignore_index=True)
+
+total_loose = sum(it["res"]["零散應出"] for it in items)
+total_box = sum(it["res"]["成箱應出"] for it in items)
+
+combined_slots = combined_df["儲位"].nunique() if "儲位" in combined_df.columns else None
+combined_items = combined_df["商品"].nunique() if "商品" in combined_df.columns else None
+
 left, right = st.columns([1, 1], gap="large")
 
 with left:
-    st.markdown("### 庫存出貨訂單量")
-    # ✅ 直向：零散在上、成箱在下
-    st.metric("出貨訂單庫存零散應出", _fmt_qty(result["零散應出"]))
-    st.metric("出貨訂單庫存成箱應出", _fmt_qty(result["成箱應出"]))
+    st.markdown("### 庫存出貨訂單量（彙總）")
+    st.metric("出貨訂單庫存零散應出", _fmt_qty(total_loose))
+    st.metric("出貨訂單庫存成箱應出", _fmt_qty(total_box))
 
 with right:
-    st.markdown("### 總揀")
-    # ✅ 直向：儲位數在上、品項數在下
-    if result["儲位數"] is None:
+    st.markdown("### 總揀（彙總）")
+    if combined_slots is None:
         st.metric("儲位數", "—")
-        st.caption("（明細未提供「儲位」欄位）")
+        st.caption("（所有檔案都未提供「儲位」欄位）")
     else:
-        st.metric("儲位數", _fmt_int(result["儲位數"]))
+        st.metric("儲位數", _fmt_int(combined_slots))
 
-    if result["品項數"] is None:
+    if combined_items is None:
         st.metric("品項數", "—")
-        st.caption("（明細未提供「商品」欄位）")
+        st.caption("（所有檔案都未提供「商品」欄位）")
     else:
-        st.metric("品項數", _fmt_int(result["品項數"]))
+        st.metric("品項數", _fmt_int(combined_items))
+
+# ----------------------------
+# 每檔彙總表
+# ----------------------------
+summary_rows = []
+for it in items:
+    r = it["res"]
+    summary_rows.append(
+        {
+            "檔名": it["name"],
+            "讀取方式": it["read_note"],
+            "筆數": it["rows"],
+            "欄數": it["cols"],
+            "零散應出": r["零散應出"],
+            "成箱應出": r["成箱應出"],
+            "儲位數": r["儲位數"] if r["儲位數"] is not None else "",
+            "品項數": r["品項數"] if r["品項數"] is not None else "",
+        }
+    )
+summary_df = pd.DataFrame(summary_rows)
+
+card_open("📊 多檔彙總")
+st.dataframe(summary_df, use_container_width=True, height=260)
+card_close()
 
 # ----------------------------
 # 明細預覽 + 下載
 # ----------------------------
-card_open("📄 明細預覽（已加入：原始配庫存出貨單位量）")
-
-# 顯示部分欄位優先（有就排前面）
 preferred = [
+    "來源檔名",
     "原始配庫存量",
     "出貨入數",
     "計量單位",
@@ -246,20 +305,38 @@ preferred = [
     "儲位",
     "商品",
 ]
-cols = list(result["df"].columns)
+cols = list(combined_df.columns)
 ordered = [c for c in preferred if c in cols] + [c for c in cols if c not in preferred]
 
+card_open("📄 明細預覽（合併）")
 st.dataframe(
-    result["df"][ordered].head(300),
+    combined_df[ordered].head(300),
     use_container_width=True,
     height=420,
 )
+card_close()
 
-xlsx_bytes = _download_xlsx(result["df"][ordered])
+# 分頁：每檔明細（方便你檢核）
+with st.expander("🔎 各檔明細預覽（點開）", expanded=False):
+    tabs = st.tabs([f"{i+1}. {it['name']}" for i, it in enumerate(items)])
+    for tab, it in zip(tabs, items):
+        with tab:
+            dfp = it["res"]["df"]
+            cols2 = list(dfp.columns)
+            ordered2 = [c for c in preferred if c in cols2] + [c for c in cols2 if c not in preferred]
+            st.caption(f"讀取方式：{it['read_note']}｜{it['rows']:,} 筆 / {it['cols']:,} 欄")
+            st.dataframe(dfp[ordered2].head(300), use_container_width=True, height=380)
+
+# 下載：彙總 + 合併 + 每檔一張
+xlsx_bytes = _download_xlsx(
+    summary_df=summary_df,
+    combined_df=combined_df[ordered],
+    per_file_dfs=[(it["name"], it["res"]["df"][ordered]) for it in items],
+)
+
 st.download_button(
-    label="⬇️ 下載處理後明細（Excel）",
+    label="⬇️ 下載結果（Excel：彙總 + 合併明細 + 各檔明細）",
     data=xlsx_bytes,
-    file_name=f"{Path(uploaded.name).stem}_出貨應出量分析_處理後.xlsx",
+    file_name="多檔_出貨應出量分析_結果.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
-card_close()
