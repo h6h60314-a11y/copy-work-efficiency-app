@@ -119,16 +119,16 @@ def _load_dataframe(uploaded_file, key_prefix: str = "") -> tuple[pd.DataFrame, 
 
 def _compute(df: pd.DataFrame) -> dict:
     """
-    ✅新計算邏輯（依你這種檔案）：
+    ✅最新邏輯（依你要求）：
     - 計量單位=2 → 成箱
     - 計量單位=3、6 → 零散
-    - 數量一律用「計量單位數量」加總
+    - 零散應出 / 成箱應出：一律用欄位「數量」加總
     - 出貨入數：排除（存在就刪）
     """
-    need_cols = ["計量單位", "計量單位數量"]
+    need_cols = ["計量單位", "數量"]
     missing = [c for c in need_cols if c not in df.columns]
     if missing:
-        raise KeyError(f"缺少必要欄位：{missing}")
+        raise KeyError(f"缺少必要欄位：{missing}（本版零散/成箱加總一律用『數量』）")
 
     out = df.copy()
 
@@ -138,22 +138,26 @@ def _compute(df: pd.DataFrame) -> dict:
 
     # 型別處理
     out["計量單位"] = pd.to_numeric(out["計量單位"], errors="coerce")
-    out["計量單位數量"] = pd.to_numeric(out["計量單位數量"], errors="coerce").fillna(0)
+    out["數量"] = pd.to_numeric(out["數量"], errors="coerce").fillna(0)
 
     # 分類欄位（方便你檢核）
     def _type(u):
         if pd.isna(u):
             return ""
-        if int(u) == 2:
+        try:
+            u = int(u)
+        except Exception:
+            return ""
+        if u == 2:
             return "成箱"
-        if int(u) in (3, 6):
+        if u in (3, 6):
             return "零散"
         return ""
 
     out["應出類型"] = out["計量單位"].apply(_type)
 
-    成箱 = out.loc[out["計量單位"] == 2, "計量單位數量"].sum()
-    零散 = out.loc[out["計量單位"].isin([3, 6]), "計量單位數量"].sum()
+    成箱 = out.loc[out["計量單位"] == 2, "數量"].sum()
+    零散 = out.loc[out["計量單位"].isin([3, 6]), "數量"].sum()
 
     儲位數 = out["儲位"].nunique() if "儲位" in out.columns else None
     品項數 = out["商品"].nunique() if "商品" in out.columns else None
@@ -192,7 +196,7 @@ def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file
 set_page(
     "庫存訂單應出量分析",
     icon="📦",
-    subtitle="支援多檔上傳｜成箱(計量單位=2)／零散(計量單位=3,6)｜數量採計量單位數量",
+    subtitle="支援多檔上傳｜成箱(計量單位=2)／零散(計量單位=3,6)｜零散/成箱加總採『數量』欄位",
 )
 
 card_open("📌 上傳明細檔（可多檔）")
@@ -237,7 +241,7 @@ if errors:
             st.error(f"{fn}：{msg}")
 
 if not items:
-    st.error("沒有任何檔案可成功計算，請確認欄位是否包含：計量單位、計量單位數量。")
+    st.error("沒有任何檔案可成功計算，請確認欄位是否包含：計量單位、數量。")
     st.stop()
 
 combined_df = pd.concat([it["res"]["df"] for it in items], ignore_index=True)
@@ -252,8 +256,8 @@ left, right = st.columns([1, 1], gap="large")
 
 with left:
     st.markdown("### 庫存出貨訂單量（彙總）")
-    st.metric("出貨訂單庫存零散應出", _fmt_qty(total_loose))
-    st.metric("出貨訂單庫存成箱應出", _fmt_qty(total_box))
+    st.metric("出貨訂單庫存零散應出（數量加總）", _fmt_qty(total_loose))
+    st.metric("出貨訂單庫存成箱應出（數量加總）", _fmt_qty(total_box))
 
 with right:
     st.markdown("### 總揀（彙總）")
@@ -278,8 +282,8 @@ for it in items:
             "讀取方式": it["read_note"],
             "筆數": it["rows"],
             "欄數": it["cols"],
-            "零散應出": r["零散應出"],
-            "成箱應出": r["成箱應出"],
+            "零散應出": r["零散應出"],  # ✅數量加總(計量單位=3,6)
+            "成箱應出": r["成箱應出"],  # ✅數量加總(計量單位=2)
             "儲位數": r["儲位數"] if r["儲位數"] is not None else "",
             "品項數": r["品項數"] if r["品項數"] is not None else "",
         }
@@ -294,7 +298,7 @@ preferred = [
     "來源檔名",
     "計量單位",
     "應出類型",
-    "計量單位數量",
+    "數量",
     "儲位",
     "商品",
 ]
