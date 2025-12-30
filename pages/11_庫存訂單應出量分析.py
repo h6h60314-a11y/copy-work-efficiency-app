@@ -99,7 +99,6 @@ def _load_dataframe(uploaded_file, key_prefix: str = "") -> tuple[pd.DataFrame, 
             sheet_names = xf.sheet_names
             sheet = sheet_names[0] if sheet_names else 0
 
-            # 多張 sheet -> 讓使用者選
             if len(sheet_names) > 1:
                 chosen = st.selectbox(
                     f"選擇工作表：{name}",
@@ -119,33 +118,42 @@ def _load_dataframe(uploaded_file, key_prefix: str = "") -> tuple[pd.DataFrame, 
 
 
 def _compute(df: pd.DataFrame) -> dict:
-    need_cols = ["原始配庫存量", "出貨入數", "計量單位"]
+    """
+    ✅新計算邏輯（依你這種檔案）：
+    - 計量單位=2 → 成箱
+    - 計量單位=3、6 → 零散
+    - 數量一律用「計量單位數量」加總
+    - 出貨入數：排除（存在就刪）
+    """
+    need_cols = ["計量單位", "計量單位數量"]
     missing = [c for c in need_cols if c not in df.columns]
     if missing:
         raise KeyError(f"缺少必要欄位：{missing}")
 
     out = df.copy()
 
+    # 排除「出貨入數」
+    if "出貨入數" in out.columns:
+        out = out.drop(columns=["出貨入數"])
+
     # 型別處理
-    out["原始配庫存量"] = pd.to_numeric(out["原始配庫存量"], errors="coerce").fillna(0)
-    out["出貨入數"] = pd.to_numeric(out["出貨入數"], errors="coerce").replace(0, pd.NA)
     out["計量單位"] = pd.to_numeric(out["計量單位"], errors="coerce")
+    out["計量單位數量"] = pd.to_numeric(out["計量單位數量"], errors="coerce").fillna(0)
 
-    # 原始配庫存出貨單位量
-    out["原始配庫存出貨單位量"] = (out["原始配庫存量"] / out["出貨入數"]).fillna(0)
+    # 分類欄位（方便你檢核）
+    def _type(u):
+        if pd.isna(u):
+            return ""
+        if int(u) == 2:
+            return "成箱"
+        if int(u) in (3, 6):
+            return "零散"
+        return ""
 
-    # === 你原本的邏輯 ===
-    mask1 = (out["原始配庫存出貨單位量"] == 1) & (out["計量單位"] == 2)
-    total1 = out.loc[mask1, "原始配庫存量"].sum()
+    out["應出類型"] = out["計量單位"].apply(_type)
 
-    mask2 = (out["原始配庫存出貨單位量"] != 1) & (out["計量單位"] == 2)
-    total2 = out.loc[mask2, "原始配庫存出貨單位量"].sum()
-
-    mask3 = out["計量單位"].isin([3, 6])
-    total3 = out.loc[mask3, "原始配庫存出貨單位量"].sum()
-
-    成箱 = total1 + total2
-    零散 = total3
+    成箱 = out.loc[out["計量單位"] == 2, "計量單位數量"].sum()
+    零散 = out.loc[out["計量單位"].isin([3, 6]), "計量單位數量"].sum()
 
     儲位數 = out["儲位"].nunique() if "儲位" in out.columns else None
     品項數 = out["商品"].nunique() if "商品" in out.columns else None
@@ -165,10 +173,8 @@ def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file
         summary_df.to_excel(writer, index=False, sheet_name="彙總")
         combined_df.to_excel(writer, index=False, sheet_name="明細_合併")
 
-        # 每個檔案各一張（避免爆 31 字）
         for name, df in per_file_dfs:
             safe = Path(name).stem[:31]
-            # 若重複 sheet name，補尾碼
             base = safe
             i = 1
             while safe in writer.book.sheetnames:
@@ -186,7 +192,7 @@ def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file
 set_page(
     "庫存訂單應出量分析",
     icon="📦",
-    subtitle="支援多檔上傳｜計算零散/成箱應出｜輸出合併明細 + 彙總",
+    subtitle="支援多檔上傳｜成箱(計量單位=2)／零散(計量單位=3,6)｜數量採計量單位數量",
 )
 
 card_open("📌 上傳明細檔（可多檔）")
@@ -204,13 +210,11 @@ if not uploaded_files:
 items = []
 errors = []
 
-# 逐檔讀取 + 計算
 for i, uf in enumerate(uploaded_files, start=1):
     try:
         df, read_note = _load_dataframe(uf, key_prefix=f"f{i}")
         res = _compute(df)
 
-        # 加來源檔欄位（合併時好追）
         df_out = res["df"].copy()
         df_out.insert(0, "來源檔名", uf.name)
         res["df"] = df_out
@@ -227,19 +231,15 @@ for i, uf in enumerate(uploaded_files, start=1):
     except Exception as e:
         errors.append((uf.name, str(e)))
 
-# 顯示錯誤（不中斷，能算的先算）
 if errors:
     with st.expander("⚠️ 部分檔案讀取/計算失敗（點開查看）", expanded=True):
         for fn, msg in errors:
             st.error(f"{fn}：{msg}")
 
 if not items:
-    st.error("沒有任何檔案可成功計算，請確認欄位是否包含：原始配庫存量、出貨入數、計量單位。")
+    st.error("沒有任何檔案可成功計算，請確認欄位是否包含：計量單位、計量單位數量。")
     st.stop()
 
-# ----------------------------
-# 彙總指標（全部檔案）
-# ----------------------------
 combined_df = pd.concat([it["res"]["df"] for it in items], ignore_index=True)
 
 total_loose = sum(it["res"]["零散應出"] for it in items)
@@ -269,9 +269,6 @@ with right:
     else:
         st.metric("品項數", _fmt_int(combined_items))
 
-# ----------------------------
-# 每檔彙總表
-# ----------------------------
 summary_rows = []
 for it in items:
     r = it["res"]
@@ -293,15 +290,11 @@ card_open("📊 多檔彙總")
 st.dataframe(summary_df, use_container_width=True, height=260)
 card_close()
 
-# ----------------------------
-# 明細預覽 + 下載
-# ----------------------------
 preferred = [
     "來源檔名",
-    "原始配庫存量",
-    "出貨入數",
     "計量單位",
-    "原始配庫存出貨單位量",
+    "應出類型",
+    "計量單位數量",
     "儲位",
     "商品",
 ]
@@ -316,7 +309,6 @@ st.dataframe(
 )
 card_close()
 
-# 分頁：每檔明細（方便你檢核）
 with st.expander("🔎 各檔明細預覽（點開）", expanded=False):
     tabs = st.tabs([f"{i+1}. {it['name']}" for i, it in enumerate(items)])
     for tab, it in zip(tabs, items):
@@ -327,7 +319,6 @@ with st.expander("🔎 各檔明細預覽（點開）", expanded=False):
             st.caption(f"讀取方式：{it['read_note']}｜{it['rows']:,} 筆 / {it['cols']:,} 欄")
             st.dataframe(dfp[ordered2].head(300), use_container_width=True, height=380)
 
-# 下載：彙總 + 合併 + 每檔一張
 xlsx_bytes = _download_xlsx(
     summary_df=summary_df,
     combined_df=combined_df[ordered],
