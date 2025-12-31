@@ -124,6 +124,7 @@ def _compute(df: pd.DataFrame) -> dict:
     ✅最終邏輯（依你要求）：
     - 計量單位=2 → 成箱：加總欄位「數量」
     - 計量單位=3、6 → 零散：加總欄位「計量單位數量」
+    - 品項數：不重複的「商品」（會自動 trim，排除空白）
     - 出貨入數：排除（存在就刪）
     """
     need_cols = ["計量單位", "數量", "計量單位數量"]
@@ -162,7 +163,14 @@ def _compute(df: pd.DataFrame) -> dict:
     零散 = out.loc[out["計量單位"].isin([3, 6]), "計量單位數量"].sum()
 
     儲位數 = out["儲位"].nunique() if "儲位" in out.columns else None
-    品項數 = out["商品"].nunique() if "商品" in out.columns else None
+
+    # ✅ 品項數 = 不重複 商品（trim + 排除空白）
+    if "商品" in out.columns:
+        prod = out["商品"].astype(str).str.strip()
+        prod = prod.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "NULL": pd.NA, "NaN": pd.NA})
+        品項數 = prod.dropna().nunique()
+    else:
+        品項數 = None
 
     return {
         "df": out,
@@ -199,7 +207,7 @@ def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file
 set_page(
     "庫存訂單應出量分析",
     icon="📦",
-    subtitle="支援多檔上傳｜成箱(計量單位=2)加總『數量』｜零散(計量單位=3,6)加總『計量單位數量』｜可一鍵🧹清除重做下一份",
+    subtitle="支援多檔上傳｜成箱(計量單位=2)加總『數量』｜零散(計量單位=3,6)加總『計量單位數量』｜品項數=不重複『商品』｜可🧹清除",
 )
 
 # ✅ uploader 清除機制：改 key 讓 uploader 重建
@@ -208,7 +216,7 @@ if "uploader_key_11" not in st.session_state:
 
 card_open("📌 上傳明細檔（可多檔）")
 
-u1, u2 = st.columns([1, 0.05], gap="small")  # ✅ 清除欄更小
+u1, u2 = st.columns([1, 0.08], gap="small")
 with u1:
     uploaded_files = st.file_uploader(
         "請上傳明細檔（Excel / CSV / HTML，可一次多個）",
@@ -218,7 +226,6 @@ with u1:
     )
 with u2:
     st.markdown(" ")
-    # ✅ 只顯示 🧹（加 tooltip）
     if st.button("🧹", help="清除已上傳檔案", use_container_width=True):
         st.session_state["uploader_key_11"] += 1
         st.rerun()
@@ -272,7 +279,14 @@ total_loose = sum(it["res"]["零散應出"] for it in items)  # 零散：計量�
 total_box = sum(it["res"]["成箱應出"] for it in items)    # 成箱：數量
 
 combined_slots = combined_df["儲位"].nunique() if "儲位" in combined_df.columns else None
-combined_items = combined_df["商品"].nunique() if "商品" in combined_df.columns else None
+
+# ✅ 合併品項數 = 不重複 商品（trim + 排除空白）
+if "商品" in combined_df.columns:
+    prod_all = combined_df["商品"].astype(str).str.strip()
+    prod_all = prod_all.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "NULL": pd.NA, "NaN": pd.NA})
+    combined_items = prod_all.dropna().nunique()
+else:
+    combined_items = None
 
 left, right = st.columns([1, 1], gap="large")
 
@@ -308,7 +322,7 @@ for it in items:
             "零散應出": r["零散應出"],  # ✅ 計量單位=3,6 → 計量單位數量
             "成箱應出": r["成箱應出"],  # ✅ 計量單位=2   → 數量
             "儲位數": r["儲位數"] if r["儲位數"] is not None else "",
-            "品項數": r["品項數"] if r["品項數"] is not None else "",
+            "品項數": r["品項數"] if r["品項數"] is not None else "",  # ✅ 不重複 商品
         }
     )
 summary_df = pd.DataFrame(summary_rows)
