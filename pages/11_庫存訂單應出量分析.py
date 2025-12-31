@@ -71,6 +71,23 @@ def _excel_engines_for_ext(ext: str):
     return []
 
 
+def _resolve_col(df: pd.DataFrame, want: str) -> str | None:
+    """
+    欄位名稱容錯：支援前後空白差異（例如「商品 」）
+    - 先找完全相同
+    - 再找 strip 後相同
+    """
+    if want in df.columns:
+        return want
+    w = want.strip()
+    if w in df.columns:
+        return w
+    for c in df.columns:
+        if isinstance(c, str) and c.strip() == w:
+            return c
+    return None
+
+
 def _load_dataframe(uploaded_file, key_prefix: str = "") -> tuple[pd.DataFrame, str]:
     """
     回傳 (df, 讀取方式描述)
@@ -100,7 +117,6 @@ def _load_dataframe(uploaded_file, key_prefix: str = "") -> tuple[pd.DataFrame, 
             sheet_names = xf.sheet_names
             sheet = sheet_names[0] if sheet_names else 0
 
-            # 多張 sheet -> 讓使用者選
             if len(sheet_names) > 1:
                 chosen = st.selectbox(
                     f"選擇工作表：{name}",
@@ -124,24 +140,27 @@ def _compute(df: pd.DataFrame) -> dict:
     ✅最終邏輯（依你要求）：
     - 計量單位=2 → 成箱：加總欄位「數量」
     - 計量單位=3、6 → 零散：加總欄位「計量單位數量」
-    - 品項數：不重複的「商品」（會自動 trim，排除空白）
+    - 品項數：不重複的「商品 」(含尾端空白的欄位名)，若不存在才退回商品
     - 出貨入數：排除（存在就刪）
     """
-    need_cols = ["計量單位", "數量", "計量單位數量"]
-    missing = [c for c in need_cols if c not in df.columns]
-    if missing:
+    unit_col = _resolve_col(df, "計量單位")
+    qty_col = _resolve_col(df, "數量")
+    unitqty_col = _resolve_col(df, "計量單位數量")
+    if not unit_col or not qty_col or not unitqty_col:
+        missing = [n for n, c in [("計量單位", unit_col), ("數量", qty_col), ("計量單位數量", unitqty_col)] if c is None]
         raise KeyError(f"缺少必要欄位：{missing}")
 
     out = df.copy()
 
-    # 排除「出貨入數」
-    if "出貨入數" in out.columns:
-        out = out.drop(columns=["出貨入數"])
+    # 排除「出貨入數」（容錯空白）
+    ship_in_col = _resolve_col(out, "出貨入數")
+    if ship_in_col in out.columns:
+        out = out.drop(columns=[ship_in_col])
 
     # 型別處理
-    out["計量單位"] = pd.to_numeric(out["計量單位"], errors="coerce")
-    out["數量"] = pd.to_numeric(out["數量"], errors="coerce").fillna(0)
-    out["計量單位數量"] = pd.to_numeric(out["計量單位數量"], errors="coerce").fillna(0)
+    out[unit_col] = pd.to_numeric(out[unit_col], errors="coerce")
+    out[qty_col] = pd.to_numeric(out[qty_col], errors="coerce").fillna(0)
+    out[unitqty_col] = pd.to_numeric(out[unitqty_col], errors="coerce").fillna(0)
 
     # 分類欄位（方便檢核）
     def _type(u):
@@ -157,16 +176,21 @@ def _compute(df: pd.DataFrame) -> dict:
             return "零散"
         return ""
 
-    out["應出類型"] = out["計量單位"].apply(_type)
+    out["應出類型"] = out[unit_col].apply(_type)
 
-    成箱 = out.loc[out["計量單位"] == 2, "數量"].sum()
-    零散 = out.loc[out["計量單位"].isin([3, 6]), "計量單位數量"].sum()
+    成箱 = out.loc[out[unit_col] == 2, qty_col].sum()
+    零散 = out.loc[out[unit_col].isin([3, 6]), unitqty_col].sum()
 
-    儲位數 = out["儲位"].nunique() if "儲位" in out.columns else None
+    slot_col = _resolve_col(out, "儲位")
+    儲位數 = out[slot_col].nunique() if slot_col else None
 
-    # ✅ 品項數 = 不重複 商品（trim + 排除空白）
-    if "商品" in out.columns:
-        prod = out["商品"].astype(str).str.strip()
+    # ✅ 品項數 = 不重複「商品 」(優先)
+    prod_col = _resolve_col(out, "商品 ")
+    if not prod_col:
+        prod_col = _resolve_col(out, "商品")
+
+    if prod_col:
+        prod = out[prod_col].astype(str).str.strip()
         prod = prod.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "NULL": pd.NA, "NaN": pd.NA})
         品項數 = prod.dropna().nunique()
     else:
@@ -187,7 +211,6 @@ def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file
         summary_df.to_excel(writer, index=False, sheet_name="彙總")
         combined_df.to_excel(writer, index=False, sheet_name="明細_合併")
 
-        # 每檔一張
         for name, df in per_file_dfs:
             safe = Path(name).stem[:31]
             base = safe
@@ -207,10 +230,10 @@ def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file
 set_page(
     "庫存訂單應出量分析",
     icon="📦",
-    subtitle="支援多檔上傳｜成箱(計量單位=2)加總『數量』｜零散(計量單位=3,6)加總『計量單位數量』｜品項數=不重複『商品』｜可🧹清除",
+    subtitle="支援多檔上傳｜成箱(計量單位=2)加總『數量』｜零散(計量單位=3,6)加總『計量單位數量』｜品項數=不重複『商品 』｜可🧹清除",
 )
 
-# ✅ uploader 清除機制：改 key 讓 uploader 重建
+# uploader 清除機制
 if "uploader_key_11" not in st.session_state:
     st.session_state["uploader_key_11"] = 0
 
@@ -239,7 +262,6 @@ if not uploaded_files:
 items = []
 errors = []
 
-# 逐檔讀取 + 計算
 for i, uf in enumerate(uploaded_files, start=1):
     try:
         df, read_note = _load_dataframe(uf, key_prefix=f"f{i}")
@@ -261,7 +283,6 @@ for i, uf in enumerate(uploaded_files, start=1):
     except Exception as e:
         errors.append((uf.name, str(e)))
 
-# 顯示錯誤（不中斷）
 if errors:
     with st.expander("⚠️ 部分檔案讀取/計算失敗（點開查看）", expanded=True):
         for fn, msg in errors:
@@ -271,18 +292,21 @@ if not items:
     st.error("沒有任何檔案可成功計算，請確認欄位是否包含：計量單位、數量、計量單位數量。")
     st.stop()
 
-# 合併明細
 combined_df = pd.concat([it["res"]["df"] for it in items], ignore_index=True)
 
-# 彙總指標（全部檔案）
-total_loose = sum(it["res"]["零散應出"] for it in items)  # 零散：計量單位數量
-total_box = sum(it["res"]["成箱應出"] for it in items)    # 成箱：數量
+total_loose = sum(it["res"]["零散應出"] for it in items)
+total_box = sum(it["res"]["成箱應出"] for it in items)
 
-combined_slots = combined_df["儲位"].nunique() if "儲位" in combined_df.columns else None
+slot_col_all = _resolve_col(combined_df, "儲位")
+combined_slots = combined_df[slot_col_all].nunique() if slot_col_all else None
 
-# ✅ 合併品項數 = 不重複 商品（trim + 排除空白）
-if "商品" in combined_df.columns:
-    prod_all = combined_df["商品"].astype(str).str.strip()
+# ✅ 合併品項數：不重複「商品 」(優先)
+prod_col_all = _resolve_col(combined_df, "商品 ")
+if not prod_col_all:
+    prod_col_all = _resolve_col(combined_df, "商品")
+
+if prod_col_all:
+    prod_all = combined_df[prod_col_all].astype(str).str.strip()
     prod_all = prod_all.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "NULL": pd.NA, "NaN": pd.NA})
     combined_items = prod_all.dropna().nunique()
 else:
@@ -305,11 +329,10 @@ with right:
 
     if combined_items is None:
         st.metric("品項數", "—")
-        st.caption("（所有檔案都未提供「商品」欄位）")
+        st.caption("（所有檔案都未提供「商品 」欄位）")
     else:
         st.metric("品項數", _fmt_int(combined_items))
 
-# 每檔彙總表
 summary_rows = []
 for it in items:
     r = it["res"]
@@ -319,10 +342,10 @@ for it in items:
             "讀取方式": it["read_note"],
             "筆數": it["rows"],
             "欄數": it["cols"],
-            "零散應出": r["零散應出"],  # ✅ 計量單位=3,6 → 計量單位數量
-            "成箱應出": r["成箱應出"],  # ✅ 計量單位=2   → 數量
+            "零散應出": r["零散應出"],
+            "成箱應出": r["成箱應出"],
             "儲位數": r["儲位數"] if r["儲位數"] is not None else "",
-            "品項數": r["品項數"] if r["品項數"] is not None else "",  # ✅ 不重複 商品
+            "品項數": r["品項數"] if r["品項數"] is not None else "",
         }
     )
 summary_df = pd.DataFrame(summary_rows)
@@ -331,7 +354,7 @@ card_open("📊 多檔彙總")
 st.dataframe(summary_df, use_container_width=True, height=260)
 card_close()
 
-# 明細預覽 + 下載
+# 明細預覽 + 下載（同時兼容 商品 / 商品 ）
 preferred = [
     "來源檔名",
     "計量單位",
@@ -339,6 +362,7 @@ preferred = [
     "數量",
     "計量單位數量",
     "儲位",
+    "商品 ",
     "商品",
 ]
 cols = list(combined_df.columns)
