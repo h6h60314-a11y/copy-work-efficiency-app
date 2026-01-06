@@ -19,7 +19,7 @@ from common_ui import (
 )
 
 # =========================================================
-# 參數（沿用你 v8.9）
+# 參數
 # =========================================================
 TO_EXCLUDE_KEYWORDS = ["CGS", "JCPL", "QC99", "GREAT0001X", "GX010", "PD99"]
 TO_EXCLUDE_PATTERN = re.compile("|".join(re.escape(k) for k in TO_EXCLUDE_KEYWORDS), flags=re.IGNORECASE)
@@ -144,6 +144,9 @@ def break_minutes_for_span(first_dt: pd.Timestamp, last_dt: pd.Timestamp) -> Tup
     return 0, "未命中規則"
 
 
+# =========================================================
+# ✅ 排除區間切段 + 「工時」扣除排除時段（關鍵）
+# =========================================================
 def _subtract_exclusions(s_dt: pd.Timestamp, e_dt: pd.Timestamp, exclude_ranges):
     if s_dt >= e_dt or not exclude_ranges:
         return [(s_dt, e_dt)]
@@ -162,6 +165,19 @@ def _subtract_exclusions(s_dt: pd.Timestamp, e_dt: pd.Timestamp, exclude_ranges)
                     new_segments.append((ex_e, b))
         segments = [(x, y) for (x, y) in new_segments if x < y]
     return segments
+
+
+def _work_minutes_excluding_windows(
+    first_dt: pd.Timestamp,
+    last_dt: pd.Timestamp,
+    exclude_ranges: List[Tuple[dt.time, dt.time]],
+) -> int:
+    """first~last 扣掉排除時段後的工作分鐘（✅ 讓效率/圖表跟著更新）"""
+    if pd.isna(first_dt) or pd.isna(last_dt) or first_dt >= last_dt:
+        return 0
+    segs = _subtract_exclusions(first_dt, last_dt, exclude_ranges or [])
+    mins = sum((b - a).total_seconds() for a, b in segs) / 60.0
+    return max(int(round(mins)), 0)
 
 
 def _compute_idle(
@@ -183,7 +199,7 @@ def _compute_idle(
             prev = cur
             continue
 
-        # ✅ 這裡才是真正排除空窗區段
+        # ✅ 空窗分鐘：gap 裡面扣掉「排除空窗時段」
         for a, b in _subtract_exclusions(prev, cur, exclude_ranges or []):
             gap_min = int(round((b - a).total_seconds() / 60.0))
             if gap_min >= int(min_minutes):
@@ -212,40 +228,38 @@ def compute_am_pm_for_group(
     idle_threshold_min: int,
     exclude_idle_ranges: List[Tuple[dt.time, dt.time]],
 ) -> pd.Series:
-    times = pd.to_datetime(g["__dt__"], errors="coerce")
+    times = pd.to_datetime(g["__dt__"], errors="coerce").dropna()
 
-    # 上午：07:00–12:30（不扣休）
+    # 上午：07:00–12:30（✅ 工時也扣排除時段；上午不扣休）
     t_am = times[times.dt.time.between(AM_START, AM_END)]
     am_first, am_last, am_cnt = _span_metrics(t_am)
-    am_mins = int(round(((am_last - am_first).total_seconds() / 60.0))) if am_cnt > 0 else 0
+    am_mins = _work_minutes_excluding_windows(am_first, am_last, exclude_idle_ranges) if am_cnt > 0 else 0
     am_eff = _eff(am_cnt, am_mins)
     am_idle_min, am_idle_ranges = _compute_idle(
         t_am, min_minutes=int(idle_threshold_min), exclude_ranges=exclude_idle_ranges
     )
 
-    # 下午：13:30–23:59:59（依規則扣休算工時；空窗不再扣休）
+    # 下午：13:30–23:59:59（✅ 先扣排除時段，再依規則扣休）
     t_pm = times[times.dt.time.between(PM_START, PM_END)]
     pm_first, pm_last, pm_cnt = _span_metrics(t_pm)
     if pm_cnt > 0:
         pm_break, pm_rule = break_minutes_for_span(pm_first, pm_last)
-        raw_pm_mins = (pm_last - pm_first).total_seconds() / 60.0
-        pm_mins = max(int(round(raw_pm_mins - pm_break)), 0)
+        raw_pm_mins = _work_minutes_excluding_windows(pm_first, pm_last, exclude_idle_ranges)
+        pm_mins = max(int(raw_pm_mins - pm_break), 0)
     else:
         pm_break, pm_rule, pm_mins = 0, "無時間資料", 0
+        pm_first, pm_last = pd.NaT, pd.NaT
     pm_eff = _eff(pm_cnt, pm_mins)
     pm_idle_min, pm_idle_ranges = _compute_idle(
         t_pm, min_minutes=int(idle_threshold_min), exclude_ranges=exclude_idle_ranges
     )
 
-    # 整體：依規則扣休算效率（空窗不統計於整體）
+    # 整體：✅ 改成「上午工時 + 下午工時」（避免跨段空檔被算進去）
     whole_first, whole_last, day_cnt = _span_metrics(times)
-    if day_cnt > 0:
-        whole_break, br_tag_whole = break_minutes_for_span(whole_first, whole_last)
-        raw_whole_mins = (whole_last - whole_first).total_seconds() / 60.0
-        whole_mins = max(int(round(raw_whole_mins - whole_break)), 0)
-    else:
-        whole_break, br_tag_whole, whole_mins = 0, "無時間資料", 0
-    whole_eff = _eff(day_cnt, whole_mins)
+    whole_mins = int(am_mins) + int(pm_mins)
+    whole_break = int(pm_break) if pm_cnt > 0 else 0
+    br_tag_whole = f"整體=上午+下午；下午規則：{pm_rule}" if pm_cnt > 0 else "整體=上午+下午；無下午資料"
+    whole_eff = _eff(int(day_cnt), int(whole_mins))
 
     return pd.Series({
         "第一筆時間": whole_first, "最後一筆時間": whole_last, "當日筆數": int(day_cnt),
@@ -297,14 +311,12 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
     if val is None:
         return EXCLUDE_IDLE_RANGES_DEFAULT
 
-    # dict 包一層
     if isinstance(val, dict):
         for k in ("exclude_windows", "exclude_windows_times", "windows", "ranges", "exclude_ranges"):
             if k in val:
                 return _parse_exclude_windows(val.get(k))
         return EXCLUDE_IDLE_RANGES_DEFAULT
 
-    # 字串：允許逗號/分號分隔
     if isinstance(val, str):
         raw = val.strip()
         if not raw:
@@ -315,13 +327,11 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
             p = p.strip()
             if not p:
                 continue
-            # 10:00-10:15 or 10:00~10:15
             m = re.match(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-~～]\s*(\d{1,2}:\d{2}(?::\d{2})?)$", p)
             if m:
                 items.append((m.group(1), m.group(2)))
         return _parse_exclude_windows(items) if items else EXCLUDE_IDLE_RANGES_DEFAULT
 
-    # list/tuple
     if not isinstance(val, (list, tuple)):
         return EXCLUDE_IDLE_RANGES_DEFAULT
 
@@ -343,11 +353,8 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
 
 
 def _extract_exclude_value_from_controls(controls: Dict[str, Any]) -> Any:
-    """盡量從 controls 裡抓到「排除空窗時段」的原始值（避免 key 變動）"""
     if not isinstance(controls, dict) or not controls:
         return None
-
-    # 1) 先試常見 key
     for k in (
         "exclude_windows",
         "exclude_windows_times",
@@ -358,13 +365,10 @@ def _extract_exclude_value_from_controls(controls: Dict[str, Any]) -> Any:
     ):
         if k in controls and controls.get(k):
             return controls.get(k)
-
-    # 2) 再用模糊比對（含 prefix 的情況）
     for k, v in controls.items():
         lk = str(k).lower()
         if ("exclude" in lk) and (("window" in lk) or ("range" in lk)) and v:
             return v
-
     return None
 
 
@@ -408,10 +412,6 @@ def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFC
 
 
 def write_block_report(writer, detail_long: pd.DataFrame, user_col: str, target_eff: float):
-    """
-    報表_區塊：依日期分成 上午/下午兩塊
-    ★ 已移除「命中規則」欄位（沿用 v8.9）
-    """
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
 
@@ -570,7 +570,7 @@ def build_excel_bytes(
 
 
 # =========================================================
-# Streamlit Page（✅ 匯出時 KPI 保留：session_state）
+# Streamlit Page
 # =========================================================
 def main():
     inject_logistics_theme()
@@ -579,11 +579,9 @@ def main():
     if "putaway_last" not in st.session_state:
         st.session_state.putaway_last = None
 
-    # Sidebar：統一條件（排除區間手動輸入 HH:MM）
     controls = sidebar_controls(default_top_n=30, enable_exclude_windows=True, state_key_prefix="putaway")
     top_n = int(controls.get("top_n", 30))
 
-    # ✅ 從 controls 抓「排除空窗時段」並解析成 [(time,time),...]
     exclude_raw = _extract_exclude_value_from_controls(controls)
     exclude_idle_ranges = _parse_exclude_windows(exclude_raw)
 
@@ -592,13 +590,11 @@ def main():
         target_eff = st.number_input("達標門檻（效率 ≥）", min_value=1, max_value=999, value=int(TARGET_EFF_DEFAULT), step=1)
         idle_threshold = st.number_input("空窗門檻（分鐘 ≥ 才算）", min_value=1, max_value=240, value=int(IDLE_MIN_THRESHOLD_DEFAULT), step=1)
 
-        # ✅ 讓你一眼確認「目前排除時段是否真的被讀到」
         preview = "、".join([f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in exclude_idle_ranges]) if exclude_idle_ranges else "（無）"
         st.caption(f"✅ 已讀取排除空窗時段：{preview}")
         st.caption("⚠️ 若你改了排除時段/門檻，需再按一次「🚀 產出 KPI」才會重新計算。")
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
-    # 上傳
     card_open("📤 上傳作業原始資料（上架）")
     uploaded = st.file_uploader(
         "上傳 Excel / CSV（需包含：由、到、修訂日期/時間、記錄輸入人）",
@@ -608,7 +604,6 @@ def main():
     run_clicked = st.button("🚀 產出 KPI", type="primary", disabled=uploaded is None)
     card_close()
 
-    # ✅ 若條件變更但未重跑：提醒（避免「以為沒有落實排除」）
     last = st.session_state.putaway_last
     current_params = {
         "target_eff": int(target_eff),
@@ -619,7 +614,6 @@ def main():
     if last and last.get("params") and last.get("params") != current_params:
         st.warning("⚠️ 你已變更側邊欄條件（含排除空窗時段/門檻），請再按一次「🚀 產出 KPI」才會套用新條件。")
 
-    # ✅ 計算：只在按下「產出 KPI」時跑一次，並存到 session_state
     if run_clicked:
         with st.spinner("計算中，請稍候..."):
             sheets = read_excel_any_quiet_bytes(uploaded.name, uploaded.getvalue())
@@ -676,7 +670,6 @@ def main():
                 .agg(
                     総日數=("日期", "nunique"),
                     總筆數=("當日筆數", "sum"),
-                    總工時_分鐘_扣休=("當日工時_分鐘_扣休", "sum"),
                     上午筆數=("上午_筆數", "sum"),
                     上午工時_分鐘=("上午_工時_分鐘", "sum"),
                     下午筆數=("下午_筆數", "sum"),
@@ -686,6 +679,8 @@ def main():
 
             summary["上午效率_件每小時"] = summary.apply(lambda r: _eff(int(r["上午筆數"]), int(r["上午工時_分鐘"])), axis=1)
             summary["下午效率_件每小時"] = summary.apply(lambda r: _eff(int(r["下午筆數"]), int(r["下午工時_分鐘_扣休"])), axis=1)
+
+            # ✅ 總工時採「上午+下午」：跟整體（day）一致，避免跨段空檔影響
             summary["總工時_分鐘_扣休"] = summary["上午工時_分鐘"].fillna(0).astype(int) + summary["下午工時_分鐘_扣休"].fillna(0).astype(int)
             summary["效率_件每小時"] = summary.apply(lambda r: _eff(int(r["總筆數"]), int(r["總工時_分鐘_扣休"])), axis=1)
 
@@ -712,7 +707,6 @@ def main():
             }
             summary_out = pd.concat([summary, pd.DataFrame([total_row])], ignore_index=True)
 
-            # 明細_時段（長表）
             long_rows = []
             for _, r in daily.iterrows():
                 if int(r["上午_筆數"]) > 0:
@@ -743,7 +737,7 @@ def main():
             xlsx_name = f"{uploaded.name.rsplit('.', 1)[0]}_上架績效.xlsx"
 
             st.session_state.putaway_last = {
-                "params": current_params,  # ✅ 記錄本次用的條件（含排除時段）
+                "params": current_params,
                 "user_col": user_col,
                 "summary": summary,
                 "summary_out": summary_out,
@@ -758,9 +752,6 @@ def main():
                 "xlsx_name": xlsx_name,
             }
 
-    # ======================
-    # 顯示：一律從 session_state 取（✅ 按匯出不會消失）
-    # ======================
     last = st.session_state.putaway_last
     if not last:
         st.info("請先上傳上架作業原始資料並點選「🚀 產出 KPI」")
@@ -769,14 +760,13 @@ def main():
     user_col = last["user_col"]
     summary = last["summary"]
     target_eff_show = float(last["target_eff"])
-    top_n_show = int(top_n)
+    top_n_show = int(last.get("top_n", 30))
     total_people = int(last["total_people"])
     met_people = int(last["met_people"])
     rate = float(last["rate"])
     xlsx_bytes = last["xlsx_bytes"]
     xlsx_name = last["xlsx_name"]
 
-    # KPI 顯示
     card_open("📌 總覽 KPI")
     render_kpis([
         KPI("總人數", f"{total_people:,}"),
@@ -786,7 +776,6 @@ def main():
     ])
     card_close()
 
-    # AM/PM 排行
     col_l, col_r = st.columns(2)
 
     with col_l:
@@ -819,7 +808,6 @@ def main():
         )
         card_close()
 
-    # ✅ 匯出：一行=按鈕；按下去 KPI 仍保留
     download_excel_card(
         xlsx_bytes,
         xlsx_name,
