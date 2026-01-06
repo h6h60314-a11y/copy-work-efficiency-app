@@ -1,7 +1,7 @@
 import io
 import re
 import datetime as dt
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 
 import pandas as pd
 import streamlit as st
@@ -14,7 +14,7 @@ from common_ui import (
     bar_topN,
     card_open,
     card_close,
-    download_excel_card,   # ✅ 改用：一行=按鈕（且外框不分段）
+    download_excel_card,   # ✅ 一行=按鈕（且外框不分段）
     sidebar_controls,
 )
 
@@ -28,7 +28,7 @@ INPUT_USER_CANDIDATES = ["記錄輸入人", "記錄輸入者", "建立人", "輸
 REV_DT_CANDIDATES = ["修訂日期", "修訂時間", "修訂日", "異動時間", "修改時間"]
 
 TARGET_EFF_DEFAULT = 20
-IDLE_MIN_THRESHOLD = 10
+IDLE_MIN_THRESHOLD_DEFAULT = 10
 
 AM_START, AM_END = dt.time(7, 0, 0), dt.time(12, 30, 0)
 PM_START, PM_END = dt.time(13, 30, 0), dt.time(23, 59, 59)
@@ -66,14 +66,14 @@ BREAK_RULES = [
     (dt.time( 8,  0, 0), dt.time(23,  0, 0), 135,"首≥08:00 且 末≤23:00 → 135 分鐘"),
 ]
 
-EXCLUDE_IDLE_RANGES = [
+# ✅ 預設排除空窗時段（可被 sidebar 覆蓋）
+EXCLUDE_IDLE_RANGES_DEFAULT = [
     (dt.time(10,  0, 0), dt.time(10, 15, 0)),
     (dt.time(12, 30, 0), dt.time(13, 30, 0)),
     (dt.time(15, 30, 0), dt.time(15, 45, 0)),
     (dt.time(18,  0, 0), dt.time(18, 30, 0)),
     (dt.time(20, 30, 0), dt.time(20, 45, 0)),
 ]
-
 
 # =========================================================
 # 讀檔（bytes）
@@ -164,7 +164,11 @@ def _subtract_exclusions(s_dt: pd.Timestamp, e_dt: pd.Timestamp, exclude_ranges)
     return segments
 
 
-def _compute_idle(series_dt: pd.Series, min_minutes=IDLE_MIN_THRESHOLD, exclude_ranges=EXCLUDE_IDLE_RANGES) -> Tuple[int, str]:
+def _compute_idle(
+    series_dt: pd.Series,
+    min_minutes: int,
+    exclude_ranges: List[Tuple[dt.time, dt.time]],
+) -> Tuple[int, str]:
     if series_dt.size < 2:
         return 0, ""
     s = series_dt.sort_values()
@@ -176,7 +180,7 @@ def _compute_idle(series_dt: pd.Series, min_minutes=IDLE_MIN_THRESHOLD, exclude_
             continue
         for a, b in _subtract_exclusions(prev, cur, exclude_ranges or []):
             gap_min = int(round((b - a).total_seconds() / 60.0))
-            if gap_min >= min_minutes:
+            if gap_min >= int(min_minutes):
                 total_min += gap_min
                 ranges_txt.append(f"{a.time()} ~ {b.time()}")
         prev = cur
@@ -193,7 +197,11 @@ def _eff(n: int, m_minutes: int) -> float:
     return round((n / m_minutes * 60.0), 2) if m_minutes and m_minutes > 0 else 0.0
 
 
-def compute_am_pm_for_group(g: pd.DataFrame) -> pd.Series:
+def compute_am_pm_for_group(
+    g: pd.DataFrame,
+    idle_threshold_min: int,
+    exclude_idle_ranges: List[Tuple[dt.time, dt.time]],
+) -> pd.Series:
     times = g["__dt__"]
 
     # 上午：07:00–12:30（不扣休）
@@ -201,7 +209,9 @@ def compute_am_pm_for_group(g: pd.DataFrame) -> pd.Series:
     am_first, am_last, am_cnt = _span_metrics(t_am)
     am_mins = int(round(((am_last - am_first).total_seconds() / 60.0))) if am_cnt > 0 else 0
     am_eff = _eff(am_cnt, am_mins)
-    am_idle_min, am_idle_ranges = _compute_idle(t_am)
+    am_idle_min, am_idle_ranges = _compute_idle(
+        t_am, min_minutes=int(idle_threshold_min), exclude_ranges=exclude_idle_ranges
+    )
 
     # 下午：13:30–23:59:59（依規則扣休算工時；空窗不再扣休）
     t_pm = times[times.dt.time.between(PM_START, PM_END)]
@@ -213,7 +223,9 @@ def compute_am_pm_for_group(g: pd.DataFrame) -> pd.Series:
     else:
         pm_break, pm_rule, pm_mins = 0, "無時間資料", 0
     pm_eff = _eff(pm_cnt, pm_mins)
-    pm_idle_min, pm_idle_ranges = _compute_idle(t_pm)
+    pm_idle_min, pm_idle_ranges = _compute_idle(
+        t_pm, min_minutes=int(idle_threshold_min), exclude_ranges=exclude_idle_ranges
+    )
 
     # 整體：依規則扣休算效率（空窗不統計於整體）
     whole_first, whole_last, day_cnt = _span_metrics(times)
@@ -239,6 +251,66 @@ def compute_am_pm_for_group(g: pd.DataFrame) -> pd.Series:
         "下午_工時_分鐘_扣休": int(pm_mins), "下午_效率_件每小時": pm_eff,
         "下午_空窗分鐘_扣休": int(pm_idle_min), "下午_空窗時段": pm_idle_ranges,
     })
+
+
+# =========================================================
+# sidebar_controls 排除區間解析（避免 common_ui 回傳格式不同造成失效）
+# =========================================================
+def _parse_time_any(x: Any) -> Optional[dt.time]:
+    if x is None:
+        return None
+    if isinstance(x, dt.time):
+        return x
+    s = str(x).strip()
+    if not s:
+        return None
+    m = re.match(r"^(\d{1,2}):(\d{2})(?::(\d{2}))?$", s)
+    if not m:
+        return None
+    hh = int(m.group(1))
+    mm = int(m.group(2))
+    ss = int(m.group(3) or 0)
+    if not (0 <= hh <= 23 and 0 <= mm <= 59 and 0 <= ss <= 59):
+        return None
+    return dt.time(hh, mm, ss)
+
+
+def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
+    """
+    支援：
+    - [(time,time), ...]
+    - [("10:00","10:15"), ...]
+    - [{"start":"10:00","end":"10:15"}, ...]
+    - {"windows":[...]} 之類包一層
+    """
+    if val is None:
+        return EXCLUDE_IDLE_RANGES_DEFAULT
+
+    if isinstance(val, dict):
+        # 常見：{"exclude_windows":[...]} 或 {"windows":[...]}
+        for k in ("exclude_windows", "exclude_windows_times", "windows", "ranges"):
+            if k in val:
+                return _parse_exclude_windows(val.get(k))
+        return EXCLUDE_IDLE_RANGES_DEFAULT
+
+    if not isinstance(val, (list, tuple)):
+        return EXCLUDE_IDLE_RANGES_DEFAULT
+
+    out: List[Tuple[dt.time, dt.time]] = []
+    for item in val:
+        if isinstance(item, dict):
+            s = _parse_time_any(item.get("start") or item.get("s") or item.get("from"))
+            e = _parse_time_any(item.get("end") or item.get("e") or item.get("to"))
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            s = _parse_time_any(item[0])
+            e = _parse_time_any(item[1])
+        else:
+            s, e = None, None
+
+        if s and e and (dt.datetime.combine(dt.date.today(), s) < dt.datetime.combine(dt.date.today(), e)):
+            out.append((s, e))
+
+    return out if out else EXCLUDE_IDLE_RANGES_DEFAULT
 
 
 # =========================================================
@@ -437,7 +509,10 @@ def build_excel_bytes(
                 "休息分鐘": int(mins),
                 "規則說明": str(tag),
             })
-        rules_df = pd.DataFrame(rules_rows, columns=["優先序", "首時間條件(>=)", "末時間條件(<=)", "休息分鐘", "規則說明"])
+        rules_df = pd.DataFrame(
+            rules_rows,
+            columns=["優先序", "首時間條件(>=)", "末時間條件(<=)", "休息分鐘", "規則說明"],
+        )
         rules_df.to_excel(writer, index=False, sheet_name="休息規則")
         autosize_columns(writer.sheets["休息規則"], rules_df)
 
@@ -457,11 +532,15 @@ def main():
 
     # Sidebar：統一條件（不含 Operator；排除區間手動輸入 HH:MM）
     controls = sidebar_controls(default_top_n=30, enable_exclude_windows=True, state_key_prefix="putaway")
-    top_n = int(controls["top_n"])
+    top_n = int(controls.get("top_n", 30))
+
+    # ✅ 解析 sidebar 的排除空窗時段（真正套用）
+    exclude_idle_ranges = _parse_exclude_windows(controls.get("exclude_windows") or controls.get("exclude_windows_times"))
 
     with st.sidebar:
         st.markdown("---")
         target_eff = st.number_input("達標門檻（效率 ≥）", min_value=1, max_value=999, value=int(TARGET_EFF_DEFAULT), step=1)
+        idle_threshold = st.number_input("空窗門檻（分鐘 ≥ 才算）", min_value=1, max_value=240, value=int(IDLE_MIN_THRESHOLD_DEFAULT), step=1)
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
     # 上傳
@@ -518,7 +597,7 @@ def main():
 
             daily = (
                 dt_data.groupby([user_col, "對應姓名", "日期"], dropna=False)
-                .apply(compute_am_pm_for_group)
+                .apply(lambda g: compute_am_pm_for_group(g, idle_threshold_min=int(idle_threshold), exclude_idle_ranges=exclude_idle_ranges))
                 .reset_index()
             )
 
@@ -593,7 +672,6 @@ def main():
             xlsx_bytes = build_excel_bytes(user_col, summary_out, daily, detail_long, target_eff=float(target_eff))
             xlsx_name = f"{uploaded.name.rsplit('.', 1)[0]}_上架績效.xlsx"
 
-            # ✅ 存進 session_state，避免按下載 rerun 後畫面消失
             st.session_state.putaway_last = {
                 "user_col": user_col,
                 "summary": summary,
@@ -620,7 +698,7 @@ def main():
     user_col = last["user_col"]
     summary = last["summary"]
     target_eff_show = float(last["target_eff"])
-    top_n_show = int(top_n)  # 排行顯示用「現在 sidebar 的 top_n」，更直覺
+    top_n_show = int(top_n)
     total_people = int(last["total_people"])
     met_people = int(last["met_people"])
     rate = float(last["rate"])
@@ -637,7 +715,7 @@ def main():
     ])
     card_close()
 
-    # AM/PM 排行（低於門檻自動紅色：由 common_ui.bar_topN 處理）
+    # AM/PM 排行
     col_l, col_r = st.columns(2)
 
     with col_l:
