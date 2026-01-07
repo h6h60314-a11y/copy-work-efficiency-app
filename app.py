@@ -195,6 +195,7 @@ df_qc_volume = page_if_exists("pages/20_進貨課 - 驗收量體.py", "進貨課
 df_putaway_volume = page_if_exists("pages/21_進貨課 - 上架量體.py", "進貨課 - 上架量體", "📦", url_path="df-putaway-volume")
 slot_page = page_if_exists("pages/4_儲位使用率.py", "儲位使用率", "🧊", url_path="inbound-slot-util")
 df_pick_volume = page_if_exists("pages/22_進貨課 - 總揀筆數.py", "進貨課 - 總揀筆數", "🎯", url_path="df-pick-volume")
+df_total_workhours = page_if_exists( "pages/25_整體作業工時.py","整體作業工時",  "🕒",url_path="df-total-workhours-25")
 
 # =========================
 # ✅ Sidebar 顯示「壞頁 / 缺檔」清單
@@ -231,9 +232,10 @@ pg = st.navigation(
             gt_putaway_daily, gt_inv_accuracy, gt_store_arrival_abn, gt_daily_attendance,
             slot_util_page
         ] if p],
-        "大豐KPI": [p for p in [df_kpi_home, df_qc_volume, df_putaway_volume, slot_page, df_pick_volume] if p],
+        "大豐KPI": [p for p in [df_kpi_home, df_qc_volume, df_putaway_volume, slot_page, df_pick_volume,df_total_workhours] if p],
     },
     expanded=False,
 )
 
 pg.run()
+
