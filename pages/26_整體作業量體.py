@@ -543,12 +543,6 @@ with left:
         [
             KPI("A) GM件數（合計）", _fmt_int(A_sum)),
             KPI("C) GM成箱PCS（合計）", _fmt0(C_sum)),
-        ],
-        cols=1,
-    )
-with right:
-    render_kpis(
-        [
             KPI("B) 一般倉零散PCS（合計）", _fmt0(B_sum)),
             KPI("D) 一般倉成箱PCS（合計）", _fmt0(D_sum)),
         ],
