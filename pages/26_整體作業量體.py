@@ -1,4 +1,4 @@
-# pages/26_整理作業量體.py
+# pages/26_整體作業量體.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
@@ -19,11 +19,11 @@ from common_ui import (
     download_excel_card,  # ✅ 一行=按鈕（且外框不分段）
 )
 
-st.set_page_config(page_title="大豐KPI｜整理作業量體", page_icon="🧹", layout="wide")
+st.set_page_config(page_title="大豐KPI｜整體作業量體", page_icon="🧹", layout="wide")
 inject_logistics_theme()
 
 set_page(
-    "整理作業量體",
+    "整體作業量體",
     icon="🧹",
     subtitle="刪除箱類型含『站所』｜計量單位數量｜出貨單位（判斷後）｜GM/一般倉 × 成箱/零散統計｜Excel下載",
 )
