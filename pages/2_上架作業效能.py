@@ -1004,134 +1004,102 @@ def main():
                 "stype_person_long": stype_person_long,
                 "stype_person_pivot": stype_person_pivot,
             }
+            
+# ======================
+# 顯示（從 session_state）
+# ======================
+last = st.session_state.putaway_last
+if not last:
+    st.info("請先上傳上架作業原始資料並點選「🚀 產出 KPI」")
+    return
 
-    # ======================
-    # 顯示（從 session_state）
-    # ======================
-    last = st.session_state.putaway_last
-    if not last:
-        st.info("請先上傳上架作業原始資料並點選「🚀 產出 KPI」")
-        return
+user_col = last["user_col"]
+summary = last["summary"]
+target_eff_show = float(last["target_eff"])
+top_n_show = int(controls.get("top_n", last.get("top_n", 30)))
+total_people = int(last["total_people"])
+met_people = int(last["met_people"])
+rate = float(last["rate"])
+xlsx_bytes = last["xlsx_bytes"]
+xlsx_name = last["xlsx_name"]
+total_match = int(last.get("total_match", 0))
+match_rate_all = float(last.get("match_rate_all", 0.0))
 
-    user_col = last["user_col"]
-    summary = last["summary"]
-    target_eff_show = float(last["target_eff"])
-    top_n_show = int(controls.get("top_n", last.get("top_n", 30)))
-    total_people = int(last["total_people"])
-    met_people = int(last["met_people"])
-    rate = float(last["rate"])
-    xlsx_bytes = last["xlsx_bytes"]
-    xlsx_name = last["xlsx_name"]
-    total_match = int(last.get("total_match", 0))
-    match_rate_all = float(last.get("match_rate_all", 0.0))
+# ✅ 只取兩張樞紐表（其他表格不顯示）
+shelf_person_pivot = last.get("shelf_person_pivot", pd.DataFrame())
+stype_person_pivot = last.get("stype_person_pivot", pd.DataFrame())
 
-    shelf_person_long = last.get("shelf_person_long", pd.DataFrame())
-    shelf_person_pivot = last.get("shelf_person_pivot", pd.DataFrame())
-    stype_person_long = last.get("stype_person_long", pd.DataFrame())
-    stype_person_pivot = last.get("stype_person_pivot", pd.DataFrame())
-    compare_unmatch = last.get("compare_unmatch", pd.DataFrame())
+# KPI（不是表格，保留）
+card_open("📌 總覽 KPI")
+render_kpis([
+    KPI("總人數", f"{total_people:,}"),
+    KPI("達標人數", f"{met_people:,}"),
+    KPI("達標率", f"{rate:.1%}"),
+    KPI("達標門檻", f"效率 ≥ {int(target_eff_show)}"),
+    KPI("棚別比對筆數", f"{total_match:,}"),
+    KPI("棚別比對率", f"{match_rate_all:.1%}"),
+])
+card_close()
 
-    # KPI
-    card_open("📌 總覽 KPI")
-    render_kpis([
-        KPI("總人數", f"{total_people:,}"),
-        KPI("達標人數", f"{met_people:,}"),
-        KPI("達標率", f"{rate:.1%}"),
-        KPI("達標門檻", f"效率 ≥ {int(target_eff_show)}"),
-        KPI("棚別比對筆數", f"{total_match:,}"),
-        KPI("棚別比對率", f"{match_rate_all:.1%}"),
-    ])
+# ✅ 只顯示兩個表：棚別樞紐 + 儲位類型樞紐
+col_a, col_b = st.columns(2)
+
+with col_a:
+    card_open("🏷️ 樞紐表（每人一列、每棚別一欄）")
+    if shelf_person_pivot is None or shelf_person_pivot.empty:
+        st.info("尚未產生棚別樞紐表（可能未上傳棚別主檔，或比對結果為空）。")
+    else:
+        st.dataframe(shelf_person_pivot, use_container_width=True, hide_index=True)
     card_close()
 
-    # 每人每棚別
-    card_open("🏷️ 每人每棚別筆數（到 → 棚別）")
-    if shelf_person_long is None or shelf_person_long.empty:
-        st.info("尚未計算出棚別統計（可能尚未上傳棚別主檔，或資料為空）。")
+with col_b:
+    card_open("🧩 樞紐表（每人一列、每儲位類型一欄）")
+    if stype_person_pivot is None or stype_person_pivot.empty:
+        st.info("尚未產生儲位類型樞紐表（可能到/棚別無法擷取區碼3，或資料為空）。")
     else:
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            show_only_matched = st.checkbox("只看已比對棚別（排除『未比對』）", value=False, key="only_matched_shelf")
-        with c2:
-            only_top_shelves = st.number_input("只顯示棚別欄位 Top N（樞紐表用；0=全部）", min_value=0, max_value=200, value=0, step=5, key="top_shelf_cols")
-
-        df_show_long = shelf_person_long.copy()
-        if show_only_matched:
-            df_show_long = df_show_long[df_show_long["棚別"] != "未比對"].copy()
-
-        st.markdown("#### 📋 長表（每人×棚別：筆數）")
-        st.dataframe(df_show_long, use_container_width=True, hide_index=True)
-
-        st.markdown("#### 🧱 樞紐表（每人一列、每棚別一欄）")
-        df_piv = shelf_person_pivot.copy()
-        if show_only_matched and not df_piv.empty and "未比對" in df_piv.columns:
-            df_piv = df_piv.drop(columns=["未比對"])
-
-        if only_top_shelves and only_top_shelves > 0 and not df_piv.empty:
-            shelf_cols = [c for c in df_piv.columns if c not in (user_col, "對應姓名")]
-            totals = df_piv[shelf_cols].sum(axis=0).sort_values(ascending=False)
-            keep = list(totals.head(int(only_top_shelves)).index)
-            df_piv = df_piv[[user_col, "對應姓名"] + keep]
-
-        st.dataframe(df_piv, use_container_width=True, hide_index=True)
-
-        st.markdown("#### 🔎 未比對明細（棚別空白，最多 5000 筆）")
-        if compare_unmatch is None or compare_unmatch.empty:
-            st.success("全部比對成功 ✅")
-        else:
-            st.dataframe(compare_unmatch, use_container_width=True, hide_index=True)
-    card_close()
-
-    # ✅ 每人每儲位類型
-    card_open("🧩 每人每儲位類型筆數（棚別/到 → 區碼3 → 類型）")
-    if stype_person_long is None or stype_person_long.empty:
-        st.info("尚未計算出儲位類型統計（可能棚別/到沒有區碼3，或資料為空）。")
-    else:
-        st.markdown("#### 📋 長表（每人×儲位類型：筆數）")
-        st.dataframe(stype_person_long, use_container_width=True, hide_index=True)
-
-        st.markdown("#### 🧱 樞紐表（每人一列、每儲位類型一欄）")
         st.dataframe(stype_person_pivot, use_container_width=True, hide_index=True)
     card_close()
 
-    # AM/PM 排行
-    col_l, col_r = st.columns(2)
+# AM/PM 排行（你原本的圖表保留）
+col_l, col_r = st.columns(2)
 
-    with col_l:
-        card_open(f"🌓 AM（上午）效率排行（Top {top_n_show}）")
-        am_rank = summary[[user_col, "對應姓名", "上午筆數", "上午工時_分鐘", "上午效率_件每小時"]].copy()
-        am_rank = am_rank.rename(columns={"上午效率_件每小時": "效率", "上午筆數": "筆數", "上午工時_分鐘": "工時"})
-        am_rank["姓名"] = am_rank["對應姓名"].where(am_rank["對應姓名"].astype(str).str.len() > 0, am_rank[user_col].astype(str))
-        bar_topN(
-            am_rank[["姓名", "效率", "筆數", "工時"]],
-            x_col="姓名",
-            y_col="效率",
-            hover_cols=["筆數", "工時"],
-            top_n=top_n_show,
-            target=float(target_eff_show),
-        )
-        card_close()
-
-    with col_r:
-        card_open(f"🌙 PM（下午）效率排行（Top {top_n_show}）")
-        pm_rank = summary[[user_col, "對應姓名", "下午筆數", "下午工時_分鐘_扣休", "下午效率_件每小時"]].copy()
-        pm_rank = pm_rank.rename(columns={"下午效率_件每小時": "效率", "下午筆數": "筆數", "下午工時_分鐘_扣休": "工時"})
-        pm_rank["姓名"] = pm_rank["對應姓名"].where(pm_rank["對應姓名"].astype(str).str.len() > 0, pm_rank[user_col].astype(str))
-        bar_topN(
-            pm_rank[["姓名", "效率", "筆數", "工時"]],
-            x_col="姓名",
-            y_col="效率",
-            hover_cols=["筆數", "工時"],
-            top_n=top_n_show,
-            target=float(target_eff_show),
-        )
-        card_close()
-
-    download_excel_card(
-        xlsx_bytes,
-        xlsx_name,
-        label="⬇️ 匯出 KPI 報表（Excel）",
+with col_l:
+    card_open(f"🌓 AM（上午）效率排行（Top {top_n_show}）")
+    am_rank = summary[[user_col, "對應姓名", "上午筆數", "上午工時_分鐘", "上午效率_件每小時"]].copy()
+    am_rank = am_rank.rename(columns={"上午效率_件每小時": "效率", "上午筆數": "筆數", "上午工時_分鐘": "工時"})
+    am_rank["姓名"] = am_rank["對應姓名"].where(am_rank["對應姓名"].astype(str).str.len() > 0, am_rank[user_col].astype(str))
+    bar_topN(
+        am_rank[["姓名", "效率", "筆數", "工時"]],
+        x_col="姓名",
+        y_col="效率",
+        hover_cols=["筆數", "工時"],
+        top_n=top_n_show,
+        target=float(target_eff_show),
     )
+    card_close()
 
+with col_r:
+    card_open(f"🌙 PM（下午）效率排行（Top {top_n_show}）")
+    pm_rank = summary[[user_col, "對應姓名", "下午筆數", "下午工時_分鐘_扣休", "下午效率_件每小時"]].copy()
+    pm_rank = pm_rank.rename(columns={"下午效率_件每小時": "效率", "下午筆數": "筆數", "下午工時_分鐘_扣休": "工時"})
+    pm_rank["姓名"] = pm_rank["對應姓名"].where(pm_rank["對應姓名"].astype(str).str.len() > 0, pm_rank[user_col].astype(str))
+    bar_topN(
+        pm_rank[["姓名", "效率", "筆數", "工時"]],
+        x_col="姓名",
+        y_col="效率",
+        hover_cols=["筆數", "工時"],
+        top_n=top_n_show,
+        target=float(target_eff_show),
+    )
+    card_close()
+
+# 下載保留
+download_excel_card(
+    xlsx_bytes,
+    xlsx_name,
+    label="⬇️ 匯出 KPI 報表（Excel）",
+)
+    
 
 if __name__ == "__main__":
     main()
