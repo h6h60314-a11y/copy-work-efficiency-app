@@ -428,7 +428,6 @@ def compute_am_pm_for_group(
     shelf_match = g.get("__shelf_match__", pd.Series([False] * len(g), index=g.index))
     shelf_match = shelf_match.fillna(False).astype(bool)
 
-    # 用原始 g 的 __dt__ 切 AM/PM（避免 times 已 dropna）
     g_dt = pd.to_datetime(g["__dt__"], errors="coerce")
     am_mask = g_dt.dt.time.between(AM_START, AM_END)
     pm_mask = g_dt.dt.time.between(PM_START, PM_END)
@@ -498,7 +497,6 @@ def compute_am_pm_for_group(
 
     whole_eff = _eff(day_cnt, whole_mins)
 
-    # ✅ 比對率
     match_rate_whole = (match_whole / int(day_cnt)) if int(day_cnt) > 0 else 0.0
     match_rate_am = (match_am / int(am_cnt)) if int(am_cnt) > 0 else 0.0
     match_rate_pm = (match_pm / int(pm_cnt)) if int(pm_cnt) > 0 else 0.0
@@ -763,15 +761,6 @@ def main():
 
     with st.sidebar:
         st.markdown("---")
-
-        # ✅ 新增：棚別主檔上傳（儲位明細：儲位、棚別）
-        slot_master_file = st.file_uploader(
-            "📚 棚別主檔（儲位明細：需含『儲位』『棚別』）",
-            type=["xlsx", "xlsm", "xls", "csv"],
-            key="putaway_slot_master",
-            help="比對定義：明細欄位『到』(儲位) → 主檔『儲位』對應出『棚別』；查得到棚別即算比對成功。",
-        )
-
         target_eff = st.number_input("達標門檻（效率 ≥）", min_value=1, max_value=999, value=int(TARGET_EFF_DEFAULT), step=1)
         idle_threshold = st.number_input("空窗門檻（分鐘 ≥ 才算）", min_value=1, max_value=240, value=int(IDLE_MIN_THRESHOLD_DEFAULT), step=1)
 
@@ -788,7 +777,17 @@ def main():
         st.caption("⚠️ 若你改了排除空窗/門檻/起始時間/上架人設定/棚別主檔，需再按一次「🚀 產出 KPI」才會重新計算。")
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
-    # 上傳
+    # ✅ 棚別主檔要在主畫面（非 sidebar）
+    card_open("📚 棚別主檔（儲位明細）")
+    slot_master_file = st.file_uploader(
+        "上傳棚別主檔（需含欄位：『儲位』『棚別』）",
+        type=["xlsx", "xlsm", "xls", "csv"],
+        key="putaway_slot_master_main",
+        help="比對定義：明細欄位『到』(儲位) → 主檔『儲位』對應出『棚別』；查得到棚別即算比對成功。",
+    )
+    card_close()
+
+    # 上傳作業原始資料
     card_open("📤 上傳作業原始資料（上架）")
     uploaded = st.file_uploader(
         "上傳 Excel / CSV（需包含：由、到、修訂日期/時間、記錄輸入人）",
@@ -818,7 +817,7 @@ def main():
         "slot_hash": slot_hash,
     }
     if last and last.get("params") and last.get("params") != current_params:
-        st.warning("⚠️ 你已變更側邊欄條件（含起始時間/上架人設定/棚別主檔），請再按一次「🚀 產出 KPI」才會套用新條件。")
+        st.warning("⚠️ 你已變更條件（含起始時間/上架人設定/棚別主檔），請再按一次「🚀 產出 KPI」才會套用新條件。")
 
     # ✅ 計算
     if run_clicked:
@@ -853,7 +852,7 @@ def main():
             data["__dt__"] = pd.to_datetime(data[revdt_col], errors="coerce")
             data["__code__"] = data[user_col].astype(str).str.strip()
 
-            # ✅ 上架人設定：姓名/區域（姓名沿用）
+            # ✅ 上架人姓名沿用（上架區域本版不再拿來做比對）
             people_settings = _get_putaway_people_settings()
             custom_name_map = {k: v.get("name", "") for k, v in people_settings.items() if v.get("name")}
             merged_name_map = {**NAME_MAP, **custom_name_map}
