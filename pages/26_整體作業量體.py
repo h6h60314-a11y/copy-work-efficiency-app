@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from io import BytesIO
+from io import BytesIO, StringIO
 from datetime import datetime
 
 import numpy as np
@@ -33,7 +33,7 @@ set_page(
 # ----------------------------
 NEED_COLS = ["packqty", "入數", "箱類型", "載具號", "BOXTYPE", "boxid"]
 CANDIDATE_SEPS = ["\t", ",", "|", ";"]
-CANDIDATE_ENCODINGS = ["utf-8-sig", "utf-8", "cp950", "big5"]
+CANDIDATE_ENCODINGS = ["utf-8-sig", "utf-8", "cp950", "big5", "latin1"]  # latin1 最後兜底
 
 
 def _safe_str(s: pd.Series) -> pd.Series:
@@ -54,51 +54,90 @@ def _fmt0(x) -> str:
         return "0"
 
 
-def _detect_sep(text: str) -> str:
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+def _detect_sep(text: str) -> str | None:
+    """
+    粗略猜分隔符：
+    - 若 Tab/逗號/|/; 都沒有明顯出現，回傳 None（代表可能是多空白/固定寬度）
+    """
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if not lines:
-        return "\t"
+        return None
     first = lines[0]
-    best = "\t"
-    best_cnt = -1
+
+    best = None
+    best_cnt = 0
     for sep in CANDIDATE_SEPS:
         cnt = first.count(sep)
         if cnt > best_cnt:
             best_cnt = cnt
             best = sep
+
+    # 沒有分隔符
+    if best_cnt <= 0:
+        return None
     return best
 
 
-def read_txt_bytes(raw: bytes, force_sep: str | None = None, force_encoding: str | None = None) -> pd.DataFrame:
-    last_err = None
+def _read_txt_as_df(text: str, sep: str | None) -> pd.DataFrame:
+    """
+    依 sep 讀取：
+    - sep=None -> 先嘗試多空白(r'\s+')，再嘗試固定寬度 read_fwf
+    """
+    # 1) 明確分隔符
+    if sep is not None and sep != "__fwf__":
+        return pd.read_csv(
+            StringIO(text),
+            sep=sep,
+            dtype=str,
+            engine="python",
+        )
 
+    # 2) 多空白分欄（對齊輸出）
+    try:
+        df_ws = pd.read_csv(
+            StringIO(text),
+            sep=r"\s+",
+            dtype=str,
+            engine="python",
+        )
+        # 若只讀到 1 欄，通常代表不是單純 whitespace table
+        if df_ws.shape[1] >= 2:
+            return df_ws
+    except Exception:
+        pass
+
+    # 3) 固定寬度（最後保底）
+    return pd.read_fwf(StringIO(text), dtype=str)
+
+
+def read_txt_bytes(raw: bytes, force_sep: str | None = None, force_encoding: str | None = None) -> pd.DataFrame:
+    """
+    TXT 讀取（重點修正）：
+    - 先自行 decode（errors='replace'）避免 big5/cp950 混編碼直接炸
+    - 再用 StringIO 丟給 pandas
+    - 自動 fallback：多空白 / fixed-width
+    """
     encodings = [force_encoding] if force_encoding else []
     encodings += [e for e in CANDIDATE_ENCODINGS if e not in encodings]
 
+    last_err = None
     for enc in encodings:
         try:
-            text = raw.decode(enc, errors="strict")
-        except Exception as e:
-            last_err = e
-            continue
-
-        sep = force_sep if force_sep else _detect_sep(text)
-
-        try:
-            bio = BytesIO(raw)
-            df = pd.read_csv(
-                bio,
-                sep=sep,
-                encoding=enc,
-                dtype=str,       # 先都當字串，後面再轉數值（穩）
-                engine="python", # 對不規則分隔較容錯
-            )
+            text = raw.decode(enc, errors="replace")
+            sep = force_sep if force_sep else _detect_sep(text)
+            df = _read_txt_as_df(text, sep=sep)
             return df
         except Exception as e:
             last_err = e
             continue
 
-    raise RuntimeError(f"TXT 讀取失敗（可能是分隔符/編碼不符或檔案格式非表格）：{last_err}")
+    raise RuntimeError(f"TXT 讀取失敗（分隔符/格式不符）：{last_err}")
 
 
 def robust_read_file(uploaded_file, txt_sep_choice: str, txt_encoding_choice: str) -> pd.DataFrame:
@@ -111,6 +150,8 @@ def robust_read_file(uploaded_file, txt_sep_choice: str, txt_encoding_choice: st
         "逗號 ,": ",",
         "直線 |": "|",
         "分號 ;": ";",
+        "多空白(對齊)": None,     # 交給 _read_txt_as_df 走 r'\s+' -> fwf
+        "固定寬度(FWF)": "__fwf__",  # 直接走 read_fwf
     }
     force_sep = sep_map.get(txt_sep_choice, None)
     force_enc = None if txt_encoding_choice == "自動" else txt_encoding_choice
@@ -127,12 +168,6 @@ def robust_read_file(uploaded_file, txt_sep_choice: str, txt_encoding_choice: st
             return pd.read_excel(bio, engine="xlrd")
         except Exception as e:
             raise RuntimeError(f"讀取 Excel 失敗：{e}")
-
-
-def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
 
 
 def compute(df_raw: pd.DataFrame) -> dict:
@@ -153,7 +188,10 @@ def compute(df_raw: pd.DataFrame) -> dict:
 
     missing2 = [c for c in NEED_COLS if c not in df_raw.columns]
     if missing2:
-        raise KeyError(f"⚠️ 找不到必要欄位：{missing2}，請確認 TXT/Excel 的表頭是否一致。")
+        raise KeyError(
+            f"⚠️ 找不到必要欄位：{missing2}\n"
+            f"目前讀到的欄位：{list(df_raw.columns)[:30]}{' ...' if len(df_raw.columns)>30 else ''}"
+        )
 
     df0 = df_raw.copy()
 
@@ -230,14 +268,22 @@ card_open("📥 上傳明細（Excel / TXT，可多檔）")
 
 colA, colB = st.columns(2)
 with colA:
-    txt_sep_choice = st.selectbox("TXT 分隔符", ["自動", "Tab", "逗號 ,", "直線 |", "分號 ;"], index=0)
+    txt_sep_choice = st.selectbox(
+        "TXT 分欄方式",
+        ["自動", "Tab", "逗號 ,", "直線 |", "分號 ;", "多空白(對齊)", "固定寬度(FWF)"],
+        index=0,
+    )
 with colB:
-    txt_encoding_choice = st.selectbox("TXT 編碼", ["自動", "utf-8-sig", "utf-8", "cp950", "big5"], index=0)
+    txt_encoding_choice = st.selectbox(
+        "TXT 編碼",
+        ["自動", "utf-8-sig", "utf-8", "cp950", "big5", "latin1"],
+        index=0,
+    )
 
 uploaded_files = st.file_uploader(
     "請上傳要處理的檔案（.xlsx / .xls / .txt）",
     type=["xlsx", "xls", "xlsm", "txt", "csv"],
-    accept_multiple_files=True,  # ✅ 多檔
+    accept_multiple_files=True,
 )
 card_close()
 
@@ -270,24 +316,21 @@ with st.spinner("處理中…"):
             )
 
             df_p = out["df_processed"].copy()
-            df_p.insert(0, "來源檔名", fname)  # ✅ 合併明細加來源
+            df_p.insert(0, "來源檔名", fname)
             details.append(df_p)
 
         except Exception as e:
             errors.append({"檔名": fname, "錯誤": str(e)})
 
-# 顯示錯誤（不中斷）
 if errors:
     with st.expander("⚠️ 部分檔案處理失敗（已略過）", expanded=True):
         st.dataframe(pd.DataFrame(errors), use_container_width=True, hide_index=True)
 
 if not results:
-    st.error("沒有任何檔案成功處理（請確認檔案格式/表頭）。")
+    st.error("沒有任何檔案成功處理（請確認檔案格式/表頭/分欄方式）。")
     st.stop()
 
 summary_all = pd.DataFrame(results)
-
-# 合併明細
 detail_all = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
 
 # KPI（多檔合計）
@@ -324,7 +367,6 @@ with c2:
         cols=1,
     )
 
-# 統計總表
 card_open("📌 多檔統計總表")
 show_df = summary_all.copy()
 for c in ["A) GM件數", "B) 一般倉零散PCS", "C) GM成箱PCS", "D) 一般倉成箱PCS"]:
@@ -332,7 +374,6 @@ for c in ["A) GM件數", "B) 一般倉零散PCS", "C) GM成箱PCS", "D) 一般�
 st.dataframe(show_df, use_container_width=True, hide_index=True)
 card_close()
 
-# 匯出
 card_open("📤 匯出（統計總表 + 合併明細）")
 stamp = datetime.now().strftime("%Y%m%d_%H%M")
 filename = f"大豐KPI_整體作業量體_多檔_{stamp}.xlsx"
