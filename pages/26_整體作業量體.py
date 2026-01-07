@@ -25,17 +25,20 @@ inject_logistics_theme()
 set_page(
     "整體作業量體",
     icon="🧹",
-    subtitle="支援 Excel/TXT｜可多檔上傳｜刪除箱類型含『站所』｜計量單位數量｜出貨單位（判斷後）｜GM/一般倉 × 成箱/零散統計｜Excel下載",
+    subtitle="支援 Excel/TXT｜可多檔上傳｜欄位對照（解決 TXT 中文亂碼）｜GM/一般倉 × 成箱/零散統計｜Excel下載",
 )
 
 # ----------------------------
-# constants / helpers
+# constants
 # ----------------------------
 NEED_COLS = ["packqty", "入數", "箱類型", "載具號", "BOXTYPE", "boxid"]
 CANDIDATE_SEPS = ["\t", ",", "|", ";"]
-CANDIDATE_ENCODINGS = ["utf-8-sig", "utf-8", "cp950", "big5", "latin1"]  # latin1 最後兜底
+CANDIDATE_ENCODINGS = ["utf-8-sig", "utf-8", "cp950", "big5", "latin1"]  # latin1 最後兜底（不炸）
 
 
+# ----------------------------
+# utils
+# ----------------------------
 def _safe_str(s: pd.Series) -> pd.Series:
     return s.astype(str).fillna("").astype(str)
 
@@ -61,10 +64,7 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _detect_sep(text: str) -> str | None:
-    """
-    粗略猜分隔符：
-    - 若 Tab/逗號/|/; 都沒有明顯出現，回傳 None（代表可能是多空白/固定寬度）
-    """
+    # 若 Tab/逗號/|/; 都沒有 → 可能是多空白/固定寬度
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if not lines:
         return None
@@ -77,62 +77,54 @@ def _detect_sep(text: str) -> str | None:
         if cnt > best_cnt:
             best_cnt = cnt
             best = sep
-
-    # 沒有分隔符
-    if best_cnt <= 0:
-        return None
-    return best
+    return best if best_cnt > 0 else None
 
 
-def _read_txt_as_df(text: str, sep: str | None) -> pd.DataFrame:
+def _read_txt_as_df(text: str, mode: str) -> pd.DataFrame:
     """
-    依 sep 讀取：
-    - sep=None -> 先嘗試多空白(r'\s+')，再嘗試固定寬度 read_fwf
+    mode:
+      - "auto": 先猜分隔符；猜不到 -> 多空白 -> 固定寬度
+      - "sep:\t" / "sep:," / "sep:|" / "sep:;"：指定分隔符
+      - "ws": 多空白
+      - "fwf": 固定寬度
     """
-    # 1) 明確分隔符
-    if sep is not None and sep != "__fwf__":
-        return pd.read_csv(
-            StringIO(text),
-            sep=sep,
-            dtype=str,
-            engine="python",
-        )
+    if mode.startswith("sep:"):
+        sep = mode.split(":", 1)[1]
+        return pd.read_csv(StringIO(text), sep=sep, dtype=str, engine="python")
 
-    # 2) 多空白分欄（對齊輸出）
+    if mode == "ws":
+        return pd.read_csv(StringIO(text), sep=r"\s+", dtype=str, engine="python")
+
+    if mode == "fwf":
+        return pd.read_fwf(StringIO(text), dtype=str)
+
+    # auto
+    sep = _detect_sep(text)
+    if sep is not None:
+        return pd.read_csv(StringIO(text), sep=sep, dtype=str, engine="python")
+
+    # fallback: ws -> fwf
     try:
-        df_ws = pd.read_csv(
-            StringIO(text),
-            sep=r"\s+",
-            dtype=str,
-            engine="python",
-        )
-        # 若只讀到 1 欄，通常代表不是單純 whitespace table
+        df_ws = pd.read_csv(StringIO(text), sep=r"\s+", dtype=str, engine="python")
         if df_ws.shape[1] >= 2:
             return df_ws
     except Exception:
         pass
-
-    # 3) 固定寬度（最後保底）
     return pd.read_fwf(StringIO(text), dtype=str)
 
 
-def read_txt_bytes(raw: bytes, force_sep: str | None = None, force_encoding: str | None = None) -> pd.DataFrame:
+def read_txt_bytes(raw: bytes, parse_mode: str, force_encoding: str | None) -> pd.DataFrame:
     """
-    TXT 讀取（重點修正）：
-    - 先自行 decode（errors='replace'）避免 big5/cp950 混編碼直接炸
-    - 再用 StringIO 丟給 pandas
-    - 自動 fallback：多空白 / fixed-width
+    ✅ 重點：decode 用 errors='replace'，避免混編碼直接炸
     """
-    encodings = [force_encoding] if force_encoding else []
-    encodings += [e for e in CANDIDATE_ENCODINGS if e not in encodings]
+    encs = [force_encoding] if force_encoding else []
+    encs += [e for e in CANDIDATE_ENCODINGS if e not in encs]
 
     last_err = None
-    for enc in encodings:
+    for enc in encs:
         try:
             text = raw.decode(enc, errors="replace")
-            sep = force_sep if force_sep else _detect_sep(text)
-            df = _read_txt_as_df(text, sep=sep)
-            return df
+            return _read_txt_as_df(text, parse_mode)
         except Exception as e:
             last_err = e
             continue
@@ -140,24 +132,25 @@ def read_txt_bytes(raw: bytes, force_sep: str | None = None, force_encoding: str
     raise RuntimeError(f"TXT 讀取失敗（分隔符/格式不符）：{last_err}")
 
 
-def robust_read_file(uploaded_file, txt_sep_choice: str, txt_encoding_choice: str) -> pd.DataFrame:
+def robust_read_file(uploaded_file, txt_parse_choice: str, txt_encoding_choice: str) -> pd.DataFrame:
     name = (uploaded_file.name or "").lower()
     raw = uploaded_file.getvalue()
 
-    sep_map = {
-        "自動": None,
-        "Tab": "\t",
-        "逗號 ,": ",",
-        "直線 |": "|",
-        "分號 ;": ";",
-        "多空白(對齊)": None,     # 交給 _read_txt_as_df 走 r'\s+' -> fwf
-        "固定寬度(FWF)": "__fwf__",  # 直接走 read_fwf
+    # 解析模式
+    parse_map = {
+        "自動": "auto",
+        "Tab": "sep:\t",
+        "逗號 ,": "sep:,",
+        "直線 |": "sep:|",
+        "分號 ;": "sep:;",
+        "多空白(對齊)": "ws",
+        "固定寬度(FWF)": "fwf",
     }
-    force_sep = sep_map.get(txt_sep_choice, None)
+    parse_mode = parse_map.get(txt_parse_choice, "auto")
     force_enc = None if txt_encoding_choice == "自動" else txt_encoding_choice
 
     if name.endswith(".txt") or name.endswith(".csv"):
-        return read_txt_bytes(raw, force_sep=force_sep, force_encoding=force_enc)
+        return read_txt_bytes(raw, parse_mode=parse_mode, force_encoding=force_enc)
 
     bio = BytesIO(raw)
     try:
@@ -170,27 +163,98 @@ def robust_read_file(uploaded_file, txt_sep_choice: str, txt_encoding_choice: st
             raise RuntimeError(f"讀取 Excel 失敗：{e}")
 
 
+def _guess_unit_col(cols: list[str]) -> str | None:
+    # 優先用 unit（你檔案裡就有）
+    if "unit" in cols:
+        return "unit"
+    # 退而求其次：名稱含 unit
+    for c in cols:
+        if "unit" in c.lower():
+            return c
+    return None
+
+
+def _guess_vehicle_col(df: pd.DataFrame) -> str | None:
+    # 找「值裡面有 GM」的欄位（掃前 5000 筆就好）
+    sample = df.head(5000)
+    for c in sample.columns:
+        s = _safe_str(sample[c])
+        if s.str.contains("GM", case=False, na=False).any():
+            return c
+    return None
+
+
+def _guess_box_type_col(df: pd.DataFrame) -> str | None:
+    """
+    箱類型通常是短字串（例如：箱/包/瓶/盒...）且唯一值不多
+    這裡用啟發式挑最像的欄位
+    """
+    sample = df.head(8000)
+    best = None
+    best_score = -1
+
+    for c in sample.columns:
+        if c in {"Facility", "Storerkey", "orderdate", "storeid", "storename", "shippeddate",
+                 "deliverydate", "deliverytime", "boxid", "externorderkey", "SKU", "manufacturersku",
+                 "descr", "susr2", "outqty", "packqty", "memo", "price", "buyersreference", "BOXTYPE"}:
+            continue
+
+        s = _safe_str(sample[c]).str.strip()
+        s = s[s != ""]
+        if len(s) == 0:
+            continue
+
+        nunq = s.nunique()
+        avg_len = s.str.len().mean()
+
+        # 分數：唯一值少 + 平均長度短
+        score = 0
+        if nunq <= 20:
+            score += 2
+        if nunq <= 10:
+            score += 2
+        if avg_len <= 4:
+            score += 2
+        if avg_len <= 2:
+            score += 1
+
+        if score > best_score:
+            best_score = score
+            best = c
+
+    return best
+
+
+def apply_column_mapping(df: pd.DataFrame, map_in: str | None, map_box: str | None, map_vehicle: str | None) -> pd.DataFrame:
+    """
+    把使用者選到的欄位 rename 成標準欄名：
+      入數 / 箱類型 / 載具號
+    若本來就有標準欄名，優先保留不覆蓋。
+    """
+    df = _normalize_columns(df)
+
+    rename = {}
+    if "入數" not in df.columns and map_in and map_in in df.columns:
+        rename[map_in] = "入數"
+    if "箱類型" not in df.columns and map_box and map_box in df.columns:
+        rename[map_box] = "箱類型"
+    if "載具號" not in df.columns and map_vehicle and map_vehicle in df.columns:
+        rename[map_vehicle] = "載具號"
+
+    if rename:
+        df = df.rename(columns=rename)
+
+    return df
+
+
 def compute(df_raw: pd.DataFrame) -> dict:
     df_raw = _normalize_columns(df_raw)
-
-    # 欄位對照（忽略大小寫/空白）
-    missing = [c for c in NEED_COLS if c not in df_raw.columns]
-    if missing:
-        lower_map = {str(c).strip().lower(): c for c in df_raw.columns}
-        remap = {}
-        for need in NEED_COLS:
-            key = need.strip().lower()
-            if key in lower_map:
-                remap[lower_map[key]] = need
-        if remap:
-            df_raw = df_raw.rename(columns=remap)
-            df_raw = _normalize_columns(df_raw)
 
     missing2 = [c for c in NEED_COLS if c not in df_raw.columns]
     if missing2:
         raise KeyError(
             f"⚠️ 找不到必要欄位：{missing2}\n"
-            f"目前讀到的欄位：{list(df_raw.columns)[:30]}{' ...' if len(df_raw.columns)>30 else ''}"
+            f"目前讀到的欄位（前30）：{list(df_raw.columns)[:30]}{' ...' if len(df_raw.columns)>30 else ''}"
         )
 
     df0 = df_raw.copy()
@@ -268,7 +332,7 @@ card_open("📥 上傳明細（Excel / TXT，可多檔）")
 
 colA, colB = st.columns(2)
 with colA:
-    txt_sep_choice = st.selectbox(
+    txt_parse_choice = st.selectbox(
         "TXT 分欄方式",
         ["自動", "Tab", "逗號 ,", "直線 |", "分號 ;", "多空白(對齊)", "固定寬度(FWF)"],
         index=0,
@@ -291,6 +355,49 @@ if not uploaded_files:
     st.info("請先上傳檔案（可多選）。")
     st.stop()
 
+# 先讀第一個檔案，用來提供「欄位對照」選項與預設猜測
+try:
+    _df_preview = robust_read_file(uploaded_files[0], txt_parse_choice, txt_encoding_choice)
+    _df_preview = _normalize_columns(_df_preview)
+except Exception as e:
+    st.error(f"第一個檔案讀取失敗：{e}")
+    st.stop()
+
+cols = list(_df_preview.columns)
+guess_in = _guess_unit_col(cols)
+guess_vehicle = _guess_vehicle_col(_df_preview)
+guess_box = _guess_box_type_col(_df_preview)
+
+with st.expander("🧩 欄位對照（TXT 中文亂碼時請在這裡指定，會套用到所有檔案）", expanded=True):
+    st.caption("若 Excel 已有正確中文欄位，可維持『自動』；TXT 欄名亂碼時請手動指定。")
+
+    opt = ["（自動）"] + cols
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        map_in = st.selectbox(
+            "入數 欄位",
+            opt,
+            index=(opt.index(guess_in) if guess_in in opt else 0),
+        )
+    with col2:
+        map_box = st.selectbox(
+            "箱類型 欄位",
+            opt,
+            index=(opt.index(guess_box) if guess_box in opt else 0),
+        )
+    with col3:
+        map_vehicle = st.selectbox(
+            "載具號 欄位（用來判斷 GM）",
+            opt,
+            index=(opt.index(guess_vehicle) if guess_vehicle in opt else 0),
+        )
+
+# 把（自動）轉為 None
+map_in = None if map_in == "（自動）" else map_in
+map_box = None if map_box == "（自動）" else map_box
+map_vehicle = None if map_vehicle == "（自動）" else map_vehicle
+
 results = []
 details = []
 errors = []
@@ -299,7 +406,9 @@ with st.spinner("處理中…"):
     for f in uploaded_files:
         fname = f.name
         try:
-            df_raw = robust_read_file(f, txt_sep_choice=txt_sep_choice, txt_encoding_choice=txt_encoding_choice)
+            df_raw = robust_read_file(f, txt_parse_choice, txt_encoding_choice)
+            df_raw = apply_column_mapping(df_raw, map_in=map_in, map_box=map_box, map_vehicle=map_vehicle)
+
             out = compute(df_raw)
 
             results.append(
@@ -327,7 +436,7 @@ if errors:
         st.dataframe(pd.DataFrame(errors), use_container_width=True, hide_index=True)
 
 if not results:
-    st.error("沒有任何檔案成功處理（請確認檔案格式/表頭/分欄方式）。")
+    st.error("沒有任何檔案成功處理（請在『欄位對照』指定 入數/箱類型/載具號，或調整 TXT 分欄方式）。")
     st.stop()
 
 summary_all = pd.DataFrame(results)
