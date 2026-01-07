@@ -20,8 +20,13 @@ from common_ui import (
 
 st.set_page_config(page_title="大豐KPI｜整體作業工時", page_icon="🕒", layout="wide")
 inject_logistics_theme()
-set_page("大豐KPI｜整體作業工時", desc="上傳出勤報表後，自動排除空打卡與外倉相關差勤，產出工時計算與可下載明細。")
 
+# ✅ 這裡不要用 desc=（common_ui.set_page 不支援）
+set_page(
+    "整體作業工時",
+    icon="🕒",
+    subtitle="出勤報表｜排除空打卡＋外倉職務｜工時摘要＋明細下載",
+)
 
 # ----------------------------
 # helpers
@@ -51,18 +56,14 @@ def robust_read_excel(uploaded_file) -> pd.DataFrame:
     """
     盡量容錯讀取：
     - xlsx/xlsm: openpyxl
-    - xls: xlrd（環境若無 xlrd 會提示）
+    - xls: xlrd（環境若無 xlrd 會拋錯並顯示）
     """
-    name = (uploaded_file.name or "").lower()
-
     raw = uploaded_file.getvalue()
     bio = BytesIO(raw)
 
     try:
-        # 大多數出勤檔都是 xlsx
         return pd.read_excel(bio, engine="openpyxl")
     except Exception:
-        # 可能是 xls
         try:
             bio.seek(0)
             return pd.read_excel(bio, engine="xlrd")
@@ -71,7 +72,6 @@ def robust_read_excel(uploaded_file) -> pd.DataFrame:
 
 
 def build_outputs(df_raw: pd.DataFrame) -> dict:
-    # 欄位檢查
     miss = [c for c in REQ_COLS if c not in df_raw.columns]
     if miss:
         raise ValueError(f"缺少必要欄位：{', '.join(miss)}")
@@ -112,7 +112,7 @@ def build_outputs(df_raw: pd.DataFrame) -> dict:
     noncadre_pattern = "|".join(exclude_group_noncadre)
     df_noncadre = df_base[~_safe_str(df_base["組別"]).str.contains(noncadre_pattern, na=False)].copy()
 
-    # 6C) 全體總工時（所有組別）
+    # 6C) 全體
     df_all = df_base.copy()
 
     # 6D) 成箱組
@@ -135,7 +135,6 @@ def build_outputs(df_raw: pd.DataFrame) -> dict:
         "成箱組": _calc(df_box),
     }
 
-    # 摘要表
     summary = pd.DataFrame(
         [
             {
@@ -193,7 +192,6 @@ except Exception as e:
     st.error(str(e))
     st.stop()
 
-# 排除資訊
 st.caption(
     f"已讀取 {out['total_in']:,} 列；"
     f"排除『上班打卡時間空白』 {out['removed_empty_clockin']:,} 列；"
@@ -201,7 +199,7 @@ st.caption(
     f"剩餘 {out['total_after']:,} 列作為計算基礎。"
 )
 
-# KPI 區
+# KPI
 kpis = [
     KPI("一般人員｜人數", f"{out['stats']['一般人員（不含行政＆幹部）']['人數']:,}"),
     KPI("一般人員｜上班時數(O)", _fmt2(out["stats"]["一般人員（不含行政＆幹部）"]["上班時數"])),
@@ -221,7 +219,7 @@ kpis = [
 ]
 render_kpis(kpis, cols=6)
 
-# 摘要表
+# 摘要
 card_open("📌 工時摘要")
 df_sum = out["summary"].copy()
 df_sum["上班時數(O)"] = df_sum["上班時數(O)"].map(_fmt2)
@@ -229,7 +227,7 @@ df_sum["打卡時數(M)"] = df_sum["打卡時數(M)"].map(_fmt2)
 st.dataframe(df_sum, use_container_width=True, hide_index=True)
 card_close()
 
-# 匯出設定
+# 匯出
 card_open("📤 匯出")
 scope = st.radio(
     "下載明細範圍",
@@ -245,11 +243,9 @@ detail_map = {
 }
 detail_df = detail_map[scope].copy()
 
-# 檔名
 stamp = datetime.now().strftime("%Y%m%d_%H%M")
 filename = f"大豐KPI_整體作業工時_{scope}_{stamp}.xlsx"
 
-# 產檔 bytes
 xlsx_bytes = make_excel_bytes(out["summary"], detail_df)
 
 download_excel_card(
