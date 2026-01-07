@@ -281,7 +281,6 @@ def prepare_filtered_df(df: pd.DataFrame) -> pd.DataFrame:
 # =========================================================
 def load_slot_master_bytes(upload_name: str, content: bytes) -> pd.DataFrame:
     sheets = read_excel_any_quiet_bytes(upload_name, content)
-
     df0 = None
     for _, d in sheets.items():
         if d is not None and not d.empty:
@@ -291,14 +290,12 @@ def load_slot_master_bytes(upload_name: str, content: bytes) -> pd.DataFrame:
         return pd.DataFrame()
 
     df0 = _strip_cols(df0)
-
     if "儲位" not in df0.columns or "棚別" not in df0.columns:
         return pd.DataFrame()
 
     out = df0[["儲位", "棚別"]].copy()
     out["儲位"] = out["儲位"].astype(str).str.strip()
     out["棚別"] = out["棚別"].astype(str).str.strip()
-
     out = out[out["儲位"].astype(str).str.len() > 0].copy()
     out = out.drop_duplicates(subset=["儲位"], keep="last")
     return out
@@ -306,7 +303,7 @@ def load_slot_master_bytes(upload_name: str, content: bytes) -> pd.DataFrame:
 
 # =========================================================
 # 計算：休息規則 / 空窗排除 / 第一筆 clamp（用全域起始時間）
-# + ✅ 比對棚別筆數（定義：到→棚別查得到即成功）
+# + ✅ 比對棚別筆數（到→棚別查得到即成功）
 # =========================================================
 def break_minutes_for_span(first_dt: pd.Timestamp, last_dt: pd.Timestamp) -> Tuple[int, str]:
     if pd.isna(first_dt) or pd.isna(last_dt):
@@ -401,7 +398,7 @@ def compute_am_pm_for_group(
     g: pd.DataFrame,
     idle_threshold_min: int,
     exclude_idle_ranges: List[Tuple[dt.time, dt.time]],
-    start_time: Optional[dt.time] = None,  # ✅ 全域起始時間，用來 clamp
+    start_time: Optional[dt.time] = None,
 ) -> pd.Series:
     times = _coerce_dt_series(g["__dt__"])
     if times.empty:
@@ -424,7 +421,6 @@ def compute_am_pm_for_group(
             "下午_比對棚別筆數": 0, "下午_比對棚別率": 0.0,
         })
 
-    # ✅ 棚別比對旗標（定義：到→棚別查得到即成功）
     shelf_match = g.get("__shelf_match__", pd.Series([False] * len(g), index=g.index))
     shelf_match = shelf_match.fillna(False).astype(bool)
 
@@ -659,6 +655,8 @@ def build_excel_bytes(
     daily: pd.DataFrame,
     detail_long: pd.DataFrame,
     compare_unmatch: pd.DataFrame,
+    shelf_person_long: pd.DataFrame,   # ✅ 每人每棚別筆數（長表）
+    shelf_person_pivot: pd.DataFrame,  # ✅ 每人×棚別（樞紐）
     target_eff: float,
 ) -> bytes:
     out = io.BytesIO()
@@ -707,7 +705,6 @@ def build_excel_bytes(
             autosize_columns(ws_long, detail_long[long_cols])
             shade_rows_by_efficiency(ws_long, "效率_件每小時", target_eff=target_eff)
 
-        if detail_long is not None and not detail_long.empty:
             write_block_report(writer, detail_long, user_col, target_eff=target_eff)
 
         # ✅ 未比對明細（抽樣/最多 5000）
@@ -715,6 +712,16 @@ def build_excel_bytes(
             un_cols = list(compare_unmatch.columns)
             compare_unmatch[un_cols].to_excel(writer, index=False, sheet_name="棚別未比對_抽樣")
             autosize_columns(writer.sheets["棚別未比對_抽樣"], compare_unmatch[un_cols])
+
+        # ✅ 每人每棚別筆數（你要的）
+        if shelf_person_long is not None and not shelf_person_long.empty:
+            shelf_person_long.to_excel(writer, index=False, sheet_name="棚別_人員_明細")
+            autosize_columns(writer.sheets["棚別_人員_明細"], shelf_person_long)
+
+        # ✅ 每人×棚別（樞紐）
+        if shelf_person_pivot is not None and not shelf_person_pivot.empty:
+            shelf_person_pivot.to_excel(writer, index=False, sheet_name="棚別_人員_樞紐")
+            autosize_columns(writer.sheets["棚別_人員_樞紐"], shelf_person_pivot)
 
         rules_rows = []
         for i, (st_ge, ed_le, mins, tag) in enumerate(BREAK_RULES, start=1):
@@ -743,13 +750,13 @@ def main():
     set_page(
         "上架產能分析（Putaway KPI）",
         icon="📦",
-        subtitle="總上組（上架）｜上午/下午分段｜效率門檻著色｜第一筆 clamp（全域起始時間）｜報表_區塊輸出｜棚別比對（到→棚別）"
+        subtitle="總上組（上架）｜上午/下午分段｜效率門檻著色｜第一筆 clamp（全域起始時間）｜棚別比對（到→棚別）｜每人每棚別筆數"
     )
 
     if "putaway_last" not in st.session_state:
         st.session_state.putaway_last = None
 
-    # Sidebar：上架人設定（不含起始時間）
+    # Sidebar：上架人設定
     render_putaway_people_settings_panel()
 
     # Sidebar：統一條件
@@ -764,7 +771,6 @@ def main():
         target_eff = st.number_input("達標門檻（效率 ≥）", min_value=1, max_value=999, value=int(TARGET_EFF_DEFAULT), step=1)
         idle_threshold = st.number_input("空窗門檻（分鐘 ≥ 才算）", min_value=1, max_value=240, value=int(IDLE_MIN_THRESHOLD_DEFAULT), step=1)
 
-        # ✅ 全域起始時間：用來 clamp 第一筆時間
         start_time_raw = st.text_input("起始時間（clamp 第一筆；HH:MM:SS）", value="08:05:00", key="putaway_global_start_time")
         global_start_time = _parse_time_any(start_time_raw)
         if global_start_time is None:
@@ -774,10 +780,10 @@ def main():
 
         preview = "、".join([f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in exclude_idle_ranges]) if exclude_idle_ranges else "（無）"
         st.caption(f"✅ 已讀取排除空窗時段：{preview}")
-        st.caption("⚠️ 若你改了排除空窗/門檻/起始時間/上架人設定/棚別主檔，需再按一次「🚀 產出 KPI」才會重新計算。")
+        st.caption("⚠️ 若你改了條件/棚別主檔，需再按一次「🚀 產出 KPI」才會重新計算。")
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
-    # ✅ 棚別主檔要在主畫面（非 sidebar）
+    # ✅ 棚別主檔在主畫面
     card_open("📚 棚別主檔（儲位明細）")
     slot_master_file = st.file_uploader(
         "上傳棚別主檔（需含欄位：『儲位』『棚別』）",
@@ -817,7 +823,7 @@ def main():
         "slot_hash": slot_hash,
     }
     if last and last.get("params") and last.get("params") != current_params:
-        st.warning("⚠️ 你已變更條件（含起始時間/上架人設定/棚別主檔），請再按一次「🚀 產出 KPI」才會套用新條件。")
+        st.warning("⚠️ 你已變更條件（含棚別主檔），請再按一次「🚀 產出 KPI」才會套用新條件。")
 
     # ✅ 計算
     if run_clicked:
@@ -852,13 +858,13 @@ def main():
             data["__dt__"] = pd.to_datetime(data[revdt_col], errors="coerce")
             data["__code__"] = data[user_col].astype(str).str.strip()
 
-            # ✅ 上架人姓名沿用（上架區域本版不再拿來做比對）
+            # ✅ 上架人姓名
             people_settings = _get_putaway_people_settings()
             custom_name_map = {k: v.get("name", "") for k, v in people_settings.items() if v.get("name")}
             merged_name_map = {**NAME_MAP, **custom_name_map}
             data["對應姓名"] = data["__code__"].map(merged_name_map).fillna("")
 
-            # ✅ 棚別比對（核心）：用「到」(儲位) → 棚別主檔對應出「棚別」
+            # ✅ 棚別比對（到→棚別）
             data["__to_loc__"] = data["到"].astype(str).str.strip()
 
             slot_map_shelf = {}
@@ -868,17 +874,15 @@ def main():
                     if not slot_master_df.empty:
                         slot_map_shelf = dict(zip(slot_master_df["儲位"], slot_master_df["棚別"]))
                     else:
-                        st.warning("⚠️ 棚別主檔讀取成功但未找到必要欄位（需含：儲位、棚別），將不計算『比對棚別筆數』。")
+                        st.warning("⚠️ 棚別主檔讀取成功但未找到必要欄位（需含：儲位、棚別），將不計算棚別。")
                 except Exception as e:
-                    st.warning(f"⚠️ 棚別主檔讀取失敗：{e}，將不計算『比對棚別筆數』。")
-                    slot_map_shelf = {}
+                    st.warning(f"⚠️ 棚別主檔讀取失敗：{e}，將不計算棚別。")
 
             if slot_map_shelf:
                 data["棚別"] = data["__to_loc__"].map(slot_map_shelf).fillna("")
             else:
                 data["棚別"] = ""
 
-            # ✅ 比對成功定義：到 → 棚別 查得到（棚別非空）
             data["__shelf_match__"] = data["棚別"].astype(str).str.strip().ne("")
 
             dt_data = data.dropna(subset=["__dt__"]).copy()
@@ -889,30 +893,50 @@ def main():
 
             dt_data["日期"] = dt_data["__dt__"].dt.date
 
-            # ✅ 主畫面用：棚別比對彙總 + 未比對明細（棚別空白）
+            # ✅ 棚別未比對抽樣
             compare_df = dt_data.copy()
             compare_df["到(儲位)"] = compare_df["__to_loc__"]
             compare_df["比對成功"] = compare_df["__shelf_match__"].fillna(False).astype(bool)
-
-            compare_summary = (
-                compare_df.groupby([user_col, "對應姓名"], dropna=False)
-                .agg(
-                    總筆數=("__dt__", "size"),
-                    比對棚別筆數=("比對成功", "sum"),
-                )
-                .reset_index()
-            )
-            compare_summary["比對棚別率"] = compare_summary.apply(
-                lambda r: (int(r["比對棚別筆數"]) / int(r["總筆數"])) if int(r["總筆數"]) > 0 else 0.0,
-                axis=1,
-            )
 
             compare_unmatch = compare_df[~compare_df["比對成功"]].copy()
             show_cols = ["__dt__", "日期", user_col, "對應姓名", "到(儲位)", "棚別", "__sheet__"]
             show_cols = [c for c in show_cols if c in compare_unmatch.columns]
             compare_unmatch = compare_unmatch[show_cols].sort_values(["日期", "__dt__"]).head(5000)
 
-            # ✅ 日彙總（含比對棚別筆數/率：整體/上午/下午）
+            # ✅ ✅ 你要的：每個人每個棚別各幾筆
+            # 我把「棚別空白」也算一個分類：『未比對』
+            shelf_for_group = compare_df["棚別"].astype(str).str.strip()
+            shelf_for_group = shelf_for_group.where(shelf_for_group.ne(""), "未比對")
+
+            shelf_person_long = (
+                compare_df.assign(_棚別分類=shelf_for_group)
+                .groupby([user_col, "對應姓名", "_棚別分類"], dropna=False)
+                .size()
+                .reset_index(name="筆數")
+                .rename(columns={"_棚別分類": "棚別"})
+                .sort_values([user_col, "棚別", "筆數"], ascending=[True, True, False])
+            )
+
+            # 樞紐表：每人 × 棚別
+            if not shelf_person_long.empty:
+                shelf_person_pivot = (
+                    shelf_person_long.pivot_table(
+                        index=[user_col, "對應姓名"],
+                        columns="棚別",
+                        values="筆數",
+                        aggfunc="sum",
+                        fill_value=0,
+                    )
+                    .reset_index()
+                )
+                # 欄位排序（把 未比對 放最後）
+                cols = [c for c in shelf_person_pivot.columns if c not in (user_col, "對應姓名")]
+                cols_sorted = [c for c in cols if c != "未比對"] + (["未比對"] if "未比對" in cols else [])
+                shelf_person_pivot = shelf_person_pivot[[user_col, "對應姓名"] + cols_sorted]
+            else:
+                shelf_person_pivot = pd.DataFrame()
+
+            # ✅ 日彙總（含比對棚別筆數/率）
             daily = (
                 dt_data.groupby([user_col, "對應姓名", "日期"], dropna=False)
                 .apply(lambda g: compute_am_pm_for_group(
@@ -1015,6 +1039,8 @@ def main():
                 daily=daily,
                 detail_long=detail_long,
                 compare_unmatch=compare_unmatch,
+                shelf_person_long=shelf_person_long,
+                shelf_person_pivot=shelf_person_pivot,
                 target_eff=float(target_eff),
             )
             xlsx_name = f"{uploaded.name.rsplit('.', 1)[0]}_上架績效.xlsx"
@@ -1035,8 +1061,9 @@ def main():
                 "xlsx_name": xlsx_name,
                 "total_match": int(total_match),
                 "match_rate_all": float(match_rate_all),
-                "compare_summary": compare_summary,
                 "compare_unmatch": compare_unmatch,
+                "shelf_person_long": shelf_person_long,
+                "shelf_person_pivot": shelf_person_pivot,
             }
 
     # ======================
@@ -1059,6 +1086,10 @@ def main():
     total_match = int(last.get("total_match", 0))
     match_rate_all = float(last.get("match_rate_all", 0.0))
 
+    shelf_person_long = last.get("shelf_person_long", pd.DataFrame())
+    shelf_person_pivot = last.get("shelf_person_pivot", pd.DataFrame())
+    compare_unmatch = last.get("compare_unmatch", pd.DataFrame())
+
     # ✅ 主畫面 KPI
     card_open("📌 總覽 KPI")
     render_kpis([
@@ -1071,38 +1102,48 @@ def main():
     ])
     card_close()
 
-    # ✅ 主畫面：棚別比對（到→棚別）
-    compare_summary = last.get("compare_summary", pd.DataFrame())
-    compare_unmatch = last.get("compare_unmatch", pd.DataFrame())
+    # ✅ 主畫面：每人每棚別筆數（你要的）
+    card_open("🏷️ 每人每棚別筆數（到 → 棚別）")
 
-    card_open("🧩 棚別比對（到 → 棚別）")
-
-    if compare_summary is None or compare_summary.empty:
-        st.info("尚未提供棚別主檔（或主檔欄位不足：需含『儲位』『棚別』），因此目前不顯示棚別比對。")
+    if shelf_person_long is None or shelf_person_long.empty:
+        st.info("尚未計算出棚別統計（可能尚未上傳棚別主檔，或資料為空）。")
     else:
-        st.markdown(f"#### 📈 比對棚別率排行（Top {top_n_show}）")
-        rank_df = compare_summary[[user_col, "對應姓名", "總筆數", "比對棚別筆數", "比對棚別率"]].copy()
-        rank_df["姓名"] = rank_df["對應姓名"].where(rank_df["對應姓名"].astype(str).str.len() > 0, rank_df[user_col].astype(str))
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            show_only_matched = st.checkbox("只看已比對棚別（排除『未比對』）", value=False, key="only_matched_shelf")
+        with c2:
+            only_top_shelves = st.number_input("只顯示棚別欄位 Top N（樞紐表用；0=全部）", min_value=0, max_value=200, value=0, step=5, key="top_shelf_cols")
 
-        bar_topN(
-            rank_df.rename(columns={"比對棚別率": "比對率"})[["姓名", "比對率", "比對棚別筆數", "總筆數"]],
-            x_col="姓名",
-            y_col="比對率",
-            hover_cols=["比對棚別筆數", "總筆數"],
-            top_n=top_n_show,
-            target=1.0,  # 100% 目標
+        df_show_long = shelf_person_long.copy()
+        if show_only_matched:
+            df_show_long = df_show_long[df_show_long["棚別"] != "未比對"].copy()
+
+        st.markdown("#### 📋 長表（每人×棚別：筆數）")
+        st.dataframe(
+            df_show_long.sort_values([user_col, "棚別", "筆數"], ascending=[True, True, False]),
+            use_container_width=True,
+            hide_index=True,
         )
 
-        st.markdown("#### 📋 每人比對彙總")
-        show = compare_summary.sort_values(["比對棚別率", "比對棚別筆數"], ascending=[False, False]).copy()
-        st.dataframe(show, use_container_width=True, hide_index=True)
+        st.markdown("#### 🧱 樞紐表（每人一列、每棚別一欄）")
+        df_piv = shelf_person_pivot.copy()
+        if show_only_matched and not df_piv.empty and "未比對" in df_piv.columns:
+            df_piv = df_piv.drop(columns=["未比對"])
+
+        # 棚別欄 TopN（依總筆數排序）
+        if only_top_shelves and only_top_shelves > 0 and not df_piv.empty:
+            shelf_cols = [c for c in df_piv.columns if c not in (user_col, "對應姓名")]
+            totals = df_piv[shelf_cols].sum(axis=0).sort_values(ascending=False)
+            keep = list(totals.head(int(only_top_shelves)).index)
+            df_piv = df_piv[[user_col, "對應姓名"] + keep]
+
+        st.dataframe(df_piv, use_container_width=True, hide_index=True)
 
         st.markdown("#### 🔎 未比對明細（棚別空白，最多 5000 筆）")
         if compare_unmatch is None or compare_unmatch.empty:
             st.success("全部比對成功 ✅")
         else:
             st.dataframe(compare_unmatch, use_container_width=True, hide_index=True)
-            st.caption("未比對原因：『到』(儲位) 在棚別主檔找不到對應棚別。")
 
     card_close()
 
