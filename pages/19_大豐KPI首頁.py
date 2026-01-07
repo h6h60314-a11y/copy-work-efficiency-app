@@ -13,6 +13,7 @@ ALLOW_PAGES = {
     "pages/21_進貨課 - 上架量體.py",  # ✅ 新增：上架量體
     "pages/4_儲位使用率.py",
     "pages/22_進貨課 - 總揀筆數.py",
+    "pages/25_整體作業工時.py",
 }
 
 
@@ -163,6 +164,13 @@ def main():
     "進貨課 - 總揀筆數",
     "pages/22_進貨課 - 總揀筆數.py",
     "多檔批次｜成箱/零散(或ALL)｜排除儲位｜回填儲位類型｜單頁Excel輸出",
+    )
+
+    _nav_item(
+        "🕒",
+        "整體作業工時",
+        "pages/25_整體作業工時.py",
+        "出勤報表｜排除空打卡＋外倉職務｜工時摘要＋明細下載",
     )
     
     st.markdown("</div>", unsafe_allow_html=True)
