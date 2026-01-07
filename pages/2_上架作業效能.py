@@ -14,7 +14,7 @@ from common_ui import (
     bar_topN,
     card_open,
     card_close,
-    download_excel_card,   # ✅ 一行=按鈕（且外框不分段）
+    download_excel_card,
     sidebar_controls,
 )
 
@@ -100,9 +100,9 @@ def _parse_time_any(x: Any) -> Optional[dt.time]:
 
 
 # =========================================================
-# 上架人設定（session_state）
+# 上架人設定（session_state）：只保留 code/name/area
 # =========================================================
-PUTAWAY_PEOPLE_STATE_KEY = "putaway_people_settings"  # code -> {name, area, start_time}
+PUTAWAY_PEOPLE_STATE_KEY = "putaway_people_settings"  # code -> {name, area}
 
 def _get_putaway_people_settings() -> Dict[str, Dict[str, str]]:
     if PUTAWAY_PEOPLE_STATE_KEY not in st.session_state:
@@ -112,9 +112,6 @@ def _get_putaway_people_settings() -> Dict[str, Dict[str, str]]:
 def _normalize_code(x: Any) -> str:
     return str(x).strip()
 
-def _format_time_str(t: Optional[dt.time]) -> str:
-    return t.strftime("%H:%M:%S") if isinstance(t, dt.time) else ""
-
 def render_putaway_people_settings_panel():
     settings = _get_putaway_people_settings()
 
@@ -122,7 +119,6 @@ def render_putaway_people_settings_panel():
         code = st.text_input("上架人代碼（可貼上）", key="putaway_person_code")
         name = st.text_input("姓名（中文可輸入）", key="putaway_person_name")
         area = st.selectbox("區域", ["低空", "高空"], index=0, key="putaway_person_area")
-        start_raw = st.text_input("起始時間（HH:MM:SS）", value="08:05:00", key="putaway_person_start")
 
         c1, c2 = st.columns(2)
         with c1:
@@ -131,11 +127,9 @@ def render_putaway_people_settings_panel():
                 if not c:
                     st.error("請先輸入上架人代碼")
                 else:
-                    stt = _parse_time_any(start_raw)
                     settings[c] = {
                         "name": str(name).strip(),
                         "area": str(area).strip(),
-                        "start_time": _format_time_str(stt) if stt else str(start_raw).strip(),
                     }
                     st.success(f"已更新：{c}")
 
@@ -147,7 +141,7 @@ def render_putaway_people_settings_panel():
 
         if settings:
             df = pd.DataFrame(
-                [{"代碼": k, "姓名": v.get("name",""), "區域": v.get("area",""), "起始時間": v.get("start_time","")} for k, v in settings.items()]
+                [{"代碼": k, "姓名": v.get("name",""), "區域": v.get("area","")} for k, v in settings.items()]
             ).sort_values(["區域", "代碼"], ascending=[True, True])
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
@@ -158,14 +152,6 @@ def render_putaway_people_settings_panel():
 # sidebar_controls 排除區間解析
 # =========================================================
 def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
-    """
-    支援：
-    - [(time,time), ...]
-    - [("10:00","10:15"), ...]
-    - [{"start":"10:00","end":"10:15"}, ...]
-    - {"windows":[...]} 之類包一層
-    - "10:00-10:15,12:30-13:30" (字串)
-    """
     if val is None:
         return EXCLUDE_IDLE_RANGES_DEFAULT
 
@@ -291,7 +277,7 @@ def prepare_filtered_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =========================================================
-# 計算：休息規則 / 空窗排除 / 第一筆 clamp
+# 計算：休息規則 / 空窗排除 / 第一筆 clamp（用全域起始時間）
 # =========================================================
 def break_minutes_for_span(first_dt: pd.Timestamp, last_dt: pd.Timestamp) -> Tuple[int, str]:
     if pd.isna(first_dt) or pd.isna(last_dt):
@@ -330,11 +316,6 @@ def _coerce_dt_series(series_dt: pd.Series) -> pd.Series:
 
 
 def _clamp_first(first_dt: pd.Timestamp, last_dt: pd.Timestamp, clamp_dt: Optional[pd.Timestamp]) -> pd.Timestamp:
-    """
-    ✅ 第一筆時間 clamp 到 起始時間：
-    - clamp_dt 存在且 first < clamp_dt <= last → first = clamp_dt
-    - 其他情況不動
-    """
     if clamp_dt is None or pd.isna(first_dt) or pd.isna(last_dt):
         return first_dt
     if (first_dt < clamp_dt) and (clamp_dt <= last_dt):
@@ -348,16 +329,11 @@ def _compute_idle(
     exclude_ranges: List[Tuple[dt.time, dt.time]],
     clamp_dt: Optional[pd.Timestamp] = None,
 ) -> Tuple[int, str]:
-    """
-    ✅ 空窗從 clamp_dt 起算（若有設定起始時間）
-    - 不會去刪掉筆數，只是讓空窗/區間計算從 clamp 起點開始
-    """
     s = _coerce_dt_series(series_dt).sort_values()
     if s.size < 2:
         return 0, ""
 
     if clamp_dt is not None and pd.notna(clamp_dt):
-        # 只拿 clamp_dt 之後的點來算空窗，並把 clamp_dt 當作起點插入
         s2 = s[s >= clamp_dt].copy()
         if s2.empty:
             return 0, ""
@@ -396,11 +372,10 @@ def compute_am_pm_for_group(
     g: pd.DataFrame,
     idle_threshold_min: int,
     exclude_idle_ranges: List[Tuple[dt.time, dt.time]],
-    start_time: Optional[dt.time] = None,
+    start_time: Optional[dt.time] = None,  # ✅ 全域起始時間，用來 clamp
 ) -> pd.Series:
     times = _coerce_dt_series(g["__dt__"])
     if times.empty:
-        # 讓下游穩定
         return pd.Series({
             "第一筆時間": pd.NaT, "最後一筆時間": pd.NaT, "當日筆數": 0,
             "休息分鐘_整體": 0, "命中規則": "無時間資料",
@@ -416,14 +391,11 @@ def compute_am_pm_for_group(
             "下午_空窗分鐘_扣休": 0, "下午_空窗時段": "",
         })
 
-    # ✅ 依當天日期組合起始時間（clamp 基準）
     clamp_dt_whole: Optional[pd.Timestamp] = None
     if isinstance(start_time, dt.time):
         clamp_dt_whole = pd.Timestamp.combine(times.min().date(), start_time)
 
-    # -------------------------
-    # 上午：07:00–12:30（不扣休）
-    # -------------------------
+    # 上午
     t_am = times[times.dt.time.between(AM_START, AM_END)]
     am_first, am_last, am_cnt = _span_metrics(t_am)
     clamp_dt_am = None
@@ -442,9 +414,7 @@ def compute_am_pm_for_group(
         clamp_dt=am_first_adj if (am_cnt > 0 and pd.notna(am_first_adj)) else None,
     )
 
-    # -------------------------
-    # 下午：13:30–23:59:59（扣休）
-    # -------------------------
+    # 下午
     t_pm = times[times.dt.time.between(PM_START, PM_END)]
     pm_first, pm_last, pm_cnt = _span_metrics(t_pm)
     clamp_dt_pm = None
@@ -455,7 +425,7 @@ def compute_am_pm_for_group(
     pm_first_adj = _clamp_first(pm_first, pm_last, clamp_dt_pm)
 
     if pm_cnt > 0 and pd.notna(pm_first_adj) and pd.notna(pm_last):
-        pm_break, pm_rule = break_minutes_for_span(pm_first_adj, pm_last)  # ✅ 用 clamp 後第一筆
+        pm_break, pm_rule = break_minutes_for_span(pm_first_adj, pm_last)
         raw_pm_mins = (pm_last - pm_first_adj).total_seconds() / 60.0
         pm_mins = max(int(round(raw_pm_mins - pm_break)), 0)
     else:
@@ -469,14 +439,12 @@ def compute_am_pm_for_group(
         clamp_dt=pm_first_adj if (pm_cnt > 0 and pd.notna(pm_first_adj)) else None,
     )
 
-    # -------------------------
-    # 整體：扣休 + clamp（空窗不統計於整體）
-    # -------------------------
+    # 整體
     whole_first, whole_last, day_cnt = _span_metrics(times)
     whole_first_adj = _clamp_first(whole_first, whole_last, clamp_dt_whole)
 
     if day_cnt > 0 and pd.notna(whole_first_adj) and pd.notna(whole_last):
-        whole_break, br_tag_whole = break_minutes_for_span(whole_first_adj, whole_last)  # ✅ 用 clamp 後第一筆
+        whole_break, br_tag_whole = break_minutes_for_span(whole_first_adj, whole_last)
         raw_whole_mins = (whole_last - whole_first_adj).total_seconds() / 60.0
         whole_mins = max(int(round(raw_whole_mins - whole_break)), 0)
     else:
@@ -540,10 +508,6 @@ def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFC
 
 
 def write_block_report(writer, detail_long: pd.DataFrame, user_col: str, target_eff: float):
-    """
-    報表_區塊：依日期分成 上午/下午兩塊
-    ★ 不含「命中規則」欄位
-    """
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
 
@@ -706,15 +670,19 @@ def build_excel_bytes(
 # =========================================================
 def main():
     inject_logistics_theme()
-    set_page("上架產能分析（Putaway KPI）", icon="📦", subtitle="總上組（上架）｜上午/下午分段｜效率門檻著色｜第一筆 clamp 起始時間｜報表_區塊輸出")
+    set_page(
+        "上架產能分析（Putaway KPI）",
+        icon="📦",
+        subtitle="總上組（上架）｜上午/下午分段｜效率門檻著色｜第一筆 clamp（全域起始時間）｜報表_區塊輸出"
+    )
 
     if "putaway_last" not in st.session_state:
         st.session_state.putaway_last = None
 
-    # Sidebar：上架人設定（新增）
+    # Sidebar：上架人設定（✅ 不含起始時間）
     render_putaway_people_settings_panel()
 
-    # Sidebar：統一條件（排除區間手動輸入 HH:MM）
+    # Sidebar：統一條件
     controls = sidebar_controls(default_top_n=30, enable_exclude_windows=True, state_key_prefix="putaway")
     top_n = int(controls.get("top_n", 30))
 
@@ -726,9 +694,17 @@ def main():
         target_eff = st.number_input("達標門檻（效率 ≥）", min_value=1, max_value=999, value=int(TARGET_EFF_DEFAULT), step=1)
         idle_threshold = st.number_input("空窗門檻（分鐘 ≥ 才算）", min_value=1, max_value=240, value=int(IDLE_MIN_THRESHOLD_DEFAULT), step=1)
 
+        # ✅ 全域起始時間：用來 clamp 第一筆時間
+        start_time_raw = st.text_input("起始時間（clamp 第一筆；HH:MM:SS）", value="08:05:00", key="putaway_global_start_time")
+        global_start_time = _parse_time_any(start_time_raw)
+        if global_start_time is None:
+            st.warning("⚠️ 起始時間格式不正確，將不進行 clamp（請用 HH:MM 或 HH:MM:SS）")
+        else:
+            st.caption(f"✅ clamp 起始時間：{global_start_time.strftime('%H:%M:%S')}")
+
         preview = "、".join([f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in exclude_idle_ranges]) if exclude_idle_ranges else "（無）"
         st.caption(f"✅ 已讀取排除空窗時段：{preview}")
-        st.caption("⚠️ 若你改了排除時段/門檻/上架人起始時間，需再按一次「🚀 產出 KPI」才會重新計算。")
+        st.caption("⚠️ 若你改了排除空窗/門檻/起始時間/上架人設定，需再按一次「🚀 產出 KPI」才會重新計算。")
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
     # 上傳
@@ -741,10 +717,10 @@ def main():
     run_clicked = st.button("🚀 產出 KPI", type="primary", disabled=uploaded is None)
     card_close()
 
-    # ✅ 條件變更提醒（避免以為沒有套用）
+    # ✅ 條件變更提醒
     last = st.session_state.putaway_last
     people_settings_snapshot = _get_putaway_people_settings()
-    people_hash = str(sorted([(k, v.get("name",""), v.get("area",""), v.get("start_time","")) for k, v in people_settings_snapshot.items()]))
+    people_hash = str(sorted([(k, v.get("name",""), v.get("area","")) for k, v in people_settings_snapshot.items()]))
 
     current_params = {
         "target_eff": int(target_eff),
@@ -752,11 +728,12 @@ def main():
         "exclude_idle_ranges": [(a.strftime("%H:%M:%S"), b.strftime("%H:%M:%S")) for a, b in exclude_idle_ranges],
         "top_n": int(top_n),
         "people_hash": people_hash,
+        "global_start_time": global_start_time.strftime("%H:%M:%S") if global_start_time else "",
     }
     if last and last.get("params") and last.get("params") != current_params:
-        st.warning("⚠️ 你已變更側邊欄條件（含排除空窗/上架人起始時間），請再按一次「🚀 產出 KPI」才會套用新條件。")
+        st.warning("⚠️ 你已變更側邊欄條件（含起始時間/上架人設定），請再按一次「🚀 產出 KPI」才會套用新條件。")
 
-    # ✅ 計算：只在按下「產出 KPI」時跑一次，並存到 session_state
+    # ✅ 計算
     if run_clicked:
         with st.spinner("計算中，請稍候..."):
             sheets = read_excel_any_quiet_bytes(uploaded.name, uploaded.getvalue())
@@ -789,19 +766,14 @@ def main():
             data["__dt__"] = pd.to_datetime(data[revdt_col], errors="coerce")
             data["__code__"] = data[user_col].astype(str).str.strip()
 
-            # ✅ 上架人設定：姓名/區域/起始時間（起始時間用來 clamp 第一筆）
+            # ✅ 上架人設定：姓名/區域
             people_settings = _get_putaway_people_settings()
             custom_name_map = {k: v.get("name", "") for k, v in people_settings.items() if v.get("name")}
             custom_area_map = {k: v.get("area", "") for k, v in people_settings.items() if v.get("area")}
-            custom_start_map = {k: v.get("start_time", "") for k, v in people_settings.items() if v.get("start_time")}
 
             merged_name_map = {**NAME_MAP, **custom_name_map}
             data["對應姓名"] = data["__code__"].map(merged_name_map).fillna("")
             data["上架區域"] = data["__code__"].map(custom_area_map).fillna("")
-            data["上架起始時間_raw"] = data["__code__"].map(custom_start_map).fillna("")
-
-            # ✅ 解析起始時間為 time（解析失敗就當 None）
-            data["__start_time__"] = data["上架起始時間_raw"].apply(_parse_time_any)
 
             dt_data = data.dropna(subset=["__dt__"]).copy()
             if dt_data.empty:
@@ -811,23 +783,13 @@ def main():
 
             dt_data["日期"] = dt_data["__dt__"].dt.date
 
-            # ✅ 每人每日：把 start_time 帶入 compute（用來 clamp 第一筆）
-            def _group_start_time(g: pd.DataFrame) -> Optional[dt.time]:
-                if "__start_time__" not in g.columns:
-                    return None
-                s = g["__start_time__"].dropna()
-                if s.empty:
-                    return None
-                v = s.iloc[0]
-                return v if isinstance(v, dt.time) else None
-
             daily = (
                 dt_data.groupby([user_col, "對應姓名", "日期"], dropna=False)
                 .apply(lambda g: compute_am_pm_for_group(
                     g,
                     idle_threshold_min=int(idle_threshold),
                     exclude_idle_ranges=exclude_idle_ranges,
-                    start_time=_group_start_time(g),  # ✅ clamp 基準
+                    start_time=global_start_time,  # ✅ 全域起始時間 clamp
                 ))
                 .reset_index()
             )
@@ -873,7 +835,6 @@ def main():
             }
             summary_out = pd.concat([summary, pd.DataFrame([total_row])], ignore_index=True)
 
-            # 明細_時段（長表）
             long_rows = []
             for _, r in daily.iterrows():
                 if int(r["上午_筆數"]) > 0:
@@ -920,7 +881,7 @@ def main():
             }
 
     # ======================
-    # 顯示：一律從 session_state 取（按匯出不會消失）
+    # 顯示（從 session_state）
     # ======================
     last = st.session_state.putaway_last
     if not last:
@@ -987,3 +948,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
