@@ -33,6 +33,28 @@ IDLE_MIN_THRESHOLD_DEFAULT = 10
 AM_START, AM_END = dt.time(7, 0, 0), dt.time(12, 30, 0)
 PM_START, PM_END = dt.time(13, 30, 0), dt.time(23, 59, 59)
 
+# ✅ 儲位類型區碼（棚別區碼 001/002/... 對應）
+STORAGE_TYPE_ZONES = {
+    "輕型料架": ["001", "002", "003", "017", "016"],
+    "落地儲": ["014", "018", "019", "020", "010", "081", "401", "402", "403", "015"],
+    "重型低空": ["011", "012", "013", "031", "032", "033", "034", "035", "036", "037", "038"],
+    "高空儲": [
+        "021", "022", "023",
+        "041", "042", "043",
+        "051", "052", "053", "054", "055", "056", "057",
+        "301", "302", "303", "304", "305", "306",
+    ],
+}
+ZONE_TO_TYPE = {z: k for k, zs in STORAGE_TYPE_ZONES.items() for z in zs}
+
+def _type_to_area(storage_type: str) -> str:
+    # 你現場通常是：高空儲 = 高空，其餘 = 低空
+    if storage_type == "高空儲":
+        return "高空"
+    if storage_type in ("輕型料架", "重型低空", "落地儲"):
+        return "低空"
+    return ""
+
 # ✅ 既有代碼→姓名（仍保留）
 NAME_MAP = {
     "20200924001": "黃雅君", "20210805001": "郭中合", "20220505002": "阮文青明",
@@ -76,7 +98,6 @@ EXCLUDE_IDLE_RANGES_DEFAULT = [
     (dt.time(20, 30, 0), dt.time(20, 45, 0)),
 ]
 
-
 # =========================================================
 # 通用：時間解析
 # =========================================================
@@ -97,7 +118,6 @@ def _parse_time_any(x: Any) -> Optional[dt.time]:
     if not (0 <= hh <= 23 and 0 <= mm <= 59 and 0 <= ss <= 59):
         return None
     return dt.time(hh, mm, ss)
-
 
 # =========================================================
 # 上架人設定（session_state）：只保留 code/name/area
@@ -147,7 +167,6 @@ def render_putaway_people_settings_panel():
         else:
             st.caption("（尚未設定）")
 
-
 # =========================================================
 # sidebar_controls 排除區間解析
 # =========================================================
@@ -195,7 +214,6 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
 
     return out if out else EXCLUDE_IDLE_RANGES_DEFAULT
 
-
 def _extract_exclude_value_from_controls(controls: Dict[str, Any]) -> Any:
     if not isinstance(controls, dict) or not controls:
         return None
@@ -215,7 +233,6 @@ def _extract_exclude_value_from_controls(controls: Dict[str, Any]) -> Any:
         if ("exclude" in lk) and (("window" in lk) or ("range" in lk)) and v:
             return v
     return None
-
 
 # =========================================================
 # 讀檔（bytes）
@@ -237,12 +254,10 @@ def read_excel_any_quiet_bytes(name: str, content: bytes) -> Dict[str, pd.DataFr
         raise Exception("CSV 讀取失敗（請確認編碼）")
     raise Exception("不支援的副檔名（僅支援 xlsx/xlsm/xls/csv）")
 
-
 def _strip_cols(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
     return df
-
 
 def find_first_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     cols = [str(c).strip() for c in df.columns]
@@ -257,15 +272,12 @@ def find_first_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
             return norm_map[key]
     return None
 
-
 def normalize_to_qc(series: pd.Series) -> pd.Series:
     return series.astype(str).str.strip().str.upper().eq("QC")
-
 
 def to_not_excluded_mask(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.strip()
     return ~s.str.contains(TO_EXCLUDE_PATTERN, na=False)
-
 
 def prepare_filtered_df(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
@@ -275,9 +287,42 @@ def prepare_filtered_df(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     return df[normalize_to_qc(df["由"]) & to_not_excluded_mask(df["到"])].copy()
 
+# =========================================================
+# ✅ 棚別主檔（儲位明細）讀取與對應
+# =========================================================
+def _extract_zone3_from_shelf(shelf: Any) -> str:
+    s = "" if shelf is None else str(shelf).strip()
+    m = re.search(r"(\d{3})", s)
+    return m.group(1) if m else ""
+
+def load_slot_master_bytes(upload_name: str, content: bytes) -> pd.DataFrame:
+    sheets = read_excel_any_quiet_bytes(upload_name, content)
+    # 取第一張有資料的 sheet
+    df0 = None
+    for _, d in sheets.items():
+        if d is not None and not d.empty:
+            df0 = d
+            break
+    if df0 is None or df0.empty:
+        return pd.DataFrame()
+    df0 = _strip_cols(df0)
+
+    # 必要欄位：儲位、棚別
+    if "儲位" not in df0.columns or "棚別" not in df0.columns:
+        return pd.DataFrame()
+
+    out = df0[["儲位", "棚別"]].copy()
+    out["儲位"] = out["儲位"].astype(str).str.strip()
+    out["棚別"] = out["棚別"].astype(str).str.strip()
+    out["棚別_區碼3"] = out["棚別"].apply(_extract_zone3_from_shelf)
+    out["儲位類型_由棚別"] = out["棚別_區碼3"].map(ZONE_TO_TYPE).fillna("")
+    out["儲位區域_由棚別"] = out["儲位類型_由棚別"].apply(_type_to_area)
+    out = out.drop_duplicates(subset=["儲位"], keep="last")
+    return out
 
 # =========================================================
 # 計算：休息規則 / 空窗排除 / 第一筆 clamp（用全域起始時間）
+# + ✅ 比對棚別筆數（整體/上午/下午）
 # =========================================================
 def break_minutes_for_span(first_dt: pd.Timestamp, last_dt: pd.Timestamp) -> Tuple[int, str]:
     if pd.isna(first_dt) or pd.isna(last_dt):
@@ -287,7 +332,6 @@ def break_minutes_for_span(first_dt: pd.Timestamp, last_dt: pd.Timestamp) -> Tup
         if (stt >= st_ge) and (edt <= ed_le):
             return int(mins), str(tag)
     return 0, "未命中規則"
-
 
 def _subtract_exclusions(s_dt: pd.Timestamp, e_dt: pd.Timestamp, exclude_ranges):
     if s_dt >= e_dt or not exclude_ranges:
@@ -308,12 +352,10 @@ def _subtract_exclusions(s_dt: pd.Timestamp, e_dt: pd.Timestamp, exclude_ranges)
         segments = [(x, y) for (x, y) in new_segments if x < y]
     return segments
 
-
 def _coerce_dt_series(series_dt: pd.Series) -> pd.Series:
     if series_dt is None:
         return pd.Series([], dtype="datetime64[ns]")
     return pd.to_datetime(series_dt, errors="coerce").dropna()
-
 
 def _clamp_first(first_dt: pd.Timestamp, last_dt: pd.Timestamp, clamp_dt: Optional[pd.Timestamp]) -> pd.Timestamp:
     if clamp_dt is None or pd.isna(first_dt) or pd.isna(last_dt):
@@ -321,7 +363,6 @@ def _clamp_first(first_dt: pd.Timestamp, last_dt: pd.Timestamp, clamp_dt: Option
     if (first_dt < clamp_dt) and (clamp_dt <= last_dt):
         return clamp_dt
     return first_dt
-
 
 def _compute_idle(
     series_dt: pd.Series,
@@ -356,17 +397,14 @@ def _compute_idle(
 
     return int(total_min), "；".join(ranges_txt)
 
-
 def _span_metrics(series_dt: pd.Series) -> Tuple[pd.Timestamp, pd.Timestamp, int]:
     s = _coerce_dt_series(series_dt)
     if s.empty:
         return pd.NaT, pd.NaT, 0
     return s.min(), s.max(), int(s.size)
 
-
 def _eff(n: int, m_minutes: int) -> float:
     return round((n / m_minutes * 60.0), 2) if m_minutes and m_minutes > 0 else 0.0
-
 
 def compute_am_pm_for_group(
     g: pd.DataFrame,
@@ -389,11 +427,29 @@ def compute_am_pm_for_group(
             "下午_休息分鐘": 0, "下午_命中規則": "無時間資料",
             "下午_工時_分鐘_扣休": 0, "下午_效率_件每小時": 0.0,
             "下午_空窗分鐘_扣休": 0, "下午_空窗時段": "",
+
+            # ✅ 棚別比對
+            "比對棚別筆數": 0, "比對棚別率": 0.0,
+            "上午_比對棚別筆數": 0, "上午_比對棚別率": 0.0,
+            "下午_比對棚別筆數": 0, "下午_比對棚別率": 0.0,
         })
+
+    # ✅ 棚別比對旗標（若沒有主檔/沒有上架區域設定，會是 False）
+    shelf_match = g.get("__shelf_match__", pd.Series([False] * len(g), index=g.index))
+    shelf_match = shelf_match.fillna(False).astype(bool)
 
     clamp_dt_whole: Optional[pd.Timestamp] = None
     if isinstance(start_time, dt.time):
         clamp_dt_whole = pd.Timestamp.combine(times.min().date(), start_time)
+
+    # ✅ 用原始 g 的 __dt__（未 dropna 也沒關係，會 coerce）
+    g_dt = pd.to_datetime(g["__dt__"], errors="coerce")
+    am_mask = g_dt.dt.time.between(AM_START, AM_END)
+    pm_mask = g_dt.dt.time.between(PM_START, PM_END)
+
+    match_whole = int(shelf_match.sum())
+    match_am = int(shelf_match[am_mask].sum()) if am_mask is not None else 0
+    match_pm = int(shelf_match[pm_mask].sum()) if pm_mask is not None else 0
 
     # 上午
     t_am = times[times.dt.time.between(AM_START, AM_END)]
@@ -452,6 +508,11 @@ def compute_am_pm_for_group(
 
     whole_eff = _eff(day_cnt, whole_mins)
 
+    # ✅ 比對率
+    match_rate_whole = (match_whole / int(day_cnt)) if int(day_cnt) > 0 else 0.0
+    match_rate_am = (match_am / int(am_cnt)) if int(am_cnt) > 0 else 0.0
+    match_rate_pm = (match_pm / int(pm_cnt)) if int(pm_cnt) > 0 else 0.0
+
     return pd.Series({
         "第一筆時間": whole_first_adj, "最後一筆時間": whole_last, "當日筆數": int(day_cnt),
         "休息分鐘_整體": int(whole_break), "命中規則": br_tag_whole,
@@ -465,8 +526,15 @@ def compute_am_pm_for_group(
         "下午_休息分鐘": int(pm_break), "下午_命中規則": pm_rule,
         "下午_工時_分鐘_扣休": int(pm_mins), "下午_效率_件每小時": pm_eff,
         "下午_空窗分鐘_扣休": int(pm_idle_min), "下午_空窗時段": pm_idle_ranges,
-    })
 
+        # ✅ 新增：棚別比對
+        "比對棚別筆數": int(match_whole),
+        "比對棚別率": float(match_rate_whole),
+        "上午_比對棚別筆數": int(match_am),
+        "上午_比對棚別率": float(match_rate_am),
+        "下午_比對棚別筆數": int(match_pm),
+        "下午_比對棚別率": float(match_rate_pm),
+    })
 
 # =========================================================
 # Excel 匯出（bytes）
@@ -481,7 +549,6 @@ def autosize_columns(ws, df: pd.DataFrame):
         else:
             max_len = max(len(str(col)), 8)
         ws.column_dimensions[get_column_letter(i)].width = min(max_len + 2, 60)
-
 
 def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFCE", red="FFC7CE", target_eff=20):
     from openpyxl.styles import PatternFill
@@ -506,7 +573,6 @@ def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFC
         for c in range(1, ws.max_column + 1):
             ws.cell(row=r, column=c).fill = fill
 
-
 def write_block_report(writer, detail_long: pd.DataFrame, user_col: str, target_eff: float):
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
@@ -517,7 +583,7 @@ def write_block_report(writer, detail_long: pd.DataFrame, user_col: str, target_
         del wb[sheet_name]
     ws = wb.create_sheet(sheet_name)
 
-    header = ["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"]
+    header = ["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段", "比對棚別筆數", "比對棚別率"]
     title_font = Font(bold=True, size=14)
     sec_font = Font(bold=True, size=12)
     header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
@@ -575,6 +641,8 @@ def write_block_report(writer, detail_long: pd.DataFrame, user_col: str, target_
                     int(r["休息分鐘"]),
                     int(r["空窗分鐘"]),
                     r["空窗時段"],
+                    int(r.get("比對棚別筆數", 0)),
+                    float(r.get("比對棚別率", 0.0)),
                 ]
                 for c, v in enumerate(values, start=1):
                     cell = ws.cell(row=row, column=c, value=v)
@@ -594,7 +662,6 @@ def write_block_report(writer, detail_long: pd.DataFrame, user_col: str, target_
             max_len = max(max_len, len(str(v)) if v is not None else 0)
         ws.column_dimensions[get_column_letter(c)].width = min(max(max_len + 2, len(str(header[c - 1])) + 2), 60)
 
-
 def build_excel_bytes(
     user_col: str,
     summary_out: pd.DataFrame,
@@ -609,6 +676,8 @@ def build_excel_bytes(
             "總筆數", "總工時_分鐘_扣休", "效率_件每小時",
             "上午筆數", "上午工時_分鐘", "上午效率_件每小時",
             "下午筆數", "下午工時_分鐘_扣休", "下午效率_件每小時",
+            # ✅ 棚別比對（彙總）
+            "比對棚別筆數", "比對棚別率",
         ]
         summary_out[sum_cols].to_excel(writer, index=False, sheet_name="彙總")
         ws_sum = writer.sheets["彙總"]
@@ -624,6 +693,10 @@ def build_excel_bytes(
             "下午_第一筆", "下午_最後一筆", "下午_筆數", "下午_休息分鐘",
             "下午_工時_分鐘_扣休", "下午_效率_件每小時",
             "下午_空窗分鐘_扣休", "下午_空窗時段",
+            # ✅ 棚別比對（明細）
+            "比對棚別筆數", "比對棚別率",
+            "上午_比對棚別筆數", "上午_比對棚別率",
+            "下午_比對棚別筆數", "下午_比對棚別率",
         ]
         daily.sort_values([user_col, "日期", "第一筆時間"])[det_cols].to_excel(writer, index=False, sheet_name="明細")
         ws_det = writer.sheets["明細"]
@@ -637,6 +710,8 @@ def build_excel_bytes(
                 "筆數", "工時_分鐘", "休息分鐘",
                 "空窗分鐘", "空窗時段",
                 "效率_件每小時", "命中規則",
+                # ✅ 棚別比對（時段）
+                "比對棚別筆數", "比對棚別率",
             ]
             detail_long[long_cols].to_excel(writer, index=False, sheet_name="明細_時段")
             ws_long = writer.sheets["明細_時段"]
@@ -664,7 +739,6 @@ def build_excel_bytes(
 
     return out.getvalue()
 
-
 # =========================================================
 # Streamlit Page
 # =========================================================
@@ -673,7 +747,7 @@ def main():
     set_page(
         "上架產能分析（Putaway KPI）",
         icon="📦",
-        subtitle="總上組（上架）｜上午/下午分段｜效率門檻著色｜第一筆 clamp（全域起始時間）｜報表_區塊輸出"
+        subtitle="總上組（上架）｜上午/下午分段｜效率門檻著色｜第一筆 clamp（全域起始時間）｜報表_區塊輸出｜棚別比對"
     )
 
     if "putaway_last" not in st.session_state:
@@ -691,6 +765,15 @@ def main():
 
     with st.sidebar:
         st.markdown("---")
+
+        # ✅ 新增：棚別主檔上傳
+        slot_master_file = st.file_uploader(
+            "📚 棚別主檔（儲位明細：需含『儲位』『棚別』）",
+            type=["xlsx", "xlsm", "xls", "csv"],
+            key="putaway_slot_master",
+            help="用來把『到（儲位）』對應成『棚別』，再與上架人設定的『低空/高空』做比對。",
+        )
+
         target_eff = st.number_input("達標門檻（效率 ≥）", min_value=1, max_value=999, value=int(TARGET_EFF_DEFAULT), step=1)
         idle_threshold = st.number_input("空窗門檻（分鐘 ≥ 才算）", min_value=1, max_value=240, value=int(IDLE_MIN_THRESHOLD_DEFAULT), step=1)
 
@@ -704,7 +787,7 @@ def main():
 
         preview = "、".join([f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in exclude_idle_ranges]) if exclude_idle_ranges else "（無）"
         st.caption(f"✅ 已讀取排除空窗時段：{preview}")
-        st.caption("⚠️ 若你改了排除空窗/門檻/起始時間/上架人設定，需再按一次「🚀 產出 KPI」才會重新計算。")
+        st.caption("⚠️ 若你改了排除空窗/門檻/起始時間/上架人設定/棚別主檔，需再按一次「🚀 產出 KPI」才會重新計算。")
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
     # 上傳
@@ -713,6 +796,7 @@ def main():
         "上傳 Excel / CSV（需包含：由、到、修訂日期/時間、記錄輸入人）",
         type=["xlsx", "xlsm", "xls", "csv"],
         label_visibility="collapsed",
+        key="putaway_raw",
     )
     run_clicked = st.button("🚀 產出 KPI", type="primary", disabled=uploaded is None)
     card_close()
@@ -722,6 +806,10 @@ def main():
     people_settings_snapshot = _get_putaway_people_settings()
     people_hash = str(sorted([(k, v.get("name",""), v.get("area","")) for k, v in people_settings_snapshot.items()]))
 
+    slot_hash = ""
+    if slot_master_file is not None:
+        slot_hash = f"{slot_master_file.name}:{len(slot_master_file.getvalue())}"
+
     current_params = {
         "target_eff": int(target_eff),
         "idle_threshold": int(idle_threshold),
@@ -729,9 +817,10 @@ def main():
         "top_n": int(top_n),
         "people_hash": people_hash,
         "global_start_time": global_start_time.strftime("%H:%M:%S") if global_start_time else "",
+        "slot_hash": slot_hash,
     }
     if last and last.get("params") and last.get("params") != current_params:
-        st.warning("⚠️ 你已變更側邊欄條件（含起始時間/上架人設定），請再按一次「🚀 產出 KPI」才會套用新條件。")
+        st.warning("⚠️ 你已變更側邊欄條件（含起始時間/上架人設定/棚別主檔），請再按一次「🚀 產出 KPI」才會套用新條件。")
 
     # ✅ 計算
     if run_clicked:
@@ -775,6 +864,34 @@ def main():
             data["對應姓名"] = data["__code__"].map(merged_name_map).fillna("")
             data["上架區域"] = data["__code__"].map(custom_area_map).fillna("")
 
+            # ✅ 讀棚別主檔（可選）
+            slot_master_df = pd.DataFrame()
+            if slot_master_file is not None:
+                try:
+                    slot_master_df = load_slot_master_bytes(slot_master_file.name, slot_master_file.getvalue())
+                    if slot_master_df.empty:
+                        st.warning("⚠️ 棚別主檔讀取成功但未找到必要欄位（需含：儲位、棚別），將不計算『比對棚別筆數』。")
+                except Exception as e:
+                    st.warning(f"⚠️ 棚別主檔讀取失敗：{e}，將不計算『比對棚別筆數』。")
+                    slot_master_df = pd.DataFrame()
+
+            slot_map_area = {}
+            if not slot_master_df.empty:
+                slot_map_area = dict(zip(slot_master_df["儲位"], slot_master_df["儲位區域_由棚別"]))
+
+            # ✅ 建立棚別比對旗標：到(儲位) → 儲位區域 → 與上架區域比對
+            data["__to_loc__"] = data["到"].astype(str).str.strip()
+            if slot_map_area:
+                data["__slot_area__"] = data["__to_loc__"].map(slot_map_area).fillna("")
+            else:
+                data["__slot_area__"] = ""
+
+            data["__shelf_match__"] = (
+                (data["上架區域"].astype(str).str.strip() != "")
+                & (data["__slot_area__"].astype(str).str.strip() != "")
+                & (data["上架區域"].astype(str).str.strip() == data["__slot_area__"].astype(str).str.strip())
+            )
+
             dt_data = data.dropna(subset=["__dt__"]).copy()
             if dt_data.empty:
                 st.error("資料沒有可用的修訂日期時間，無法計算。")
@@ -804,6 +921,8 @@ def main():
                     上午工時_分鐘=("上午_工時_分鐘", "sum"),
                     下午筆數=("下午_筆數", "sum"),
                     下午工時_分鐘_扣休=("下午_工時_分鐘_扣休", "sum"),
+                    # ✅ 棚別比對（彙總）
+                    比對棚別筆數=("比對棚別筆數", "sum"),
                 )
             )
 
@@ -812,12 +931,18 @@ def main():
             summary["總工時_分鐘_扣休"] = summary["上午工時_分鐘"].fillna(0).astype(int) + summary["下午工時_分鐘_扣休"].fillna(0).astype(int)
             summary["效率_件每小時"] = summary.apply(lambda r: _eff(int(r["總筆數"]), int(r["總工時_分鐘_扣休"])), axis=1)
 
-            for c in ["總筆數", "總工時_分鐘_扣休", "上午筆數", "上午工時_分鐘", "下午筆數", "下午工時_分鐘_扣休"]:
+            for c in ["總筆數", "總工時_分鐘_扣休", "上午筆數", "上午工時_分鐘", "下午筆數", "下午工時_分鐘_扣休", "比對棚別筆數"]:
                 summary[c] = summary[c].fillna(0).astype(int)
+
+            summary["比對棚別率"] = summary.apply(lambda r: (int(r["比對棚別筆數"]) / int(r["總筆數"])) if int(r["總筆數"]) > 0 else 0.0, axis=1)
 
             total_people = int(summary[user_col].nunique())
             met_people = int((summary["效率_件每小時"] >= float(target_eff)).sum())
             rate = (met_people / total_people) if total_people > 0 else 0.0
+
+            total_match = int(summary["比對棚別筆數"].sum())
+            total_cnt = int(summary["總筆數"].sum())
+            match_rate_all = (total_match / total_cnt) if total_cnt > 0 else 0.0
 
             total_row = {
                 user_col: "整體合計",
@@ -832,6 +957,8 @@ def main():
                 "效率_件每小時": _eff(int(summary["總筆數"].sum()), int(summary["總工時_分鐘_扣休"].sum())),
                 "上午效率_件每小時": _eff(int(summary["上午筆數"].sum()), int(summary["上午工時_分鐘"].sum())),
                 "下午效率_件每小時": _eff(int(summary["下午筆數"].sum()), int(summary["下午工時_分鐘_扣休"].sum())),
+                "比對棚別筆數": int(total_match),
+                "比對棚別率": float(match_rate_all),
             }
             summary_out = pd.concat([summary, pd.DataFrame([total_row])], ignore_index=True)
 
@@ -846,6 +973,8 @@ def main():
                         "空窗分鐘": int(r["上午_空窗分鐘"]), "空窗時段": r["上午_空窗時段"],
                         "效率_件每小時": float(r["上午_效率_件每小時"]),
                         "命中規則": "上午不扣休",
+                        "比對棚別筆數": int(r.get("上午_比對棚別筆數", 0)),
+                        "比對棚別率": float(r.get("上午_比對棚別率", 0.0)),
                     })
                 if int(r["下午_筆數"]) > 0:
                     long_rows.append({
@@ -856,6 +985,8 @@ def main():
                         "空窗分鐘": int(r["下午_空窗分鐘_扣休"]), "空窗時段": r["下午_空窗時段"],
                         "效率_件每小時": float(r["下午_效率_件每小時"]),
                         "命中規則": str(r["下午_命中規則"]),
+                        "比對棚別筆數": int(r.get("下午_比對棚別筆數", 0)),
+                        "比對棚別率": float(r.get("下午_比對棚別率", 0.0)),
                     })
             detail_long = pd.DataFrame(long_rows)
             if not detail_long.empty:
@@ -878,6 +1009,9 @@ def main():
                 "rate": float(rate),
                 "xlsx_bytes": xlsx_bytes,
                 "xlsx_name": xlsx_name,
+                # ✅ 棚別比對 KPI
+                "total_match": int(total_match),
+                "match_rate_all": float(match_rate_all),
             }
 
     # ======================
@@ -898,12 +1032,17 @@ def main():
     xlsx_bytes = last["xlsx_bytes"]
     xlsx_name = last["xlsx_name"]
 
+    total_match = int(last.get("total_match", 0))
+    match_rate_all = float(last.get("match_rate_all", 0.0))
+
     card_open("📌 總覽 KPI")
     render_kpis([
         KPI("總人數", f"{total_people:,}"),
         KPI("達標人數", f"{met_people:,}"),
         KPI("達標率", f"{rate:.1%}"),
         KPI("達標門檻", f"效率 ≥ {int(target_eff_show)}"),
+        KPI("棚別比對筆數", f"{total_match:,}"),
+        KPI("棚別比對率", f"{match_rate_all:.1%}"),
     ])
     card_close()
 
@@ -945,7 +1084,5 @@ def main():
         label="⬇️ 匯出 KPI 報表（Excel）",
     )
 
-
 if __name__ == "__main__":
     main()
-
