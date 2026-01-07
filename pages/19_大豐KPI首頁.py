@@ -10,10 +10,11 @@ inject_logistics_theme()
 # ✅ 允許從 KPI 首頁導頁的模組清單（安全白名單）
 ALLOW_PAGES = {
     "pages/20_進貨課 - 驗收量體.py",
-    "pages/21_進貨課 - 上架量體.py",  # ✅ 新增：上架量體
+    "pages/21_進貨課 - 上架量體.py",
     "pages/4_儲位使用率.py",
     "pages/22_進貨課 - 總揀筆數.py",
     "pages/25_整體作業工時.py",
+    "pages/26_整體作業量體.py",  
 }
 
 
@@ -136,7 +137,6 @@ def main():
 
     st.markdown('<div class="kpi-list">', unsafe_allow_html=True)
 
-    # ✅ 20_進貨課 - 驗收量體
     _nav_item(
         "✅",
         "進貨課 - 驗收量體",
@@ -144,7 +144,6 @@ def main():
         "只保留「到=QC」｜SKU（唯一商品）｜ITEM（筆數）｜輸出Excel",
     )
 
-    # ✅ 21_進貨課 - 上架量體
     _nav_item(
         "📦",
         "進貨課 - 上架量體",
@@ -160,10 +159,10 @@ def main():
     )
 
     _nav_item(
-    "🎯",
-    "進貨課 - 總揀筆數",
-    "pages/22_進貨課 - 總揀筆數.py",
-    "多檔批次｜成箱/零散(或ALL)｜排除儲位｜回填儲位類型｜單頁Excel輸出",
+        "🎯",
+        "進貨課 - 總揀筆數",
+        "pages/22_進貨課 - 總揀筆數.py",
+        "多檔批次｜成箱/零散(或ALL)｜排除儲位｜回填儲位類型｜單頁Excel輸出",
     )
 
     _nav_item(
@@ -172,7 +171,14 @@ def main():
         "pages/25_整體作業工時.py",
         "出勤報表｜排除空打卡＋外倉職務｜工時摘要＋明細下載",
     )
-    
+
+    _nav_item(
+        "🧹",
+        "整體作業量體",
+        "pages/26_整體作業量體.py",
+        "刪除箱類型含站所｜計量單位數量＋出貨單位｜GM/一般倉統計｜Excel下載",
+    )
+
     st.markdown("</div>", unsafe_allow_html=True)
     card_close()
 
