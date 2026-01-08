@@ -567,6 +567,198 @@ def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFC
             ws.cell(row=r, column=cc).fill = fill
 
 
+def _fmt_ts_time(x: Any) -> str:
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return ""
+    if isinstance(x, pd.Timestamp):
+        if pd.isna(x):
+            return ""
+        return x.strftime("%H:%M:%S")
+    try:
+        xx = pd.to_datetime(x, errors="coerce")
+        if pd.isna(xx):
+            return ""
+        return xx.strftime("%H:%M:%S")
+    except Exception:
+        return ""
+
+
+def _build_shift_total_df(daily: pd.DataFrame, user_col: str, shift: str) -> pd.DataFrame:
+    """
+    shift='AM' or 'PM'
+    產出你截圖那種欄位：
+    代碼、姓名、筆數、工作區間、總分鐘、效率(件/時)、休息分鐘、空窗分鐘、空窗時段
+    """
+    if daily is None or daily.empty:
+        return pd.DataFrame(columns=["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"])
+
+    d = daily.copy()
+
+    if shift.upper() == "AM":
+        cnt_col = "上午_筆數"
+        first_col, last_col = "上午_第一筆", "上午_最後一筆"
+        mins_col = "上午_工時_分鐘"
+        eff_col = "上午_效率_件每小時"
+        rest_col = None  # 上午不扣休（你目前邏輯）
+        idle_min_col = "上午_空窗分鐘"
+        idle_rng_col = "上午_空窗時段"
+    else:
+        cnt_col = "下午_筆數"
+        first_col, last_col = "下午_第一筆", "下午_最後一筆"
+        mins_col = "下午_工時_分鐘_扣休"
+        eff_col = "下午_效率_件每小時"
+        rest_col = "下午_休息分鐘"
+        idle_min_col = "下午_空窗分鐘_扣休"
+        idle_rng_col = "下午_空窗時段"
+
+    d[cnt_col] = pd.to_numeric(d.get(cnt_col, 0), errors="coerce").fillna(0).astype(int)
+    d = d[d[cnt_col] > 0].copy()
+
+    if d.empty:
+        return pd.DataFrame(columns=["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"])
+
+    name_series = d["對應姓名"].astype(str).fillna("").str.strip()
+    code_series = d[user_col].astype(str).fillna("").str.strip()
+    d["_姓名顯示"] = name_series.where(name_series.ne(""), code_series)
+
+    d["工作區間"] = d.apply(lambda r: f"{_fmt_ts_time(r.get(first_col))} ~ {_fmt_ts_time(r.get(last_col))}".strip(), axis=1)
+
+    out = pd.DataFrame({
+        "代碼": code_series,
+        "姓名": d["_姓名顯示"],
+        "筆數": d[cnt_col].astype(int),
+        "工作區間": d["工作區間"],
+        "總分鐘": pd.to_numeric(d.get(mins_col, 0), errors="coerce").fillna(0).astype(int),
+        "效率(件/時)": pd.to_numeric(d.get(eff_col, 0), errors="coerce").fillna(0.0).round(2),
+        "休息分鐘": (pd.to_numeric(d.get(rest_col, 0), errors="coerce").fillna(0).astype(int) if rest_col else 0),
+        "空窗分鐘": pd.to_numeric(d.get(idle_min_col, 0), errors="coerce").fillna(0).astype(int),
+        "空窗時段": d.get(idle_rng_col, "").astype(str).fillna(""),
+    })
+
+    # 依你截圖：效率高到低（也可以改成代碼排序）
+    out = out.sort_values(["效率(件/時)", "代碼"], ascending=[False, True]).reset_index(drop=True)
+    return out
+
+
+def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
+    """
+    在同一張「總表」工作表，依日期輸出：
+    [YYYY-MM-DD 上架績效] / 上午表 / 下午表
+    """
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    thin = Side(style="thin", color="9CA3AF")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    fill_title = PatternFill("solid", fgColor="FFFFFF")
+    fill_header = PatternFill("solid", fgColor="E5E7EB")   # 灰
+    fill_am = PatternFill("solid", fgColor="D1FAE5")       # 淡綠
+    fill_pm = PatternFill("solid", fgColor="FDE2E2")       # 淡粉
+
+    font_title = Font(bold=True, size=14)
+    font_section = Font(bold=True, size=12)
+    font_header = Font(bold=True, size=11)
+    align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    headers = ["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"]
+    ncol = len(headers)
+
+    # 欄寬（接近你截圖）
+    col_widths = [12, 10, 6, 22, 8, 10, 8, 8, 60]
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    if daily is None or daily.empty or "日期" not in daily.columns:
+        ws["A1"] = "無可用資料"
+        return
+
+    dates = sorted([x for x in daily["日期"].dropna().unique()])
+    r = 1
+
+    for d0 in dates:
+        day_df = daily[daily["日期"] == d0].copy()
+
+        # Title
+        title = f"{d0} 上架績效"
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
+        c = ws.cell(row=r, column=1, value=title)
+        c.fill = fill_title
+        c.font = font_title
+        c.alignment = align_center
+        r += 1
+
+        # AM section
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
+        c = ws.cell(row=r, column=1, value="上午")
+        c.font = font_section
+        c.alignment = align_center
+        r += 1
+
+        # Header row
+        for j, h in enumerate(headers, start=1):
+            cell = ws.cell(row=r, column=j, value=h)
+            cell.fill = fill_header
+            cell.font = font_header
+            cell.alignment = align_center
+            cell.border = border
+        r += 1
+
+        am_tbl = _build_shift_total_df(day_df, user_col=user_col, shift="AM")
+        if am_tbl.empty:
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
+            c = ws.cell(row=r, column=1, value="（上午無資料）")
+            c.alignment = align_center
+            r += 1
+        else:
+            for _, row in am_tbl.iterrows():
+                for j, h in enumerate(headers, start=1):
+                    v = row.get(h, "")
+                    cell = ws.cell(row=r, column=j, value=v)
+                    cell.fill = fill_am
+                    cell.alignment = (align_left if h == "空窗時段" else align_center)
+                    cell.border = border
+                r += 1
+
+        r += 1  # blank
+
+        # PM section
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
+        c = ws.cell(row=r, column=1, value="下午")
+        c.font = font_section
+        c.alignment = align_center
+        r += 1
+
+        for j, h in enumerate(headers, start=1):
+            cell = ws.cell(row=r, column=j, value=h)
+            cell.fill = fill_header
+            cell.font = font_header
+            cell.alignment = align_center
+            cell.border = border
+        r += 1
+
+        pm_tbl = _build_shift_total_df(day_df, user_col=user_col, shift="PM")
+        if pm_tbl.empty:
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
+            c = ws.cell(row=r, column=1, value="（下午無資料）")
+            c.alignment = align_center
+            r += 1
+        else:
+            for _, row in pm_tbl.iterrows():
+                for j, h in enumerate(headers, start=1):
+                    v = row.get(h, "")
+                    cell = ws.cell(row=r, column=j, value=v)
+                    cell.fill = fill_pm
+                    cell.alignment = (align_left if h == "空窗時段" else align_center)
+                    cell.border = border
+                r += 1
+
+        r += 2  # blank between dates
+
+    ws.freeze_panes = "A4"
+
+
 def build_excel_bytes(
     user_col: str,
     summary_out: pd.DataFrame,
@@ -624,6 +816,11 @@ def build_excel_bytes(
         rules_df.to_excel(writer, index=False, sheet_name="休息規則")
         autosize_columns(writer.sheets["休息規則"], rules_df)
 
+        # ✅ 新增：總表（符合你截圖那種 AM/PM 分段）
+        ws_total = writer.book.create_sheet("總表")
+        writer.sheets["總表"] = ws_total
+        _write_total_sheet(ws_total, daily=daily, user_col=user_col)
+
     return out.getvalue()
 
 
@@ -635,7 +832,7 @@ def main():
     set_page(
         "上架產能分析（Putaway KPI）",
         icon="📦",
-        subtitle="主畫面只顯示：儲位類型樞紐表 + 棚別樞紐表（其餘表格不顯示）"
+        subtitle="主畫面顯示：儲位類型樞紐表 + 棚別樞紐表；Excel 匯出含：彙總/明細/總表"
     )
 
     if "putaway_last" not in st.session_state:
@@ -933,7 +1130,7 @@ def main():
             }
 
     # ======================
-    # ✅ 顯示（主畫面：只顯示兩個表格，其他表格一律不顯示）
+    # ✅ 顯示（主畫面：維持只顯示兩個表格）
     # ======================
     last = st.session_state.putaway_last
     if not last:
@@ -967,7 +1164,7 @@ def main():
     ])
     card_close()
 
-    # ✅ 只顯示兩張表：儲位類型樞紐 + 棚別樞紐（不再顯示任何長表）
+    # ✅ 只顯示兩張表：儲位類型樞紐 + 棚別樞紐
     card_open("📦 樞紐表（每人一列、每儲位類型一欄）")
     if stype_person_pivot is None or stype_person_pivot.empty:
         st.info("尚未產生儲位類型樞紐表（可能無法擷取區碼3或資料為空）。")
@@ -1018,7 +1215,7 @@ def main():
     download_excel_card(
         xlsx_bytes,
         xlsx_name,
-        label="⬇️ 匯出 KPI 報表（Excel）",
+        label="⬇️ 匯出 KPI 報表（Excel：含『總表』）",
     )
 
 
