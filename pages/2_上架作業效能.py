@@ -586,7 +586,7 @@ def _fmt_ts_time(x: Any) -> str:
 def _build_shift_total_df(daily: pd.DataFrame, user_col: str, shift: str) -> pd.DataFrame:
     """
     shift='AM' or 'PM'
-    產出你截圖那種欄位：
+    欄位：
     代碼、姓名、筆數、工作區間、總分鐘、效率(件/時)、休息分鐘、空窗分鐘、空窗時段
     """
     if daily is None or daily.empty:
@@ -599,7 +599,7 @@ def _build_shift_total_df(daily: pd.DataFrame, user_col: str, shift: str) -> pd.
         first_col, last_col = "上午_第一筆", "上午_最後一筆"
         mins_col = "上午_工時_分鐘"
         eff_col = "上午_效率_件每小時"
-        rest_col = None  # 上午不扣休（你目前邏輯）
+        rest_col = None
         idle_min_col = "上午_空窗分鐘"
         idle_rng_col = "上午_空窗時段"
     else:
@@ -635,7 +635,6 @@ def _build_shift_total_df(daily: pd.DataFrame, user_col: str, shift: str) -> pd.
         "空窗時段": d.get(idle_rng_col, "").astype(str).fillna(""),
     })
 
-    # 依你截圖：效率高到低（也可以改成代碼排序）
     out = out.sort_values(["效率(件/時)", "代碼"], ascending=[False, True]).reset_index(drop=True)
     return out
 
@@ -644,17 +643,29 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
     """
     在同一張「總表」工作表，依日期輸出：
     [YYYY-MM-DD 上架績效] / 上午表 / 下午表
+
+    ✅ 欄位F「效率(件/時)」：
+      >=20：底色 #FFC7CE、字色 #9C0006
+      <20 ：底色 #C6EFCE、字色 #006100
     """
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+
+    EFF_THRESHOLD = 20.0
 
     thin = Side(style="thin", color="9CA3AF")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     fill_title = PatternFill("solid", fgColor="FFFFFF")
     fill_header = PatternFill("solid", fgColor="E5E7EB")   # 灰
-    fill_am = PatternFill("solid", fgColor="D1FAE5")       # 淡綠
-    fill_pm = PatternFill("solid", fgColor="FDE2E2")       # 淡粉
+    fill_am = PatternFill("solid", fgColor="D1FAE5")       # 上午淡綠
+    fill_pm = PatternFill("solid", fgColor="FDE2E2")       # 下午淡粉
+
+    # ✅ 效率欄(F)條件式樣式（照你指定：>=20 紅底紅字；<20 綠底綠字）
+    eff_bad_fill  = PatternFill("solid", fgColor="FFC7CE")  # #FFC7CE
+    eff_bad_font  = Font(color="9C0006")                    # #9C0006
+    eff_good_fill = PatternFill("solid", fgColor="C6EFCE")  # #C6EFCE
+    eff_good_font = Font(color="006100")                    # #006100
 
     font_title = Font(bold=True, size=14)
     font_section = Font(bold=True, size=12)
@@ -665,7 +676,7 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
     headers = ["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"]
     ncol = len(headers)
 
-    # 欄寬（接近你截圖）
+    # 欄寬
     col_widths = [12, 10, 6, 22, 8, 10, 8, 8, 60]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -676,6 +687,17 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
 
     dates = sorted([x for x in daily["日期"].dropna().unique()])
     r = 1
+
+    def _try_float(x):
+        try:
+            if x is None:
+                return None
+            s = str(x).strip()
+            if s == "":
+                return None
+            return float(x)
+        except Exception:
+            return None
 
     for d0 in dates:
         day_df = daily[daily["日期"] == d0].copy()
@@ -716,7 +738,21 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
                 for j, h in enumerate(headers, start=1):
                     v = row.get(h, "")
                     cell = ws.cell(row=r, column=j, value=v)
+
+                    # 預設：上午底色
                     cell.fill = fill_am
+
+                    # ✅ 只針對欄位F：效率(件/時) 套條件色/字色
+                    if h == "效率(件/時)":
+                        val = _try_float(v)
+                        if val is not None:
+                            if val >= EFF_THRESHOLD:
+                                cell.fill = eff_bad_fill
+                                cell.font = eff_bad_font
+                            else:
+                                cell.fill = eff_good_fill
+                                cell.font = eff_good_font
+
                     cell.alignment = (align_left if h == "空窗時段" else align_center)
                     cell.border = border
                 r += 1
@@ -749,7 +785,21 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
                 for j, h in enumerate(headers, start=1):
                     v = row.get(h, "")
                     cell = ws.cell(row=r, column=j, value=v)
+
+                    # 預設：下午底色
                     cell.fill = fill_pm
+
+                    # ✅ 只針對欄位F：效率(件/時) 套條件色/字色
+                    if h == "效率(件/時)":
+                        val = _try_float(v)
+                        if val is not None:
+                            if val >= EFF_THRESHOLD:
+                                cell.fill = eff_bad_fill
+                                cell.font = eff_bad_font
+                            else:
+                                cell.fill = eff_good_fill
+                                cell.font = eff_good_font
+
                     cell.alignment = (align_left if h == "空窗時段" else align_center)
                     cell.border = border
                 r += 1
@@ -816,7 +866,7 @@ def build_excel_bytes(
         rules_df.to_excel(writer, index=False, sheet_name="休息規則")
         autosize_columns(writer.sheets["休息規則"], rules_df)
 
-        # ✅ 新增：總表（符合你截圖那種 AM/PM 分段）
+        # ✅ 新增：總表（符合你截圖 AM/PM 分段 + F欄效率套色）
         ws_total = writer.book.create_sheet("總表")
         writer.sheets["總表"] = ws_total
         _write_total_sheet(ws_total, daily=daily, user_col=user_col)
@@ -1130,7 +1180,7 @@ def main():
             }
 
     # ======================
-    # ✅ 顯示（主畫面：維持只顯示兩個表格）
+    # ✅ 顯示（主畫面：只顯示兩個樞紐表）
     # ======================
     last = st.session_state.putaway_last
     if not last:
@@ -1152,7 +1202,7 @@ def main():
     shelf_person_pivot = last.get("shelf_person_pivot", pd.DataFrame())
     stype_person_pivot = last.get("stype_person_pivot", pd.DataFrame())
 
-    # KPI（不是表格，可保留）
+    # KPI（不是表格）
     card_open("📌 總覽 KPI")
     render_kpis([
         KPI("總人數", f"{total_people:,}"),
@@ -1179,7 +1229,7 @@ def main():
         st.dataframe(shelf_person_pivot, use_container_width=True, hide_index=True)
     card_close()
 
-    # AM/PM 圖表保留（不是表格）
+    # AM/PM 圖表（不是表格）
     col_l, col_r = st.columns(2)
 
     with col_l:
