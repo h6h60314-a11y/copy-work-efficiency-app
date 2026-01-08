@@ -12,6 +12,7 @@ ALLOW_PAGES = {
     "pages/2_上架作業效能.py",
     "pages/3_總揀作業效能.py",
     "pages/5_揀貨差異代庫存.py",
+    "pages/27_QC未上架比對.py",
 }
 
 
@@ -166,7 +167,12 @@ def main():
         "pages/5_揀貨差異代庫存.py",
         "少揀差異展開、庫存儲位/效期對應、國際條碼後五碼放大顯示",
     )
-
+    _nav_item(
+        "🧾",
+        "QC 未上架比對",
+        "pages/27_QC未上架比對.py",
+        "QC「商品」比對「未上架明細商品碼」，回填「進貨日」，產生「符合未上架明細」，並刪除指定欄位",
+    )
     st.markdown("</div>", unsafe_allow_html=True)
     card_close()
 
