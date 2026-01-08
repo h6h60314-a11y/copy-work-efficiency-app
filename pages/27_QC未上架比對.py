@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment
+from openpyxl import Workbook
 import copy as _copy
 
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
@@ -36,7 +37,6 @@ def _page_css():
     st.markdown(
         r"""
 <style>
-/* 背景（淡藍漸層） */
 div[data-testid="stAppViewContainer"]{
   background: linear-gradient(
     180deg,
@@ -46,7 +46,6 @@ div[data-testid="stAppViewContainer"]{
   ) !important;
 }
 
-/* Header 下面的 chips */
 .qc-chips{
   margin-top: 4px;
   font-size: 12.5px;
@@ -55,7 +54,6 @@ div[data-testid="stAppViewContainer"]{
 }
 .qc-chips .sep{ margin: 0 8px; opacity:.55; }
 
-/* 小標題（上傳區每段） */
 .qc-u-label{
   font-size: 13.5px;
   font-weight: 900;
@@ -63,7 +61,6 @@ div[data-testid="stAppViewContainer"]{
   margin: 4px 0 6px 0;
 }
 
-/* Streamlit uploader dropzone：白底圓角（貼近你截圖） */
 section[data-testid="stFileUploadDropzone"]{
   border: 1px solid rgba(148,163,184,.35) !important;
   border-radius: 14px !important;
@@ -75,20 +72,17 @@ section[data-testid="stFileUploadDropzone"]:hover{
   box-shadow: 0 6px 18px rgba(59,130,246,.08);
 }
 
-/* Browse files 按鈕更像卡片式 */
 section[data-testid="stFileUploadDropzone"] button{
   border-radius: 10px !important;
   font-weight: 900 !important;
 }
 
-/* 產出按鈕不要太寬、跟截圖一致 */
 div[data-testid="stButton"] > button{
   border-radius: 12px !important;
   font-weight: 900 !important;
   padding: 9px 14px !important;
 }
 
-/* 底部提示條（藍底） */
 .qc-banner{
   background: rgba(219, 234, 254, .9);
   border: 1px solid rgba(59,130,246,.18);
@@ -167,7 +161,7 @@ def normalize_code(value, fmt: str, fallback_width: int = 0) -> str:
 def force_code_text_cell(cell, width: int):
     """把 cell 轉成文字並保留前導0（只針對純數字碼）"""
     v = cell.value
-    fmt = cell.number_format
+    fmt = getattr(cell, "number_format", "") or ""
     s = normalize_code(v, fmt, width)
     if s and s.isdigit() and width >= 2:
         s = s.zfill(width)
@@ -191,23 +185,83 @@ def format_date_value(v) -> str:
 
 
 # =============================
-# 讀取：僅支援 xlsx/xlsm（上傳 xls/xlsb 會提示先轉檔）
+# 轉換：DataFrames -> openpyxl Workbook
 # =============================
-def _load_wb_from_upload(uploaded_file) -> Tuple[str, "openpyxl.workbook.workbook.Workbook"]:
+def _dfs_to_workbook(sheets: Dict[str, pd.DataFrame]) -> Workbook:
+    wb = Workbook()
+    # 移除預設 Sheet
+    if wb.worksheets:
+        wb.remove(wb.worksheets[0])
+
+    for sheet_name, df in sheets.items():
+        name = str(sheet_name)[:31] if sheet_name else "Sheet1"
+        ws = wb.create_sheet(title=name)
+
+        # header
+        ws.append([str(c) if c is not None else "" for c in df.columns.tolist()])
+
+        # rows
+        for row in df.itertuples(index=False, name=None):
+            out_row = []
+            for v in row:
+                if isinstance(v, float) and pd.isna(v):
+                    out_row.append(None)
+                else:
+                    out_row.append(v)
+            ws.append(out_row)
+
+    return wb
+
+
+# =============================
+# 讀取：支援 xlsx/xlsm/xls/xlsb
+# =============================
+def _load_wb_from_upload(uploaded_file) -> Tuple[str, Workbook]:
     name = uploaded_file.name
     ext = (name.split(".")[-1] or "").lower()
+    raw = uploaded_file.getvalue()
+    bio = io.BytesIO(raw)
 
-    if ext not in ("xlsx", "xlsm"):
-        raise ValueError(
-            f"目前上傳檔案為 .{ext}：{name}\n"
-            "此頁面僅支援 .xlsx / .xlsm。\n"
-            "（若是 .xls / .xlsb 請先用 Excel 另存新檔為 .xlsx 再上傳）"
-        )
+    # xlsx / xlsm -> openpyxl
+    if ext in ("xlsx", "xlsm"):
+        keep_vba = (ext == "xlsm")
+        wb = load_workbook(bio, keep_vba=keep_vba)
+        return name, wb
 
-    bio = io.BytesIO(uploaded_file.getvalue())
-    keep_vba = (ext == "xlsm")
-    wb = load_workbook(bio, keep_vba=keep_vba)
-    return name, wb
+    # xlsb -> pandas (pyxlsb) -> openpyxl
+    if ext == "xlsb":
+        try:
+            sheets = pd.read_excel(io.BytesIO(raw), engine="pyxlsb", sheet_name=None)
+        except Exception as e:
+            raise ValueError(
+                f"讀取 .xlsb 失敗：{e}\n"
+                "請確認 requirements.txt 有 pyxlsb"
+            )
+        wb = _dfs_to_workbook(sheets)
+        return name, wb
+
+    # xls -> pandas (xlrd) -> openpyxl
+    if ext == "xls":
+        try:
+            sheets = pd.read_excel(io.BytesIO(raw), engine="xlrd", sheet_name=None)
+        except ModuleNotFoundError:
+            raise ValueError(
+                "目前環境缺少 xlrd，無法讀取 .xls。\n"
+                "請在 requirements.txt 加上：xlrd==2.0.1\n"
+                "或先用 Excel 另存為 .xlsx 再上傳。"
+            )
+        except Exception as e:
+            raise ValueError(
+                f"讀取 .xls 失敗：{e}\n"
+                "建議先用 Excel 另存 .xlsx 再上傳。"
+            )
+        wb = _dfs_to_workbook(sheets)
+        return name, wb
+
+    raise ValueError(
+        f"不支援的檔案格式：.{ext}\n"
+        "支援：.xlsx / .xlsm / .xls / .xlsb"
+    )
 
 
 # =============================
@@ -247,7 +301,7 @@ def process_wb(
     date_sets = defaultdict(set)
     for r in range(2, un_ws.max_row + 1):
         code_cell = un_ws.cell(row=r, column=un_key_col)
-        code = normalize_code(code_cell.value, code_cell.number_format, fallback_width)
+        code = normalize_code(code_cell.value, getattr(code_cell, "number_format", ""), fallback_width)
 
         d_cell = un_ws.cell(row=r, column=un_date_col)
         d_str = format_date_value(d_cell.value)
@@ -269,14 +323,17 @@ def process_wb(
         qc_date_col = qc_ws.max_column + 1
         hdr = qc_ws.cell(row=1, column=qc_date_col, value="進貨日")
         src_hdr = qc_ws.cell(row=1, column=qc_key_col)
-        hdr._style = _copy.copy(src_hdr._style)
+        try:
+            hdr._style = _copy.copy(src_hdr._style)
+        except Exception:
+            pass
         hdr.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     # 填入進貨日 + 收集 match rows
     match_rows = []
     for r in range(2, qc_ws.max_row + 1):
         code_cell = qc_ws.cell(row=r, column=qc_key_col)
-        code = normalize_code(code_cell.value, code_cell.number_format, fallback_width)
+        code = normalize_code(code_cell.value, getattr(code_cell, "number_format", ""), fallback_width)
         if code and code.isdigit():
             code = code.zfill(fallback_width)
 
@@ -296,18 +353,24 @@ def process_wb(
     for c in range(1, maxc + 1):
         src = qc_ws.cell(row=1, column=c)
         dst = mws.cell(row=1, column=c, value=src.value)
-        dst._style = _copy.copy(src._style)
-        dst.number_format = src.number_format
-        dst.alignment = _copy.copy(src.alignment)
+        try:
+            dst._style = _copy.copy(src._style)
+        except Exception:
+            pass
+        dst.number_format = getattr(src, "number_format", "")
+        dst.alignment = _copy.copy(getattr(src, "alignment", Alignment()))
 
     out_r = 2
     for r in match_rows:
         for c in range(1, maxc + 1):
             src = qc_ws.cell(row=r, column=c)
             dst = mws.cell(row=out_r, column=c, value=src.value)
-            dst._style = _copy.copy(src._style)
-            dst.number_format = src.number_format
-            dst.alignment = _copy.copy(src.alignment)
+            try:
+                dst._style = _copy.copy(src._style)
+            except Exception:
+                pass
+            dst.number_format = getattr(src, "number_format", "")
+            dst.alignment = _copy.copy(getattr(src, "alignment", Alignment()))
         out_r += 1
 
     # 刪除指定欄位（所有工作表）
@@ -334,26 +397,29 @@ def process_wb(
 
 
 # =============================
-# Streamlit UI（檔案上傳格式已調整）
+# Streamlit UI
 # =============================
 st.set_page_config(page_title="大豐物流 - 進貨課｜QC未上架比對", page_icon="🧾", layout="wide")
 inject_logistics_theme()
 _page_css()
 
-set_page("QC 未上架比對", icon="🧾", subtitle="0108QC「商品」比對 未上架明細「商品碼」，回填「進貨日」，並產生「符合未上架明細」分頁；同時刪除指定欄位。")
+set_page(
+    "QC 未上架比對",
+    icon="🧾",
+    subtitle="0108QC「商品」比對 未上架明細「商品碼」，回填「進貨日」，並產生「符合未上架明細」分頁；同時刪除指定欄位。",
+)
 
 st.markdown(
     '<div class="qc-chips">少揀差異<span class="sep">｜</span>庫存儲位展開<span class="sep">｜</span>欄位刪除<span class="sep">｜</span>前導 0 保留</div>',
     unsafe_allow_html=True,
 )
 
-# ✅ 用 card_open / card_close：才會真的形成卡片（不會再出現空白大圓角）
 card_open("📁 檔案上傳")
 
-st.markdown('<div class="qc-u-label">0108QC（Excel：.xlsx / .xlsm）</div>', unsafe_allow_html=True)
+st.markdown('<div class="qc-u-label">0108QC（支援：.xlsx / .xlsm / .xls / .xlsb）</div>', unsafe_allow_html=True)
 qc_file = st.file_uploader(
     "0108QC",
-    type=["xlsx", "xlsm"],
+    type=["xlsx", "xlsm", "xls", "xlsb"],
     accept_multiple_files=False,
     label_visibility="collapsed",
     key="qc_file",
@@ -361,10 +427,10 @@ qc_file = st.file_uploader(
 
 st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
 
-st.markdown('<div class="qc-u-label">未上架明細（同一個檔 / Excel：.xlsx / .xlsm）</div>', unsafe_allow_html=True)
+st.markdown('<div class="qc-u-label">未上架明細（支援：.xlsx / .xlsm / .xls / .xlsb）</div>', unsafe_allow_html=True)
 un_file = st.file_uploader(
     "未上架明細",
-    type=["xlsx", "xlsm"],
+    type=["xlsx", "xlsm", "xls", "xlsb"],
     accept_multiple_files=False,
     label_visibility="collapsed",
     key="un_file",
