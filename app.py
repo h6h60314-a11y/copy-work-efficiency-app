@@ -170,6 +170,7 @@ qc_page = page_if_exists("pages/1_驗收作業效能.py", "驗收作業效能", 
 putaway_page = page_if_exists("pages/2_上架作業效能.py", "上架作業效能", "📦", url_path="inbound-putaway")
 pick_page = page_if_exists("pages/3_總揀作業效能.py", "總揀作業效能", "🎯", url_path="inbound-pick")
 diff_page = page_if_exists("pages/5_揀貨差異代庫存.py", "揀貨差異代庫存", "🔎", url_path="inbound-pick-diff")
+qc_unputaway_compare = page_if_exists("pages/27_QC未上架比對.py","QC 未上架比對", "🧾", url_path="inbound-qc-unputaway-compare-27")
 
 # 大樹KPI
 gt_kpi_home = page_if_exists("pages/9_大樹KPI首頁.py", "大樹KPI首頁", "📈", url_path="gt-kpi-home")
@@ -227,7 +228,7 @@ pg = st.navigation(
                 outbound_line_productivity,   # ✅ 24 放在出貨課下
             ] if p
         ],
-        "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, diff_page] if p],
+        "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, diff_page,qc_unputaway_compare] if p],
         "大樹KPI": [p for p in [
             gt_kpi_home, gt_inbound_receipt, gt_ship_should, gt_xdock, gt_ship_actual,
             gt_putaway_daily, gt_inv_accuracy, gt_store_arrival_abn, gt_daily_attendance,
@@ -239,5 +240,6 @@ pg = st.navigation(
 )
 
 pg.run()
+
 
 
