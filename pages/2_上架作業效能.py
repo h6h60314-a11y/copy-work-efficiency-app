@@ -544,8 +544,14 @@ def autosize_columns(ws, df: pd.DataFrame):
 
 
 def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFCE", red="FFC7CE", target_eff=20):
-    # 這個是彙總/明細用的（保留原邏輯：>=target 綠，<target 紅）
+    """
+    彙總/明細：整列底色
+    - val >= target_eff -> green
+    - val <  target_eff -> red
+    （這段不含字色，保持你原先邏輯；你要的「總表整列底色+字色」已在 _write_total_sheet 內處理）
+    """
     from openpyxl.styles import PatternFill
+
     eff_col = None
     for c in range(1, ws.max_column + 1):
         if str(ws.cell(row=1, column=c).value).strip() == header_name:
@@ -553,8 +559,12 @@ def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFC
             break
     if eff_col is None:
         return
+
     green_fill = PatternFill(start_color=green, end_color=green, fill_type="solid")
     red_fill = PatternFill(start_color=red, end_color=red, fill_type="solid")
+
+    thr = float(target_eff)  # ✅ 修正：floatfloat -> float
+
     for r in range(2, ws.max_row + 1):
         v = ws.cell(row=r, column=eff_col).value
         try:
@@ -563,7 +573,8 @@ def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFC
             val = None
         if val is None:
             continue
-        fill = green_fill if val >= floatfloat(target_eff) else red_fill
+
+        fill = green_fill if val >= thr else red_fill
         for cc in range(1, ws.max_column + 1):
             ws.cell(row=r, column=cc).fill = fill
 
