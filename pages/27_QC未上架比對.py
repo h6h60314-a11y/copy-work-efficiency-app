@@ -11,7 +11,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Alignment
 import copy as _copy
 
-from common_ui import inject_logistics_theme
+from common_ui import inject_logistics_theme, set_page, card_open, card_close
 
 
 # =============================
@@ -30,124 +30,72 @@ DELETE_HEADERS = [
 
 
 # =============================
-# UI：頁面 CSS（套用你截圖風格）
+# UI CSS（背景 + 上傳框風格）
 # =============================
 def _page_css():
     st.markdown(
         r"""
 <style>
-/* ===== 背景（淡藍漸層） ===== */
+/* 背景（淡藍漸層） */
 div[data-testid="stAppViewContainer"]{
-  background: linear-gradient(180deg, rgba(232,245,255,1) 0%, rgba(244,250,255,1) 32%, rgba(255,255,255,1) 100%) !important;
+  background: linear-gradient(
+    180deg,
+    rgba(232,245,255,1) 0%,
+    rgba(244,250,255,1) 34%,
+    rgba(255,255,255,1) 100%
+  ) !important;
 }
 
-/* 讓內容區更像「大卡片」版面 */
-.qc-compare-page{ padding-top: 4px; }
-
-/* ===== Header ===== */
-.qc-hero{
-  padding: 18px 18px 10px 18px;
-  border-radius: 18px;
-  background: transparent;
-}
-.qc-hero-title{
-  font-size: 26px;
-  font-weight: 900;
-  color: rgba(15, 23, 42, .92);
-  letter-spacing: .2px;
-  display:flex; align-items:center; gap:10px;
-}
-.qc-hero-sub{
-  margin-top: 6px;
-  font-size: 13.5px;
-  font-weight: 650;
-  color: rgba(15, 23, 42, .68);
-}
-.qc-hero-tabs{
-  margin-top: 8px;
+/* Header 下面的 chips */
+.qc-chips{
+  margin-top: 4px;
   font-size: 12.5px;
-  font-weight: 750;
+  font-weight: 800;
   color: rgba(15,23,42,.62);
 }
-.qc-hero-tabs a{ color: rgba(15,23,42,.72) !important; text-decoration: none !important; }
-.qc-hero-tabs .sep{ margin: 0 8px; opacity:.5; }
+.qc-chips .sep{ margin: 0 8px; opacity:.55; }
 
-/* ===== 卡片容器 ===== */
-.qc-card{
-  background: rgba(255,255,255,.88);
-  border: 1px solid rgba(148,163,184,.18);
-  border-radius: 18px;
-  padding: 16px 16px 14px 16px;
-  box-shadow: 0 10px 30px rgba(15,23,42,.06);
-  margin: 10px 0 14px 0;
-}
-.qc-card-title{
-  font-weight: 900;
-  font-size: 15px;
-  color: rgba(15,23,42,.88);
-  display:flex; align-items:center; gap:10px;
-  margin-bottom: 10px;
-}
-
-/* ===== 上傳區塊（每個 uploader 一塊） ===== */
-.qc-u-block{ margin: 12px 0; }
+/* 小標題（上傳區每段） */
 .qc-u-label{
   font-size: 13.5px;
-  font-weight: 850;
-  color: rgba(15,23,42,.82);
-  margin-bottom: 6px;
-}
-.qc-u-hint{
-  font-size: 12px;
-  font-weight: 650;
-  color: rgba(15,23,42,.58);
-  margin-top: 4px;
+  font-weight: 900;
+  color: rgba(15,23,42,.86);
+  margin: 4px 0 6px 0;
 }
 
-/* Streamlit uploader dropzone：變成「白底圓角」 */
-.qc-compare-page section[data-testid="stFileUploadDropzone"]{
+/* Streamlit uploader dropzone：白底圓角（貼近你截圖） */
+section[data-testid="stFileUploadDropzone"]{
   border: 1px solid rgba(148,163,184,.35) !important;
   border-radius: 14px !important;
   background: rgba(255,255,255,1) !important;
   padding: 12px 14px !important;
 }
-.qc-compare-page section[data-testid="stFileUploadDropzone"]:hover{
+section[data-testid="stFileUploadDropzone"]:hover{
   border-color: rgba(59,130,246,.35) !important;
   box-shadow: 0 6px 18px rgba(59,130,246,.08);
 }
 
-/* uploader 裡面的「Browse files」更像截圖 */
-.qc-compare-page section[data-testid="stFileUploadDropzone"] button{
+/* Browse files 按鈕更像卡片式 */
+section[data-testid="stFileUploadDropzone"] button{
   border-radius: 10px !important;
-  font-weight: 800 !important;
+  font-weight: 900 !important;
 }
 
-/* ===== 主要按鈕（產出） ===== */
-.qc-actions{ margin-top: 8px; display:flex; gap:10px; align-items:center; }
-.qc-compare-page div[data-testid="stButton"] > button{
+/* 產出按鈕不要太寬、跟截圖一致 */
+div[data-testid="stButton"] > button{
   border-radius: 12px !important;
   font-weight: 900 !important;
-  padding: 10px 14px !important;
-}
-.qc-compare-page div[data-testid="stButton"] > button:disabled{
-  opacity: .55 !important;
+  padding: 9px 14px !important;
 }
 
-/* ===== 下載按鈕（download_button） ===== */
-.qc-compare-page div[data-testid="stDownloadButton"] > button{
-  border-radius: 12px !important;
-  font-weight: 900 !important;
-  padding: 10px 14px !important;
-}
-
-/* ===== 底部提示條（藍底） ===== */
+/* 底部提示條（藍底） */
 .qc-banner{
   background: rgba(219, 234, 254, .9);
   border: 1px solid rgba(59,130,246,.18);
   color: rgba(15,23,42,.86);
   border-radius: 10px;
   padding: 10px 12px;
-  font-weight: 800;
+  font-weight: 900;
   font-size: 13px;
   margin-top: 14px;
 }
@@ -252,8 +200,8 @@ def _load_wb_from_upload(uploaded_file) -> Tuple[str, "openpyxl.workbook.workboo
     if ext not in ("xlsx", "xlsm"):
         raise ValueError(
             f"目前上傳檔案為 .{ext}：{name}\n"
-            "此頁面在 Streamlit 僅支援 .xlsx / .xlsm。\n"
-            "請先用 Excel 另存新檔為 .xlsx 再上傳。"
+            "此頁面僅支援 .xlsx / .xlsm。\n"
+            "（若是 .xls / .xlsb 請先用 Excel 另存新檔為 .xlsx 再上傳）"
         )
 
     bio = io.BytesIO(uploaded_file.getvalue())
@@ -386,62 +334,45 @@ def process_wb(
 
 
 # =============================
-# Streamlit UI（截圖風格）
+# Streamlit UI（檔案上傳格式已調整）
 # =============================
 st.set_page_config(page_title="大豐物流 - 進貨課｜QC未上架比對", page_icon="🧾", layout="wide")
 inject_logistics_theme()
 _page_css()
 
-st.markdown('<div class="qc-compare-page">', unsafe_allow_html=True)
+set_page("QC 未上架比對", icon="🧾", subtitle="0108QC「商品」比對 未上架明細「商品碼」，回填「進貨日」，並產生「符合未上架明細」分頁；同時刪除指定欄位。")
 
 st.markdown(
-    """
-<div class="qc-hero">
-  <div class="qc-hero-title">🧾 QC 未上架比對</div>
-  <div class="qc-hero-sub">0108QC「商品」比對 未上架明細「商品碼」，回填「進貨日」，並產生「符合未上架明細」分頁；同時刪除指定欄位。</div>
-  <div class="qc-hero-tabs">
-    <span>少揀差異</span><span class="sep">｜</span>
-    <span>庫存儲位展開</span><span class="sep">｜</span>
-    <span>欄位刪除</span><span class="sep">｜</span>
-    <span>前導 0 保留</span>
-  </div>
-</div>
-""",
+    '<div class="qc-chips">少揀差異<span class="sep">｜</span>庫存儲位展開<span class="sep">｜</span>欄位刪除<span class="sep">｜</span>前導 0 保留</div>',
     unsafe_allow_html=True,
 )
 
-# 卡片：檔案上傳
-st.markdown('<div class="qc-card">', unsafe_allow_html=True)
-st.markdown('<div class="qc-card-title">📁 檔案上傳</div>', unsafe_allow_html=True)
+# ✅ 用 card_open / card_close：才會真的形成卡片（不會再出現空白大圓角）
+card_open("📁 檔案上傳")
 
-# 兩個 uploader（排版與截圖同樣「直式堆疊」）
-st.markdown('<div class="qc-u-block">', unsafe_allow_html=True)
-st.markdown('<div class="qc-u-label">0108QC（可多檔）</div>', unsafe_allow_html=True)
+st.markdown('<div class="qc-u-label">0108QC（Excel：.xlsx / .xlsm）</div>', unsafe_allow_html=True)
 qc_file = st.file_uploader(
     "0108QC",
-    type=["xlsx", "xlsm", "xls", "xlsb", "csv", "txt"],
+    type=["xlsx", "xlsm"],
     accept_multiple_files=False,
     label_visibility="collapsed",
     key="qc_file",
 )
-st.markdown('<div class="qc-u-hint">Limit 200MB per file • XLSX, XLS, XLSM, CSV, TXT</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="qc-u-block">', unsafe_allow_html=True)
-st.markdown('<div class="qc-u-label">未上架明細（同一個檔）</div>', unsafe_allow_html=True)
+st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
+
+st.markdown('<div class="qc-u-label">未上架明細（同一個檔 / Excel：.xlsx / .xlsm）</div>', unsafe_allow_html=True)
 un_file = st.file_uploader(
     "未上架明細",
-    type=["xlsx", "xlsm", "xls", "xlsb", "csv", "txt"],
+    type=["xlsx", "xlsm"],
     accept_multiple_files=False,
     label_visibility="collapsed",
     key="un_file",
 )
-st.markdown('<div class="qc-u-hint">Limit 200MB per file • XLSX, XLS, XLSM, CSV, TXT</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
 
-# 進階設定：工作表選擇（不干擾主畫面風格）
 qc_sheet_name = None
 un_sheet_name = None
+
 with st.expander("進階設定（工作表選擇）", expanded=False):
     c1, c2 = st.columns(2)
     with c1:
@@ -460,29 +391,23 @@ with st.expander("進階設定（工作表選擇）", expanded=False):
                 st.error(str(e))
 
 ready = bool(qc_file and un_file)
+run = st.button("🚀 產出比對", disabled=not ready)
 
-# 按鈕區
-st.markdown('<div class="qc-actions">', unsafe_allow_html=True)
-run = st.button("🚀 產出比對", type="secondary", disabled=not ready, use_container_width=False)
-st.markdown('</div>', unsafe_allow_html=True)
+card_close()
 
-st.markdown("</div>", unsafe_allow_html=True)  # end qc-card
-
-
-# 狀態提示 + 執行
 status_msg = "請依序上傳：0108QC + 未上架明細"
-if ready:
-    status_msg = "檔案已就緒，可按「產出比對」"
-
 xlsx_bytes = None
 matched = None
-err_msg = None
+
+if ready:
+    status_msg = "檔案已就緒，可按「產出比對」"
 
 if run:
     try:
         with st.spinner("處理中…"):
             _, qc_wb = _load_wb_from_upload(qc_file)
             _, un_wb = _load_wb_from_upload(un_file)
+
             matched, xlsx_bytes = process_wb(
                 qc_wb=qc_wb,
                 un_wb=un_wb,
@@ -490,30 +415,18 @@ if run:
                 un_sheet_name=un_sheet_name,
             )
     except Exception as e:
-        err_msg = str(e)
-
-# 結果卡片（只在有結果或錯誤時顯示）
-if err_msg:
-    st.error(f"❌ 執行失敗：{err_msg}")
+        st.error(f"❌ 執行失敗：{e}")
 
 if xlsx_bytes is not None:
-    st.markdown('<div class="qc-card">', unsafe_allow_html=True)
-    st.markdown('<div class="qc-card-title">✅ 產出結果</div>', unsafe_allow_html=True)
-
+    card_open("✅ 產出結果")
     st.success(f"完成！符合筆數：{matched}")
-
     out_name = f"QC未上架比對_輸出_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     st.download_button(
         label="📥 下載輸出 Excel",
         data=xlsx_bytes,
         file_name=out_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=False,
     )
+    card_close()
 
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# 底部提示條（藍底）
 st.markdown(f'<div class="qc-banner">{status_msg}</div>', unsafe_allow_html=True)
-
-st.markdown("</div>", unsafe_allow_html=True)  # end qc-compare-page
