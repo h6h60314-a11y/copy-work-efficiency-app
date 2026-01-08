@@ -544,6 +544,7 @@ def autosize_columns(ws, df: pd.DataFrame):
 
 
 def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFCE", red="FFC7CE", target_eff=20):
+    # 這個是彙總/明細用的（保留原邏輯：>=target 綠，<target 紅）
     from openpyxl.styles import PatternFill
     eff_col = None
     for c in range(1, ws.max_column + 1):
@@ -562,7 +563,7 @@ def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFC
             val = None
         if val is None:
             continue
-        fill = green_fill if val >= float(target_eff) else red_fill
+        fill = green_fill if val >= floatfloat(target_eff) else red_fill
         for cc in range(1, ws.max_column + 1):
             ws.cell(row=r, column=cc).fill = fill
 
@@ -644,9 +645,9 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
     在同一張「總表」工作表，依日期輸出：
     [YYYY-MM-DD 上架績效] / 上午表 / 下午表
 
-    ✅ 欄位F「效率(件/時)」：
-      >=20：底色 #FFC7CE、字色 #9C0006
-      <20 ：底色 #C6EFCE、字色 #006100
+    ✅ 你指定的新規則（整列套色）：
+      效率 < 20  → 整列底色 #FFC7CE、整列文字 #9C0006
+      效率 >= 20 → 整列底色 #C6EFCE、整列文字 #006100
     """
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -661,11 +662,13 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
     fill_am = PatternFill("solid", fgColor="D1FAE5")       # 上午淡綠
     fill_pm = PatternFill("solid", fgColor="FDE2E2")       # 下午淡粉
 
-    # ✅ 效率欄(F)條件式樣式（照你指定：>=20 紅底紅字；<20 綠底綠字）
-    eff_bad_fill  = PatternFill("solid", fgColor="FFC7CE")  # #FFC7CE
-    eff_bad_font  = Font(color="9C0006")                    # #9C0006
-    eff_good_fill = PatternFill("solid", fgColor="C6EFCE")  # #C6EFCE
-    eff_good_font = Font(color="006100")                    # #006100
+    # ✅ 低效：紅底紅字（效率 < 20）
+    eff_low_fill = PatternFill("solid", fgColor="FFC7CE")  # #FFC7CE
+    eff_low_font = Font(color="9C0006")                    # #9C0006
+
+    # ✅ 高效：綠底綠字（效率 >= 20）
+    eff_high_fill = PatternFill("solid", fgColor="C6EFCE") # #C6EFCE
+    eff_high_font = Font(color="006100")                   # #006100
 
     font_title = Font(bold=True, size=14)
     font_section = Font(bold=True, size=12)
@@ -695,7 +698,7 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
             s = str(x).strip()
             if s == "":
                 return None
-            return float(x)
+            return float(s)
         except Exception:
             return None
 
@@ -711,14 +714,15 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
         c.alignment = align_center
         r += 1
 
-        # AM section
+        # ======================
+        # AM
+        # ======================
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
         c = ws.cell(row=r, column=1, value="上午")
         c.font = font_section
         c.alignment = align_center
         r += 1
 
-        # Header row
         for j, h in enumerate(headers, start=1):
             cell = ws.cell(row=r, column=j, value=h)
             cell.fill = fill_header
@@ -735,31 +739,35 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
             r += 1
         else:
             for _, row in am_tbl.iterrows():
+                eff_val = _try_float(row.get("效率(件/時)", ""))
+
+                # 預設：上午底色；若有效率值→整列依效率規則套色
+                row_fill = fill_am
+                row_font = None
+                if eff_val is not None:
+                    if eff_val < EFF_THRESHOLD:
+                        row_fill = eff_low_fill
+                        row_font = eff_low_font
+                    else:
+                        row_fill = eff_high_fill
+                        row_font = eff_high_font
+
                 for j, h in enumerate(headers, start=1):
                     v = row.get(h, "")
                     cell = ws.cell(row=r, column=j, value=v)
-
-                    # 預設：上午底色
-                    cell.fill = fill_am
-
-                    # ✅ 只針對欄位F：效率(件/時) 套條件色/字色
-                    if h == "效率(件/時)":
-                        val = _try_float(v)
-                        if val is not None:
-                            if val >= EFF_THRESHOLD:
-                                cell.fill = eff_bad_fill
-                                cell.font = eff_bad_font
-                            else:
-                                cell.fill = eff_good_fill
-                                cell.font = eff_good_font
-
+                    cell.fill = row_fill
+                    if row_font is not None:
+                        cell.font = row_font
                     cell.alignment = (align_left if h == "空窗時段" else align_center)
                     cell.border = border
+
                 r += 1
 
         r += 1  # blank
 
-        # PM section
+        # ======================
+        # PM
+        # ======================
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
         c = ws.cell(row=r, column=1, value="下午")
         c.font = font_section
@@ -782,26 +790,27 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
             r += 1
         else:
             for _, row in pm_tbl.iterrows():
+                eff_val = _try_float(row.get("效率(件/時)", ""))
+
+                row_fill = fill_pm
+                row_font = None
+                if eff_val is not None:
+                    if eff_val < EFF_THRESHOLD:
+                        row_fill = eff_low_fill
+                        row_font = eff_low_font
+                    else:
+                        row_fill = eff_high_fill
+                        row_font = eff_high_font
+
                 for j, h in enumerate(headers, start=1):
                     v = row.get(h, "")
                     cell = ws.cell(row=r, column=j, value=v)
-
-                    # 預設：下午底色
-                    cell.fill = fill_pm
-
-                    # ✅ 只針對欄位F：效率(件/時) 套條件色/字色
-                    if h == "效率(件/時)":
-                        val = _try_float(v)
-                        if val is not None:
-                            if val >= EFF_THRESHOLD:
-                                cell.fill = eff_bad_fill
-                                cell.font = eff_bad_font
-                            else:
-                                cell.fill = eff_good_fill
-                                cell.font = eff_good_font
-
+                    cell.fill = row_fill
+                    if row_font is not None:
+                        cell.font = row_font
                     cell.alignment = (align_left if h == "空窗時段" else align_center)
                     cell.border = border
+
                 r += 1
 
         r += 2  # blank between dates
@@ -828,6 +837,7 @@ def build_excel_bytes(
         ]
         summary_out[sum_cols].to_excel(writer, index=False, sheet_name="彙總")
         autosize_columns(writer.sheets["彙總"], summary_out[sum_cols])
+        # 這裡沿用舊邏輯：>=target 綠、<target 紅（不影響你要的總表）
         shade_rows_by_efficiency(writer.sheets["彙總"], "效率_件每小時", target_eff=target_eff)
 
         det_cols = [
@@ -866,7 +876,7 @@ def build_excel_bytes(
         rules_df.to_excel(writer, index=False, sheet_name="休息規則")
         autosize_columns(writer.sheets["休息規則"], rules_df)
 
-        # ✅ 新增：總表（符合你截圖 AM/PM 分段 + F欄效率套色）
+        # ✅ 新增：總表（你要的整列套色在這張）
         ws_total = writer.book.create_sheet("總表")
         writer.sheets["總表"] = ws_total
         _write_total_sheet(ws_total, daily=daily, user_col=user_col)
@@ -1031,7 +1041,7 @@ def main():
 
             dt_data["日期"] = dt_data["__dt__"].dt.date
 
-            # ✅ 日彙總（含棚別比對筆數/率）
+            # ✅ 日彙總
             daily = (
                 dt_data.groupby([user_col, "對應姓名", "日期"], dropna=False)
                 .apply(lambda g: compute_am_pm_for_group(
@@ -1224,7 +1234,7 @@ def main():
 
     card_open("🏷️ 樞紐表（每人一列、每棚別一欄）")
     if shelf_person_pivot is None or shelf_person_pivot.empty:
-        st.info("尚未產生棚別樞紐表（可能未上傳棚別主檔，或比對結果為空）。")
+        st.info("尚未產生棚別主檔樞紐表（可能未上傳棚別主檔，或比對結果為空）。")
     else:
         st.dataframe(shelf_person_pivot, use_container_width=True, hide_index=True)
     card_close()
