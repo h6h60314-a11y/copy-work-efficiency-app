@@ -23,6 +23,54 @@ except Exception:
 # =============================
 # helpers
 # =============================
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    1) 全欄位名稱去前後空白
+    2) 常見亂碼/全形空白也一併處理
+    """
+    df = df.copy()
+    new_cols = []
+    for c in df.columns:
+        s = str(c)
+        s = s.replace("\u3000", " ")  # 全形空白 -> 半形
+        s = s.strip()
+        new_cols.append(s)
+    df.columns = new_cols
+    return df
+
+
+def ensure_order_sku_column(df_order: pd.DataFrame) -> pd.DataFrame:
+    """
+    ✅ 訂單檔：強制對齊「商品」欄位
+    - 先 normalize columns
+    - 若存在 '商品 ' 這種尾巴空白，normalize 後會變成 '商品'
+    - 若仍沒有，嘗試同義欄位映射到 '商品'
+    """
+    df_order = normalize_columns(df_order)
+
+    if "商品" in df_order.columns:
+        return df_order
+
+    # 同義欄位候選（依你環境常見命名）
+    candidates = [
+        "商品碼",
+        "商品代號",
+        "商品號",
+        "品號",
+        "ITEM",
+        "SKU",
+        "SKU#",
+        "Item",
+        "item",
+    ]
+    for c in candidates:
+        if c in df_order.columns:
+            df_order = df_order.rename(columns={c: "商品"})
+            return df_order
+
+    raise ValueError(f"訂單檔缺少欄位『商品』。目前欄位：{list(df_order.columns)}")
+
+
 def format_code(x, length: int) -> str:
     """處理空值、去除小數點、補足前導 0 (如 255 -> 000255)"""
     if pd.isna(x) or str(x).strip() == "":
@@ -33,14 +81,11 @@ def format_code(x, length: int) -> str:
 
 
 def _is_fake_xls(raw: bytes) -> bool:
-    """有些 WMS/系統會輸出『假 .xls』其實是 HTML 或文字"""
     head = raw[:2048].upper()
     return (b"<HTML" in head) or (b"<TABLE" in head) or (b"PROVIDER" in head)
 
 
 def _read_fake_xls_text_or_html(raw: bytes) -> pd.DataFrame:
-    """讀取假 xls（HTML/文字表格）"""
-    # 嘗試多種編碼解碼
     for enc in ("utf-8-sig", "utf-8", "cp950", "big5"):
         try:
             text = raw.decode(enc, errors="replace")
@@ -50,14 +95,12 @@ def _read_fake_xls_text_or_html(raw: bytes) -> pd.DataFrame:
     if text is None:
         text = raw.decode("utf-8", errors="replace")
 
-    # HTML table
     if "<table" in text.lower():
         dfs = pd.read_html(io.StringIO(text))
         if not dfs:
             raise ValueError("偵測為 HTML，但找不到 table")
         return dfs[0]
 
-    # 文字表格（優先嘗試 tab，再嘗試逗號）
     try:
         df = pd.read_csv(io.StringIO(text), sep="\t")
         if df.shape[1] >= 2:
@@ -69,33 +112,21 @@ def _read_fake_xls_text_or_html(raw: bytes) -> pd.DataFrame:
 
 
 def robust_read_table(uploaded) -> pd.DataFrame:
-    """
-    ✅ 依副檔名自動讀檔：
-    - csv
-    - xlsx/xlsm
-    - xls（真 xls 需要 xlrd；假 xls 走 html/text）
-    """
     name = (uploaded.name or "").lower()
     raw = uploaded.getvalue()
 
-    # CSV
     if name.endswith(".csv"):
         try:
             return pd.read_csv(io.BytesIO(raw), encoding="utf-8-sig")
         except Exception:
             return pd.read_csv(io.BytesIO(raw), encoding="big5", errors="replace")
 
-    # XLSX / XLSM
-    if name.endswith(".xlsx") or name.endswith(".xlsm") or name.endswith(".xltx") or name.endswith(".xltm"):
+    if name.endswith((".xlsx", ".xlsm", ".xltx", ".xltm")):
         return pd.read_excel(io.BytesIO(raw), engine="openpyxl")
 
-    # XLS
     if name.endswith(".xls"):
-        # 假 xls（HTML/文字）
         if _is_fake_xls(raw):
             return _read_fake_xls_text_or_html(raw)
-
-        # 真 xls（需要 xlrd）
         try:
             import xlrd  # noqa: F401
         except Exception:
@@ -106,16 +137,13 @@ def robust_read_table(uploaded) -> pd.DataFrame:
             )
         return pd.read_excel(io.BytesIO(raw), engine="xlrd")
 
-    # 其他：嘗試當作 excel
     return pd.read_excel(io.BytesIO(raw))
 
 
 def read_master_file(uploaded) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """讀取商品主檔（需含：商品主檔 / 大類加權），支援 xlsx/xls/xlsm（xls 需 xlrd）"""
     raw = uploaded.getvalue()
     name = (uploaded.name or "").lower()
 
-    # 判斷 engine
     if name.endswith(".xls"):
         if _is_fake_xls(raw):
             raise ValueError("商品主檔不應是『假 xls』格式，請提供正常 Excel（含分頁）。")
@@ -134,6 +162,8 @@ def read_master_file(uploaded) -> tuple[pd.DataFrame, pd.DataFrame]:
     try:
         df_master = pd.read_excel(io.BytesIO(raw), sheet_name="商品主檔", engine=engine)
         df_weight = pd.read_excel(io.BytesIO(raw), sheet_name="大類加權", engine=engine)
+        df_master = normalize_columns(df_master)
+        df_weight = normalize_columns(df_weight)
         return df_master, df_weight
     except Exception as e:
         raise ValueError("找不到『商品主檔』或『大類加權』分頁，請檢查 Excel 工作表名稱。") from e
@@ -141,6 +171,9 @@ def read_master_file(uploaded) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def build_result(df_order: pd.DataFrame, df_master: pd.DataFrame, df_weight: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     msgs: list[str] = []
+
+    # ✅ 欄位對齊：一定把訂單檔對齊到欄位『商品』
+    df_order = ensure_order_sku_column(df_order)
 
     # --- 排除特殊儲位 ---
     exclude_list = ["CGS", "JCPL", "QC99", "PD99", "GX010", "GREAT0001X"]
@@ -161,10 +194,7 @@ def build_result(df_order: pd.DataFrame, df_master: pd.DataFrame, df_weight: pd.
         df_order["成箱箱號"] = " "
         msgs.append("已將『成箱箱號』全數改為空白(空格)")
 
-    # --- 必要欄位檢查（你要求：一樣抓『商品』） ---
-    if "商品" not in df_order.columns:
-        raise ValueError(f"訂單檔缺少欄位『商品』。目前欄位：{list(df_order.columns)}")
-
+    # --- 必要欄位檢查 ---
     if "商品代號" not in df_master.columns:
         raise ValueError("商品主檔缺少欄位『商品代號』")
     if "大類" not in df_master.columns:
@@ -219,7 +249,6 @@ def to_csv_bytes(df: pd.DataFrame) -> bytes:
 
 
 def safe_download_card(label: str, data: bytes, filename: str, mime: str = "text/csv"):
-    """相容不同版本 download_excel_card + 最終保底 st.download_button"""
     if HAS_COMMON_UI and "download_excel_card" in globals():
         fn = download_excel_card
         try:
@@ -227,24 +256,20 @@ def safe_download_card(label: str, data: bytes, filename: str, mime: str = "text
             params = set(sig.parameters.keys())
             kwargs = {}
 
-            if "title" in params:
-                kwargs["title"] = label
-            elif "label" in params:
-                kwargs["label"] = label
-            elif "text" in params:
-                kwargs["text"] = label
+            for k in ("title", "label", "text"):
+                if k in params:
+                    kwargs[k] = label
+                    break
 
-            if "data" in params:
-                kwargs["data"] = data
-            elif "xlsx_bytes" in params:
-                kwargs["xlsx_bytes"] = data
-            elif "bytes_data" in params:
-                kwargs["bytes_data"] = data
+            for k in ("data", "xlsx_bytes", "bytes_data"):
+                if k in params:
+                    kwargs[k] = data
+                    break
 
-            if "filename" in params:
-                kwargs["filename"] = filename
-            elif "file_name" in params:
-                kwargs["file_name"] = filename
+            for k in ("filename", "file_name"):
+                if k in params:
+                    kwargs[k] = filename
+                    break
 
             if "mime" in params:
                 kwargs["mime"] = mime
@@ -254,24 +279,13 @@ def safe_download_card(label: str, data: bytes, filename: str, mime: str = "text
         except Exception:
             pass
 
-        for args in [
-            (label, data, filename),
-            (data, filename, label),
-            (data, filename),
-            (label, data),
-        ]:
+        for args in [(label, data, filename), (data, filename), (label, data)]:
             try:
                 return fn(*args)
             except Exception:
                 continue
 
-    return st.download_button(
-        label,
-        data=data,
-        file_name=filename,
-        mime=mime,
-        use_container_width=True,
-    )
+    return st.download_button(label, data=data, file_name=filename, mime=mime, use_container_width=True)
 
 
 # =============================
@@ -282,34 +296,19 @@ def main():
 
     if HAS_COMMON_UI:
         inject_logistics_theme()
-        set_page("📦 每日庫存應作量", "支援 xls/xlsx/csv｜抓『商品』欄位｜加權計算｜下載 CSV")
+        set_page("📦 每日庫存應作量", "自動辨識『商品』欄位（含尾巴空白）｜加權計算｜下載 CSV")
     else:
         st.title("📦 每日庫存應作量")
-        st.caption("支援 xls/xlsx/csv｜抓『商品』欄位｜加權計算｜下載 CSV")
+        st.caption("自動辨識『商品』欄位（含尾巴空白）｜加權計算｜下載 CSV")
 
     if HAS_COMMON_UI:
         card_open("📥 1) 上傳檔案")
 
-    st.markdown(
-        """
-- 訂單資料檔：支援 `.csv / .xlsx / .xls / .xlsm`（✅ 真 `.xls` 需要 requirements 安裝 `xlrd>=2.0.1`）
-- 商品主檔：Excel，需包含分頁：`商品主檔`、`大類加權`
-        """.strip()
-    )
-
     c1, c2 = st.columns(2)
     with c1:
-        order_file = st.file_uploader(
-            "訂單資料檔（抓欄位『商品』）",
-            type=["csv", "xlsx", "xls", "xlsm"],
-            key="order",
-        )
+        order_file = st.file_uploader("訂單資料檔（抓『商品』）", type=["csv", "xlsx", "xls", "xlsm"], key="order")
     with c2:
-        master_file = st.file_uploader(
-            "商品主檔（含：商品主檔 / 大類加權）",
-            type=["xlsx", "xls", "xlsm"],
-            key="master",
-        )
+        master_file = st.file_uploader("商品主檔（含：商品主檔 / 大類加權）", type=["xlsx", "xls", "xlsm"], key="master")
 
     if HAS_COMMON_UI:
         card_close()
@@ -328,31 +327,23 @@ def main():
         with st.spinner("處理中（排除 / 補碼 / Join / 計算）..."):
             final_df, msgs = build_result(df_order, df_master, df_weight)
 
+        # 摘要
         total_rows = len(final_df)
         uniq_sku = final_df["商品"].nunique() if "商品" in final_df.columns else 0
         sum_weighted = float(final_df["加權計算結果"].sum()) if "加權計算結果" in final_df.columns else 0.0
 
-        if HAS_COMMON_UI:
-            card_open("📊 2) 結果摘要")
         k1, k2, k3 = st.columns(3)
         k1.metric("筆數", f"{total_rows:,}")
         k2.metric("商品數(不重複)", f"{uniq_sku:,}")
         k3.metric("加權計算結果總和", f"{sum_weighted:,.2f}")
-        if HAS_COMMON_UI:
-            card_close()
 
         if msgs:
             st.info(" \n".join([f"- {m}" for m in msgs]))
 
-        if HAS_COMMON_UI:
-            card_open("🔎 3) 明細預覽")
         st.dataframe(final_df, use_container_width=True, height=520)
-        if HAS_COMMON_UI:
-            card_close()
 
         csv_bytes = to_csv_bytes(final_df)
-        filename = "處理完成_加權計算結果.csv"
-        safe_download_card("✅ 下載 CSV（加權計算結果）", csv_bytes, filename, mime="text/csv")
+        safe_download_card("✅ 下載 CSV（加權計算結果）", csv_bytes, "處理完成_加權計算結果.csv", mime="text/csv")
 
         st.success("完成 ✅")
 
