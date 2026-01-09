@@ -2,7 +2,7 @@
 # pages/28_每日庫存應作量.py
 
 import io
-import os
+import inspect
 import pandas as pd
 import streamlit as st
 
@@ -28,8 +28,7 @@ def format_code(x, length: int) -> str:
     if pd.isna(x) or str(x).strip() == "":
         return ""
     s = str(x).strip()
-    # 去除 Excel 常見的 .0
-    s = s.split(".")[0].strip()
+    s = s.split(".")[0].strip()  # 去除 Excel 常見 .0
     return s.zfill(length)
 
 
@@ -39,13 +38,11 @@ def read_order_file(uploaded) -> pd.DataFrame:
     raw = uploaded.getvalue()
 
     if name.endswith(".csv"):
-        # 依你原本：utf-8-sig → big5
         try:
             return pd.read_csv(io.BytesIO(raw), encoding="utf-8-sig")
         except Exception:
             return pd.read_csv(io.BytesIO(raw), encoding="big5", errors="replace")
-    else:
-        return pd.read_excel(io.BytesIO(raw))
+    return pd.read_excel(io.BytesIO(raw))
 
 
 def read_master_file(uploaded) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -59,7 +56,9 @@ def read_master_file(uploaded) -> tuple[pd.DataFrame, pd.DataFrame]:
         raise ValueError("找不到『商品主檔』或『大類加權』分頁，請檢查 Excel 工作表名稱。") from e
 
 
-def build_result(df_order: pd.DataFrame, df_master: pd.DataFrame, df_weight: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+def build_result(
+    df_order: pd.DataFrame, df_master: pd.DataFrame, df_weight: pd.DataFrame
+) -> tuple[pd.DataFrame, list[str]]:
     """主流程：清理 → 補碼 → join → 計算"""
     msgs: list[str] = []
 
@@ -106,7 +105,6 @@ def build_result(df_order: pd.DataFrame, df_master: pd.DataFrame, df_weight: pd.
     df_weight["PA"] = df_weight["PA"].apply(lambda x: format_code(x, 2))
 
     # --- 二次比對 ---
-    # A: 商品代號 → 大類 / 類別
     master_cols = ["商品代號", "大類"]
     if "類別" in df_master.columns:
         master_cols.append("類別")
@@ -114,7 +112,6 @@ def build_result(df_order: pd.DataFrame, df_master: pd.DataFrame, df_weight: pd.
 
     step1_df = pd.merge(df_order, df_master_sub, left_on="商品", right_on="商品代號", how="left")
 
-    # B: 大類 → PARM_VALUE2（加權）
     df_weight_sub = df_weight[["PA", "PARM_VALUE2"]].drop_duplicates(subset=["PA"])
     final_df = pd.merge(step1_df, df_weight_sub, left_on="大類", right_on="PA", how="left")
 
@@ -134,12 +131,83 @@ def build_result(df_order: pd.DataFrame, df_master: pd.DataFrame, df_weight: pd.
 
     # --- 清理輔助欄位 ---
     final_df = final_df.drop(columns=["商品代號", "PA"], errors="ignore")
-
     return final_df, msgs
 
 
 def to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+
+
+def safe_download_card(label: str, data: bytes, filename: str, mime: str = "text/csv"):
+    """
+    ✅ 相容不同版本 common_ui.download_excel_card 的參數命名
+    - 會先用 signature 偵測參數
+    - 再做位置參數 fallback
+    - 最後退回 st.download_button（永遠不會炸）
+    """
+    if HAS_COMMON_UI and "download_excel_card" in globals():
+        fn = download_excel_card
+        try:
+            sig = inspect.signature(fn)
+            params = set(sig.parameters.keys())
+
+            kwargs = {}
+
+            # 標題/文字參數：title / label / text (擇一)
+            if "title" in params:
+                kwargs["title"] = label
+            elif "label" in params:
+                kwargs["label"] = label
+            elif "text" in params:
+                kwargs["text"] = label
+
+            # 資料參數：data / xlsx_bytes / bytes_data (擇一)
+            if "data" in params:
+                kwargs["data"] = data
+            elif "xlsx_bytes" in params:
+                kwargs["xlsx_bytes"] = data
+            elif "bytes_data" in params:
+                kwargs["bytes_data"] = data
+
+            # 檔名參數：filename / file_name (擇一)
+            if "filename" in params:
+                kwargs["filename"] = filename
+            elif "file_name" in params:
+                kwargs["file_name"] = filename
+
+            # mime 若支援就帶
+            if "mime" in params:
+                kwargs["mime"] = mime
+
+            # 若 kwargs 太少（例如此版本只吃位置參數），會進 except 做 fallback
+            if kwargs:
+                return fn(**kwargs)
+
+        except TypeError:
+            pass
+        except Exception:
+            pass
+
+        # 位置參數 fallback（嘗試幾種常見順序）
+        for args in [
+            (label, data, filename),
+            (data, filename, label),
+            (data, filename),
+            (label, data),
+        ]:
+            try:
+                return fn(*args)
+            except Exception:
+                continue
+
+    # 最終保底：原生下載按鈕
+    return st.download_button(
+        label,
+        data=data,
+        file_name=filename,
+        mime=mime,
+        use_container_width=True,
+    )
 
 
 # =============================
@@ -157,6 +225,7 @@ def main():
 
     if HAS_COMMON_UI:
         card_open("📥 1) 上傳檔案")
+
     st.markdown(
         """
 - 訂單資料檔：支援 `.csv / .xlsx / .xls / .xlsm`
@@ -166,9 +235,17 @@ def main():
 
     c1, c2 = st.columns(2)
     with c1:
-        order_file = st.file_uploader("訂單資料檔（例如：0108.csv）", type=["csv", "xlsx", "xls", "xlsm"], key="order")
+        order_file = st.file_uploader(
+            "訂單資料檔（例如：0108.csv）",
+            type=["csv", "xlsx", "xls", "xlsm"],
+            key="order",
+        )
     with c2:
-        master_file = st.file_uploader("商品主檔（含：商品主檔 / 大類加權）", type=["xlsx", "xls", "xlsm"], key="master")
+        master_file = st.file_uploader(
+            "商品主檔（含：商品主檔 / 大類加權）",
+            type=["xlsx", "xls", "xlsm"],
+            key="master",
+        )
 
     if HAS_COMMON_UI:
         card_close()
@@ -176,7 +253,6 @@ def main():
     st.divider()
 
     run = st.button("✅ 開始處理", type="primary", disabled=not (order_file and master_file))
-
     if not run:
         return
 
@@ -188,7 +264,7 @@ def main():
         with st.spinner("處理中（排除 / 補碼 / Join / 計算）..."):
             final_df, msgs = build_result(df_order, df_master, df_weight)
 
-        # KPI / 摘要
+        # 摘要 KPI
         total_rows = len(final_df)
         uniq_sku = final_df["商品"].nunique() if "商品" in final_df.columns else 0
         sum_weighted = float(final_df["加權計算結果"].sum()) if "加權計算結果" in final_df.columns else 0.0
@@ -215,23 +291,7 @@ def main():
         # 下載
         csv_bytes = to_csv_bytes(final_df)
         filename = "處理完成_加權計算結果.csv"
-
-        if HAS_COMMON_UI and "download_excel_card" in globals():
-            # 你平台常用的一行下載按鈕（函式名雖叫 excel，但也可用於 bytes）
-            download_excel_card(
-                title="✅ 下載 CSV（加權計算結果）",
-                data=csv_bytes,
-                filename=filename,
-                mime="text/csv",
-            )
-        else:
-            st.download_button(
-                "✅ 下載 CSV（加權計算結果）",
-                data=csv_bytes,
-                file_name=filename,
-                mime="text/csv",
-                use_container_width=True,
-            )
+        safe_download_card("✅ 下載 CSV（加權計算結果）", csv_bytes, filename, mime="text/csv")
 
         st.success("完成 ✅")
 
