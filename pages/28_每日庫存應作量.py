@@ -24,15 +24,11 @@ except Exception:
 # helpers
 # =============================
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    1) 全欄位名稱去前後空白
-    2) 常見亂碼/全形空白也一併處理
-    """
     df = df.copy()
     new_cols = []
     for c in df.columns:
         s = str(c)
-        s = s.replace("\u3000", " ")  # 全形空白 -> 半形
+        s = s.replace("\u3000", " ")  # 全形空白
         s = s.strip()
         new_cols.append(s)
     df.columns = new_cols
@@ -40,43 +36,23 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def ensure_order_sku_column(df_order: pd.DataFrame) -> pd.DataFrame:
-    """
-    ✅ 訂單檔：強制對齊「商品」欄位
-    - 先 normalize columns
-    - 若存在 '商品 ' 這種尾巴空白，normalize 後會變成 '商品'
-    - 若仍沒有，嘗試同義欄位映射到 '商品'
-    """
     df_order = normalize_columns(df_order)
-
     if "商品" in df_order.columns:
         return df_order
 
-    # 同義欄位候選（依你環境常見命名）
-    candidates = [
-        "商品碼",
-        "商品代號",
-        "商品號",
-        "品號",
-        "ITEM",
-        "SKU",
-        "SKU#",
-        "Item",
-        "item",
-    ]
+    candidates = ["商品碼", "商品代號", "商品號", "品號", "ITEM", "SKU", "SKU#", "Item", "item"]
     for c in candidates:
         if c in df_order.columns:
-            df_order = df_order.rename(columns={c: "商品"})
-            return df_order
+            return df_order.rename(columns={c: "商品"})
 
     raise ValueError(f"訂單檔缺少欄位『商品』。目前欄位：{list(df_order.columns)}")
 
 
 def format_code(x, length: int) -> str:
-    """處理空值、去除小數點、補足前導 0 (如 255 -> 000255)"""
     if pd.isna(x) or str(x).strip() == "":
         return ""
     s = str(x).strip()
-    s = s.split(".")[0].strip()  # 去除 Excel 常見 .0
+    s = s.split(".")[0].strip()
     return s.zfill(length)
 
 
@@ -162,9 +138,7 @@ def read_master_file(uploaded) -> tuple[pd.DataFrame, pd.DataFrame]:
     try:
         df_master = pd.read_excel(io.BytesIO(raw), sheet_name="商品主檔", engine=engine)
         df_weight = pd.read_excel(io.BytesIO(raw), sheet_name="大類加權", engine=engine)
-        df_master = normalize_columns(df_master)
-        df_weight = normalize_columns(df_weight)
-        return df_master, df_weight
+        return normalize_columns(df_master), normalize_columns(df_weight)
     except Exception as e:
         raise ValueError("找不到『商品主檔』或『大類加權』分頁，請檢查 Excel 工作表名稱。") from e
 
@@ -260,17 +234,14 @@ def safe_download_card(label: str, data: bytes, filename: str, mime: str = "text
                 if k in params:
                     kwargs[k] = label
                     break
-
             for k in ("data", "xlsx_bytes", "bytes_data"):
                 if k in params:
                     kwargs[k] = data
                     break
-
             for k in ("filename", "file_name"):
                 if k in params:
                     kwargs[k] = filename
                     break
-
             if "mime" in params:
                 kwargs["mime"] = mime
 
@@ -288,6 +259,27 @@ def safe_download_card(label: str, data: bytes, filename: str, mime: str = "text
     return st.download_button(label, data=data, file_name=filename, mime=mime, use_container_width=True)
 
 
+def concat_orders(order_files) -> tuple[pd.DataFrame, list[str]]:
+    """
+    ✅ 多檔訂單合併（先各自讀取/正規化欄位，再 concat）
+    """
+    msgs = []
+    dfs = []
+    for f in order_files:
+        df = robust_read_table(f)
+        df = normalize_columns(df)
+        # 先確保有商品欄位（含商品尾巴空白 -> normalize 後可對齊）
+        df = ensure_order_sku_column(df)
+        dfs.append(df)
+        msgs.append(f"已讀取：{f.name}（{len(df):,} 筆）")
+
+    if not dfs:
+        raise ValueError("尚未選擇任何訂單檔")
+    out = pd.concat(dfs, ignore_index=True, sort=False)
+    msgs.append(f"多檔合併完成：{len(dfs)} 檔，共 {len(out):,} 筆")
+    return out, msgs
+
+
 # =============================
 # UI
 # =============================
@@ -296,32 +288,43 @@ def main():
 
     if HAS_COMMON_UI:
         inject_logistics_theme()
-        set_page("📦 每日庫存應作量", "自動辨識『商品』欄位（含尾巴空白）｜加權計算｜下載 CSV")
+        set_page("📦 每日庫存應作量", "訂單多檔合併｜自動辨識『商品』｜加權計算｜下載 CSV")
     else:
         st.title("📦 每日庫存應作量")
-        st.caption("自動辨識『商品』欄位（含尾巴空白）｜加權計算｜下載 CSV")
+        st.caption("訂單多檔合併｜自動辨識『商品』｜加權計算｜下載 CSV")
 
     if HAS_COMMON_UI:
         card_open("📥 1) 上傳檔案")
 
     c1, c2 = st.columns(2)
     with c1:
-        order_file = st.file_uploader("訂單資料檔（抓『商品』）", type=["csv", "xlsx", "xls", "xlsm"], key="order")
+        order_files = st.file_uploader(
+            "訂單資料檔（抓『商品』｜可選擇多檔）",
+            type=["csv", "xlsx", "xls", "xlsm"],
+            accept_multiple_files=True,   # ✅ 多檔
+            key="order_multi",
+        )
     with c2:
-        master_file = st.file_uploader("商品主檔（含：商品主檔 / 大類加權）", type=["xlsx", "xls", "xlsm"], key="master")
+        master_file = st.file_uploader(
+            "商品主檔（含：商品主檔 / 大類加權）",
+            type=["xlsx", "xls", "xlsm"],
+            key="master",
+        )
 
     if HAS_COMMON_UI:
         card_close()
 
     st.divider()
 
-    run = st.button("✅ 開始處理", type="primary", disabled=not (order_file and master_file))
+    run = st.button("✅ 開始處理", type="primary", disabled=not (order_files and master_file))
     if not run:
         return
 
     try:
-        with st.spinner("讀取檔案中..."):
-            df_order = robust_read_table(order_file)
+        with st.spinner("讀取訂單檔（多檔）..."):
+            df_order, read_msgs = concat_orders(order_files)
+
+        with st.spinner("讀取商品主檔..."):
             df_master, df_weight = read_master_file(master_file)
 
         with st.spinner("處理中（排除 / 補碼 / Join / 計算）..."):
@@ -337,8 +340,7 @@ def main():
         k2.metric("商品數(不重複)", f"{uniq_sku:,}")
         k3.metric("加權計算結果總和", f"{sum_weighted:,.2f}")
 
-        if msgs:
-            st.info(" \n".join([f"- {m}" for m in msgs]))
+        st.info(" \n".join([f"- {m}" for m in (read_msgs + msgs)]))
 
         st.dataframe(final_df, use_container_width=True, height=520)
 
