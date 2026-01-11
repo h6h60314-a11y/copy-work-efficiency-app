@@ -22,7 +22,7 @@ QC_KEY_HEADER = "商品"
 UN_KEY_HEADER = "商品碼"
 UN_DATE_HEADER = "進貨日"
 
-# ✅ 新增：兩檔都要有的欄位
+# ✅ 新增：兩檔都要比對的欄位
 UNIT_HEADER = "可移動單位"
 
 MATCH_SHEET_NAME = "符合未上架明細"
@@ -110,10 +110,12 @@ def get_ws(wb, sheet_name: Optional[str]):
 
 
 def find_header_col(ws, header_name: str, header_row: int = 1) -> Optional[int]:
+    # exact
     for c in range(1, ws.max_column + 1):
         v = ws.cell(row=header_row, column=c).value
         if isinstance(v, str) and v.strip() == header_name:
             return c
+    # contains
     target = header_name.strip()
     for c in range(1, ws.max_column + 1):
         v = ws.cell(row=header_row, column=c).value
@@ -162,7 +164,7 @@ def normalize_code(value, fmt: str, fallback_width: int = 0) -> str:
 
 
 def normalize_unit(value) -> str:
-    """把可移動單位轉為可比對的字串（去空白、數字浮點轉整數字串）"""
+    """把可移動單位轉為可比對的字串（去空白、浮點整數化）"""
     if value is None:
         return ""
     if isinstance(value, str):
@@ -200,6 +202,19 @@ def format_date_value(v) -> str:
         return pd.Timestamp(dtv).strftime("%Y-%m-%d")
     except Exception:
         return s
+
+
+def _force_leading_zero_for_all_sheets(wb, headers, width: int):
+    """
+    ✅ 所有工作表：只要欄位名稱符合 headers（例如 商品 / 商品碼），就整欄轉文字並補齊前導0
+    """
+    for ws in wb.worksheets:
+        for h in headers:
+            col = find_header_col(ws, h, 1)
+            if col is None:
+                continue
+            for r in range(2, ws.max_row + 1):
+                force_code_text_cell(ws.cell(row=r, column=col), width)
 
 
 # =============================
@@ -317,6 +332,13 @@ def process_wb(
                 code_len = max(code_len, len(s))
     fallback_width = code_len or 6
 
+    # ✅ 所有輸出工作表：只要有「商品 / 商品碼」都保留前導 0（000000）
+    _force_leading_zero_for_all_sheets(
+        qc_wb,
+        headers=[QC_KEY_HEADER, UN_KEY_HEADER],  # "商品", "商品碼"
+        width=fallback_width
+    )
+
     # ✅ (商品碼, 可移動單位) -> 進貨日(可多筆合併)
     date_sets = defaultdict(set)
 
@@ -332,15 +354,10 @@ def process_wb(
         d_cell = un_ws.cell(row=r, column=un_date_col)
         d_str = format_date_value(d_cell.value)
 
-        # ✅ 必須同時有 code + unit + date 才入索引
         if code and unit and d_str:
             date_sets[(code, unit)].add(d_str)
 
     date_map: Dict[Tuple[str, str], str] = {k: "、".join(sorted(v)) for k, v in date_sets.items()}
-
-    # QC 的商品欄位：統一轉文字並保留 000000
-    for r in range(2, qc_ws.max_row + 1):
-        force_code_text_cell(qc_ws.cell(row=r, column=qc_key_col), fallback_width)
 
     # 新增/定位「進貨日」
     qc_date_col = find_header_col(qc_ws, "進貨日", 1)
@@ -354,7 +371,7 @@ def process_wb(
             pass
         hdr.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # ✅ 填入進貨日 + 收集 match rows（必須商品+可移動單位同時符合）
+    # ✅ 填入進貨日 + 收集 match rows（商品 + 可移動單位 必須同時符合）
     match_rows = []
     for r in range(2, qc_ws.max_row + 1):
         code_cell = qc_ws.cell(row=r, column=qc_key_col)
@@ -402,6 +419,13 @@ def process_wb(
             dst.alignment = _copy.copy(getattr(src, "alignment", Alignment()))
         out_r += 1
 
+    # 再保險一次：新增分頁後也套用（避免某些檔案 header 不在主表而是在新增表）
+    _force_leading_zero_for_all_sheets(
+        qc_wb,
+        headers=[QC_KEY_HEADER, UN_KEY_HEADER],
+        width=fallback_width
+    )
+
     # 刪除指定欄位（所有工作表）
     drop_set = {x.strip().lower() for x in DELETE_HEADERS}
 
@@ -435,11 +459,11 @@ _page_css()
 set_page(
     "QC 未上架比對",
     icon="🧾",
-    subtitle="0108QC「商品+可移動單位」比對 未上架明細「商品碼+可移動單位」，回填「進貨日」，並產生「符合未上架明細」分頁；同時刪除指定欄位。",
+    subtitle="0108QC「商品+可移動單位」比對 未上架明細「商品碼+可移動單位」，回填「進貨日」，並產生「符合未上架明細」分頁；同時刪除指定欄位；全檔保留前導0。",
 )
 
 st.markdown(
-    '<div class="qc-chips">少揀差異<span class="sep">｜</span>庫存儲位展開<span class="sep">｜</span>欄位刪除<span class="sep">｜</span>前導 0 保留<span class="sep">｜</span>可移動單位雙條件</div>',
+    '<div class="qc-chips">少揀差異<span class="sep">｜</span>庫存儲位展開<span class="sep">｜</span>欄位刪除<span class="sep">｜</span>前導 0 保留（全檔）<span class="sep">｜</span>可移動單位雙條件</div>',
     unsafe_allow_html=True,
 )
 
