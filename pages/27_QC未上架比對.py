@@ -22,7 +22,7 @@ QC_KEY_HEADER = "商品"
 UN_KEY_HEADER = "商品碼"
 UN_DATE_HEADER = "進貨日"
 
-# ✅ 新增：兩檔都要比對的欄位
+# ✅ 兩檔都要比對的欄位
 UNIT_HEADER = "可移動單位"
 
 MATCH_SHEET_NAME = "符合未上架明細"
@@ -125,6 +125,7 @@ def find_header_col(ws, header_name: str, header_row: int = 1) -> Optional[int]:
 
 
 def zero_run_width(number_format: str) -> int:
+    """偵測 number_format 內連續0的最大長度，例如 '000000' -> 6"""
     if not number_format:
         return 0
     fmt = number_format.split(";")[0]
@@ -139,7 +140,7 @@ def zero_run_width(number_format: str) -> int:
 
 
 def normalize_code(value, fmt: str, fallback_width: int = 0) -> str:
-    """把商品碼轉成字串並保留前導0（依 number_format 或 fallback_width）"""
+    """把數值轉成字串並保留前導0（依 number_format 或 fallback_width）"""
     if value is None:
         return ""
     if isinstance(value, str):
@@ -164,7 +165,7 @@ def normalize_code(value, fmt: str, fallback_width: int = 0) -> str:
 
 
 def normalize_unit(value) -> str:
-    """把可移動單位轉為可比對的字串（去空白、浮點整數化）"""
+    """可移動單位轉為可比對字串（去空白、浮點整數化）"""
     if value is None:
         return ""
     if isinstance(value, str):
@@ -204,17 +205,89 @@ def format_date_value(v) -> str:
         return s
 
 
-def _force_leading_zero_for_all_sheets(wb, headers, width: int):
+def _maybe_intlike_number(v) -> bool:
+    if isinstance(v, int):
+        return True
+    if isinstance(v, float) and abs(v - round(v)) < 1e-9:
+        return True
+    return False
+
+
+def _force_all_columns_keep_leading_zeros(wb: Workbook, scan_limit: int = 5000):
     """
-    ✅ 所有工作表：只要欄位名稱符合 headers（例如 商品 / 商品碼），就整欄轉文字並補齊前導0
+    ✅ 全面保留前導0（不只商品/商品碼）
+    規則：
+      - 若某欄任一儲存格 number_format 含 0000...（zero_run_width>=2），視為「碼欄位」
+      - 或某欄任一儲存格為字串且是純數字且以0開頭(例如 000123)，也視為「碼欄位」
+    動作：
+      - 對判定為碼欄位的整欄：把所有「純數字」值轉文字(@)，並依欄位寬度 zfill 補齊
     """
     for ws in wb.worksheets:
-        for h in headers:
-            col = find_header_col(ws, h, 1)
-            if col is None:
+        max_r = ws.max_row
+        max_c = ws.max_column
+        if max_r < 2 or max_c < 1:
+            continue
+
+        # 先推每欄寬度（只掃描一部分列以控時）
+        col_width = [0] * (max_c + 1)  # 1-based
+        col_flag = [False] * (max_c + 1)
+
+        end_r = min(max_r, scan_limit)
+
+        for c in range(1, max_c + 1):
+            w = 0
+            flagged = False
+            for r in range(2, end_r + 1):
+                cell = ws.cell(row=r, column=c)
+                v = cell.value
+                if v is None:
+                    continue
+
+                fmt = getattr(cell, "number_format", "") or ""
+                z = zero_run_width(fmt)
+                if z >= 2:
+                    flagged = True
+                    w = max(w, z)
+
+                if isinstance(v, str):
+                    s = v.strip()
+                    if s.isdigit() and len(s) >= 2 and s.startswith("0"):
+                        flagged = True
+                        w = max(w, len(s))
+
+            col_flag[c] = flagged
+            col_width[c] = w
+
+        # 再套用：整欄轉文字並補齊
+        for c in range(1, max_c + 1):
+            if not col_flag[c] or col_width[c] < 2:
                 continue
-            for r in range(2, ws.max_row + 1):
-                force_code_text_cell(ws.cell(row=r, column=col), width)
+            w = col_width[c]
+
+            for r in range(2, max_r + 1):
+                cell = ws.cell(row=r, column=c)
+                v = cell.value
+                if v is None:
+                    continue
+
+                # 只處理「純數字」或「看起來像純數字的字串」
+                if isinstance(v, str):
+                    s = v.strip()
+                    if not s:
+                        continue
+                    if s.isdigit():
+                        cell.value = s.zfill(w)
+                        cell.number_format = "@"
+                    # 非純數字字串不動
+                    continue
+
+                if _maybe_intlike_number(v):
+                    iv = int(round(v))
+                    cell.value = str(iv).zfill(w)
+                    cell.number_format = "@"
+                    continue
+
+                # 其他型別（日期/文字等）不動
 
 
 # =============================
@@ -328,20 +401,23 @@ def process_wb(
         cell = un_ws.cell(row=r, column=un_key_col)
         if isinstance(cell.value, str):
             s = cell.value.strip()
-            if s.isdigit():
+            if s.isdigit() and s.startswith("0"):
                 code_len = max(code_len, len(s))
+            elif s.isdigit():
+                code_len = max(code_len, len(s))
+        else:
+            fmt = getattr(cell, "number_format", "") or ""
+            z = zero_run_width(fmt)
+            if z >= 2:
+                code_len = max(code_len, z)
+
     fallback_width = code_len or 6
 
-    # ✅ 所有輸出工作表：只要有「商品 / 商品碼」都保留前導 0（000000）
-    _force_leading_zero_for_all_sheets(
-        qc_wb,
-        headers=[QC_KEY_HEADER, UN_KEY_HEADER],  # "商品", "商品碼"
-        width=fallback_width
-    )
+    # ✅ 核心：輸出整本 QC 的所有欄位，只要有 000000 類型，就完整保留
+    _force_all_columns_keep_leading_zeros(qc_wb, scan_limit=5000)
 
     # ✅ (商品碼, 可移動單位) -> 進貨日(可多筆合併)
     date_sets = defaultdict(set)
-
     for r in range(2, un_ws.max_row + 1):
         code_cell = un_ws.cell(row=r, column=un_key_col)
         code = normalize_code(code_cell.value, getattr(code_cell, "number_format", ""), fallback_width)
@@ -419,12 +495,8 @@ def process_wb(
             dst.alignment = _copy.copy(getattr(src, "alignment", Alignment()))
         out_r += 1
 
-    # 再保險一次：新增分頁後也套用（避免某些檔案 header 不在主表而是在新增表）
-    _force_leading_zero_for_all_sheets(
-        qc_wb,
-        headers=[QC_KEY_HEADER, UN_KEY_HEADER],
-        width=fallback_width
-    )
+    # ✅ 新增分頁後再跑一次（確保新分頁也完全保留前導0）
+    _force_all_columns_keep_leading_zeros(qc_wb, scan_limit=5000)
 
     # 刪除指定欄位（所有工作表）
     drop_set = {x.strip().lower() for x in DELETE_HEADERS}
@@ -459,11 +531,11 @@ _page_css()
 set_page(
     "QC 未上架比對",
     icon="🧾",
-    subtitle="0108QC「商品+可移動單位」比對 未上架明細「商品碼+可移動單位」，回填「進貨日」，並產生「符合未上架明細」分頁；同時刪除指定欄位；全檔保留前導0。",
+    subtitle="0108QC「商品+可移動單位」比對 未上架明細「商品碼+可移動單位」，回填「進貨日」，並產生「符合未上架明細」分頁；同時刪除指定欄位；全欄位前導0完整保留。",
 )
 
 st.markdown(
-    '<div class="qc-chips">少揀差異<span class="sep">｜</span>庫存儲位展開<span class="sep">｜</span>欄位刪除<span class="sep">｜</span>前導 0 保留（全檔）<span class="sep">｜</span>可移動單位雙條件</div>',
+    '<div class="qc-chips">少揀差異<span class="sep">｜</span>庫存儲位展開<span class="sep">｜</span>欄位刪除<span class="sep">｜</span>前導 0 全面保留<span class="sep">｜</span>可移動單位雙條件</div>',
     unsafe_allow_html=True,
 )
 
