@@ -22,6 +22,9 @@ QC_KEY_HEADER = "商品"
 UN_KEY_HEADER = "商品碼"
 UN_DATE_HEADER = "進貨日"
 
+# ✅ 新增：兩檔都要有的欄位
+UNIT_HEADER = "可移動單位"
+
 MATCH_SHEET_NAME = "符合未上架明細"
 
 DELETE_HEADERS = [
@@ -158,6 +161,21 @@ def normalize_code(value, fmt: str, fallback_width: int = 0) -> str:
     return str(value).strip()
 
 
+def normalize_unit(value) -> str:
+    """把可移動單位轉為可比對的字串（去空白、數字浮點轉整數字串）"""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (datetime, date)):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, float) and abs(value - round(value)) < 1e-9:
+        return str(int(round(value)))
+    if isinstance(value, int):
+        return str(value)
+    return str(value).strip()
+
+
 def force_code_text_cell(cell, width: int):
     """把 cell 轉成文字並保留前導0（只針對純數字碼）"""
     v = cell.value
@@ -189,7 +207,6 @@ def format_date_value(v) -> str:
 # =============================
 def _dfs_to_workbook(sheets: Dict[str, pd.DataFrame]) -> Workbook:
     wb = Workbook()
-    # 移除預設 Sheet
     if wb.worksheets:
         wb.remove(wb.worksheets[0])
 
@@ -197,10 +214,8 @@ def _dfs_to_workbook(sheets: Dict[str, pd.DataFrame]) -> Workbook:
         name = str(sheet_name)[:31] if sheet_name else "Sheet1"
         ws = wb.create_sheet(title=name)
 
-        # header
         ws.append([str(c) if c is not None else "" for c in df.columns.tolist()])
 
-        # rows
         for row in df.itertuples(index=False, name=None):
             out_row = []
             for v in row:
@@ -222,13 +237,11 @@ def _load_wb_from_upload(uploaded_file) -> Tuple[str, Workbook]:
     raw = uploaded_file.getvalue()
     bio = io.BytesIO(raw)
 
-    # xlsx / xlsm -> openpyxl
     if ext in ("xlsx", "xlsm"):
         keep_vba = (ext == "xlsm")
         wb = load_workbook(bio, keep_vba=keep_vba)
         return name, wb
 
-    # xlsb -> pandas (pyxlsb) -> openpyxl
     if ext == "xlsb":
         try:
             sheets = pd.read_excel(io.BytesIO(raw), engine="pyxlsb", sheet_name=None)
@@ -240,7 +253,6 @@ def _load_wb_from_upload(uploaded_file) -> Tuple[str, Workbook]:
         wb = _dfs_to_workbook(sheets)
         return name, wb
 
-    # xls -> pandas (xlrd) -> openpyxl
     if ext == "xls":
         try:
             sheets = pd.read_excel(io.BytesIO(raw), engine="xlrd", sheet_name=None)
@@ -277,13 +289,21 @@ def process_wb(
     un_ws = get_ws(un_wb, un_sheet_name)
 
     qc_key_col = find_header_col(qc_ws, QC_KEY_HEADER, 1)
+    qc_unit_col = find_header_col(qc_ws, UNIT_HEADER, 1)
+
     un_key_col = find_header_col(un_ws, UN_KEY_HEADER, 1)
+    un_unit_col = find_header_col(un_ws, UNIT_HEADER, 1)
     un_date_col = find_header_col(un_ws, UN_DATE_HEADER, 1)
 
     if qc_key_col is None:
         raise ValueError(f"QC 找不到欄位：{QC_KEY_HEADER}")
+    if qc_unit_col is None:
+        raise ValueError(f"QC 找不到欄位：{UNIT_HEADER}")
+
     if un_key_col is None:
         raise ValueError(f"未上架明細找不到欄位：{UN_KEY_HEADER}")
+    if un_unit_col is None:
+        raise ValueError(f"未上架明細找不到欄位：{UNIT_HEADER}")
     if un_date_col is None:
         raise ValueError(f"未上架明細找不到欄位：{UN_DATE_HEADER}")
 
@@ -297,21 +317,26 @@ def process_wb(
                 code_len = max(code_len, len(s))
     fallback_width = code_len or 6
 
-    # 商品碼 -> 進貨日(可多筆合併)
+    # ✅ (商品碼, 可移動單位) -> 進貨日(可多筆合併)
     date_sets = defaultdict(set)
+
     for r in range(2, un_ws.max_row + 1):
         code_cell = un_ws.cell(row=r, column=un_key_col)
         code = normalize_code(code_cell.value, getattr(code_cell, "number_format", ""), fallback_width)
+        if code and code.isdigit():
+            code = code.zfill(fallback_width)
+
+        unit_cell = un_ws.cell(row=r, column=un_unit_col)
+        unit = normalize_unit(unit_cell.value)
 
         d_cell = un_ws.cell(row=r, column=un_date_col)
         d_str = format_date_value(d_cell.value)
 
-        if code and d_str:
-            if code.isdigit():
-                code = code.zfill(fallback_width)
-            date_sets[code].add(d_str)
+        # ✅ 必須同時有 code + unit + date 才入索引
+        if code and unit and d_str:
+            date_sets[(code, unit)].add(d_str)
 
-    date_map: Dict[str, str] = {k: "、".join(sorted(v)) for k, v in date_sets.items()}
+    date_map: Dict[Tuple[str, str], str] = {k: "、".join(sorted(v)) for k, v in date_sets.items()}
 
     # QC 的商品欄位：統一轉文字並保留 000000
     for r in range(2, qc_ws.max_row + 1):
@@ -329,7 +354,7 @@ def process_wb(
             pass
         hdr.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # 填入進貨日 + 收集 match rows
+    # ✅ 填入進貨日 + 收集 match rows（必須商品+可移動單位同時符合）
     match_rows = []
     for r in range(2, qc_ws.max_row + 1):
         code_cell = qc_ws.cell(row=r, column=qc_key_col)
@@ -337,10 +362,14 @@ def process_wb(
         if code and code.isdigit():
             code = code.zfill(fallback_width)
 
-        d_str = date_map.get(code, "")
+        unit_cell = qc_ws.cell(row=r, column=qc_unit_col)
+        unit = normalize_unit(unit_cell.value)
+
+        d_str = date_map.get((code, unit), "")
         out_cell = qc_ws.cell(row=r, column=qc_date_col)
         out_cell.value = d_str
         out_cell.number_format = "@"
+
         if d_str:
             match_rows.append(r)
 
@@ -406,11 +435,11 @@ _page_css()
 set_page(
     "QC 未上架比對",
     icon="🧾",
-    subtitle="0108QC「商品」比對 未上架明細「商品碼」，回填「進貨日」，並產生「符合未上架明細」分頁；同時刪除指定欄位。",
+    subtitle="0108QC「商品+可移動單位」比對 未上架明細「商品碼+可移動單位」，回填「進貨日」，並產生「符合未上架明細」分頁；同時刪除指定欄位。",
 )
 
 st.markdown(
-    '<div class="qc-chips">少揀差異<span class="sep">｜</span>庫存儲位展開<span class="sep">｜</span>欄位刪除<span class="sep">｜</span>前導 0 保留</div>',
+    '<div class="qc-chips">少揀差異<span class="sep">｜</span>庫存儲位展開<span class="sep">｜</span>欄位刪除<span class="sep">｜</span>前導 0 保留<span class="sep">｜</span>可移動單位雙條件</div>',
     unsafe_allow_html=True,
 )
 
