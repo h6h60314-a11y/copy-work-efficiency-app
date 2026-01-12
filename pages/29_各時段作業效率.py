@@ -22,6 +22,10 @@ except Exception:
 
 TPE = ZoneInfo("Asia/Taipei")
 
+# ✅ 狀態文字（你要的）
+STATUS_PASS = "達標"
+STATUS_FAIL = "未達標"
+
 
 # =============================
 # 強韌讀檔：CSV/Excel 自動處理編碼/分隔符
@@ -95,12 +99,12 @@ def _safe_time(s: str) -> str:
 
 
 # =============================
-# Excel：PASS/FAIL 上色（只輸出 PASS/FAIL 文字）
+# Excel：達標/未達標 上色（只輸出文字）
 # =============================
 def build_excel_bytes_pf(matrix_pf: pd.DataFrame, hour_cols: list[int]) -> bytes:
     bio = io.BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        matrix_pf.to_excel(writer, index=False, sheet_name="PASS_FAIL_矩陣")
+        matrix_pf.to_excel(writer, index=False, sheet_name="達標_矩陣")
     bio.seek(0)
 
     wb = load_workbook(bio)
@@ -116,9 +120,9 @@ def build_excel_bytes_pf(matrix_pf: pd.DataFrame, hour_cols: list[int]) -> bytes
     for r in ws.iter_rows(min_row=2, min_col=min_col, max_col=max_col):
         for c in r:
             v = str(c.value).strip() if c.value is not None else ""
-            if v == "PASS":
+            if v == STATUS_PASS:
                 c.fill = fill_ok
-            elif v == "FAIL":
+            elif v == STATUS_FAIL:
                 c.fill = fill_ng
 
     out = io.BytesIO()
@@ -130,9 +134,9 @@ def build_excel_bytes_pf(matrix_pf: pd.DataFrame, hour_cols: list[int]) -> bytes
 # 表格著色（前端 dataframe）
 # =============================
 def _style_pf(v):
-    if v == "PASS":
+    if v == STATUS_PASS:
         return "background-color: rgba(198,239,206,1); color: rgba(0,0,0,0.9); font-weight:700;"
-    if v == "FAIL":
+    if v == STATUS_FAIL:
         return "background-color: rgba(255,199,206,1); color: rgba(0,0,0,0.9); font-weight:700;"
     return ""
 
@@ -141,8 +145,8 @@ def _kpi_counts(dist_df: pd.DataFrame):
     # dist_df columns: 小時, 狀態, count
     if dist_df is None or dist_df.empty:
         return 0, 0, None
-    p = int(dist_df.loc[dist_df["狀態"] == "PASS", "count"].sum())
-    f = int(dist_df.loc[dist_df["狀態"] == "FAIL", "count"].sum())
+    p = int(dist_df.loc[dist_df["狀態"] == STATUS_PASS, "count"].sum())
+    f = int(dist_df.loc[dist_df["狀態"] == STATUS_FAIL, "count"].sum())
     rate = (p / (p + f) * 100.0) if (p + f) > 0 else None
     return p, f, rate
 
@@ -150,7 +154,7 @@ def _kpi_counts(dist_df: pd.DataFrame):
 def _render_dist_chart(dist_df: pd.DataFrame, title: str):
     # dist_df columns: 小時, 狀態, count
     if dist_df is None or dist_df.empty:
-        st.info("此區間沒有可呈現的 PASS/FAIL 分佈。")
+        st.info("此區間沒有可呈現的 達標/未達標 分佈。")
         return
 
     chart = (
@@ -161,7 +165,7 @@ def _render_dist_chart(dist_df: pd.DataFrame, title: str):
             y=alt.Y("count:Q", title="段數數量", stack="zero"),
             color=alt.Color(
                 "狀態:N",
-                scale=alt.Scale(domain=["PASS", "FAIL"], range=["#2E7D32", "#C62828"]),
+                scale=alt.Scale(domain=[STATUS_PASS, STATUS_FAIL], range=["#2E7D32", "#C62828"]),
                 legend=alt.Legend(title="狀態"),
             ),
             tooltip=[alt.Tooltip("小時:O"), alt.Tooltip("狀態:N"), alt.Tooltip("count:Q")],
@@ -177,7 +181,7 @@ def main():
         inject_logistics_theme()
         set_page("📦 出貨課", "⏱️ 29｜各時段作業效率")
 
-    st.markdown("### ⏱️ 各時段作業效率（PASS/FAIL｜段1~段4 分佈）")
+    st.markdown("### ⏱️ 各時段作業效率（達標/未達標｜段1~段4 分佈）")
 
     # --- 固定人員開始時間表 ---
     fixed_time_map = {
@@ -254,7 +258,7 @@ def main():
         df_members["段數"] = clean_zone_1to4(df_members["段數"])
         df_members = df_members[df_members["段數"].notna()].copy()
 
-        # ✅ 如果同一線別+段數有多筆，先取第一筆，避免合併展開
+        # ✅ 同一線別+段數只留一筆（避免合併展開）
         df_members = df_members.drop_duplicates(["線別", "段數"], keep="first").copy()
 
         # =========================================================
@@ -299,7 +303,7 @@ def main():
             raise ValueError("套用開始時間過濾後沒有資料：請確認 PICKDATE 與開始時間設定。")
 
         # =========================================================
-        # 3) 以「累計」判斷 PASS/FAIL（每人每小時）
+        # 3) 以「累計」判斷 達標/未達標（每人每小時）
         # =========================================================
         df["小時"] = df["PICKDATE"].dt.hour
         base_cols = ["線別", "段數", "姓名", "開始時間"]
@@ -326,11 +330,17 @@ def main():
         )
 
         target = np.maximum(0.01, elapsed) * float(target_hr)
-        status = np.where(np.isnan(elapsed), None, np.where(hourly["累計實際量"].values >= target, "PASS", "FAIL"))
+
+        # ✅ 直接輸出「達標/未達標」
+        status = np.where(
+            np.isnan(elapsed),
+            None,
+            np.where(hourly["累計實際量"].values >= target, STATUS_PASS, STATUS_FAIL)
+        )
         hourly["狀態"] = status
 
         # =========================================================
-        # 4) 建「完整網格」：每線 × 段(1~4) × 每小時，都用 PASS/FAIL 顯示
+        # 4) 建「完整網格」：每線 × 段(1~4) × 每小時，都用 達標/未達標 顯示
         # =========================================================
         hour_cols = list(range(int(hour_min), int(cur_h) + 1))
 
@@ -341,7 +351,7 @@ def main():
         grid = keys.assign(_k=1).merge(pd.DataFrame({"小時": hour_cols, "_k": 1}), on="_k").drop(columns=["_k"])
         grid = grid.merge(hourly[base_cols + ["小時", "狀態"]], on=base_cols + ["小時"], how="left")
 
-        # ✅ 產出總矩陣：線別+段數+姓名+開始時間 + 每小時 PASS/FAIL
+        # ✅ 產出總矩陣：線別+段數+姓名+開始時間 + 每小時 達標/未達標
         matrix_pf = (
             grid.pivot(index=base_cols, columns="小時", values="狀態")
             .reset_index()
@@ -353,21 +363,20 @@ def main():
         matrix_pf = matrix_pf[base_cols + hour_cols]
 
         # =========================================================
-        # 5) KPI 圖表：每線（段1~段4 PASS/FAIL 分佈） + 全作業線總和
+        # 5) KPI 圖表：每線（段1~段4 達標/未達標 分佈） + 全作業線總和
         # =========================================================
-        st.success("計算完成 ✅（呈現：PASS/FAIL｜段1~段4 分佈）")
-        st.markdown("## 📊 KPI（每線：段1~段4 PASS/FAIL 分佈）")
+        st.success("計算完成 ✅（呈現：達標/未達標｜段1~段4 分佈）")
+        st.markdown("## 📊 KPI（每線：段1~段4 達標/未達標 分佈）")
 
-        # dist：每線、每小時 PASS/FAIL 有幾段
+        # dist：每線、每小時 達標/未達標 有幾段
         dist = (
-            grid[grid["狀態"].isin(["PASS", "FAIL"])]
+            grid[grid["狀態"].isin([STATUS_PASS, STATUS_FAIL])]
             .groupby(["線別", "小時", "狀態"], as_index=False)
             .size()
             .rename(columns={"size": "count"})
             .sort_values(["線別", "小時", "狀態"])
         )
 
-        # 決定 KPI 參考小時：用目前小時（cur_h）為主
         eff_hour = int(cur_h)
 
         lines = sorted(keys["線別"].dropna().unique().tolist())
@@ -377,44 +386,49 @@ def main():
             else:
                 st.markdown(f"### 📦 {line}")
 
-            # KPI：目前小時的 PASS/FAIL 段數（段1~段4）
+            # KPI：目前小時的 達標/未達標 段數（段1~段4）
             dist_now = dist[(dist["線別"] == line) & (dist["小時"] == eff_hour)]
             p, f, rate = _kpi_counts(dist_now)
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("判斷小時", f"{eff_hour} 點")
-            c2.metric("PASS 段數", p)
-            c3.metric("FAIL 段數", f)
-            c4.metric("PASS 率", (f"{rate:.1f}%" if rate is not None else "—"))
+            c2.metric("達標 段數", p)
+            c3.metric("未達標 段數", f)
+            c4.metric("達標 率", (f"{rate:.1f}%" if rate is not None else "—"))
 
-            # 圖：每小時 PASS/FAIL 段數（0~4）
+            # 圖：每小時 達標/未達標 段數（0~4）
             dist_line = dist[dist["線別"] == line].copy()
-            _render_dist_chart(dist_line, title=f"{line}｜每小時 PASS/FAIL 段數（段1~段4）")
+            _render_dist_chart(dist_line, title=f"{line}｜每小時 達標/未達標 段數（段1~段4）")
 
-            # 表：段1~段4 × 小時（PASS/FAIL）
-            tbl = grid[grid["線別"] == line][["段數", "小時", "狀態"]].copy()
-            tbl["段數"] = tbl["段數"].astype(int)
+            # ✅ 表：段1~段4 × 小時（顯示姓名）
+            tbl = grid[grid["線別"] == line][["段數", "姓名", "小時", "狀態"]].copy()
+            tbl["段數"] = pd.to_numeric(tbl["段數"], errors="coerce").astype("Int64")
+
             line_matrix = (
-                tbl.pivot(index="段數", columns="小時", values="狀態")
-                .reindex(index=[1, 2, 3, 4])
+                tbl.pivot(index=["段數", "姓名"], columns="小時", values="狀態")
                 .reset_index()
             )
             line_matrix.columns = [int(c) if str(c).isdigit() else c for c in line_matrix.columns]
+
+            # 補齊小時欄
             for hh in hour_cols:
                 if hh not in line_matrix.columns:
                     line_matrix[hh] = None
-            line_matrix = line_matrix[["段數"] + hour_cols]
 
-            st.caption("段1~段4 × 每小時：只顯示 PASS/FAIL（空白=無判斷/未到時段）")
-            st.dataframe(line_matrix.style.applymap(_style_pf), use_container_width=True, height=210)
+            # 排序：段數 1~4
+            line_matrix = line_matrix.sort_values(["段數", "姓名"]).reset_index(drop=True)
+            line_matrix = line_matrix[["段數", "姓名"] + hour_cols]
+
+            st.caption("段1~段4 × 每小時：顯示『姓名』與『達標/未達標』（空白=無判斷/未到時段）")
+            st.dataframe(line_matrix.style.applymap(_style_pf), use_container_width=True, height=240)
 
             if HAS_COMMON_UI:
                 card_close()
 
         # 全作業線總和
-        st.markdown("## 🧾 全作業線總和（段1~段4 PASS/FAIL 分佈）")
+        st.markdown("## 🧾 全作業線總和（段1~段4 達標/未達標 分佈）")
         dist_all = (
-            grid[grid["狀態"].isin(["PASS", "FAIL"])]
+            grid[grid["狀態"].isin([STATUS_PASS, STATUS_FAIL])]
             .groupby(["小時", "狀態"], as_index=False)
             .size()
             .rename(columns={"size": "count"})
@@ -426,28 +440,28 @@ def main():
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("判斷小時", f"{eff_hour} 點")
-        c2.metric("PASS 段數", p_all)
-        c3.metric("FAIL 段數", f_all)
-        c4.metric("PASS 率", (f"{rate_all:.1f}%" if rate_all is not None else "—"))
+        c2.metric("達標 段數", p_all)
+        c3.metric("未達標 段數", f_all)
+        c4.metric("達標 率", (f"{rate_all:.1f}%" if rate_all is not None else "—"))
 
-        _render_dist_chart(dist_all, title="全作業線｜每小時 PASS/FAIL 段數（所有線別段1~段4）")
+        _render_dist_chart(dist_all, title="全作業線｜每小時 達標/未達標 段數（所有線別段1~段4）")
 
         # =========================================================
-        # 6) 下載 Excel（PASS/FAIL 矩陣）
+        # 6) 下載 Excel（達標/未達標 矩陣）
         # =========================================================
         st.markdown("## ⬇️ 下載")
         xlsx_bytes = build_excel_bytes_pf(matrix_pf, hour_cols)
-        filename = f"產能時段_PASS_FAIL_{datetime.now(TPE).strftime('%H%M')}.xlsx"
+        filename = f"產能時段_達標矩陣_{datetime.now(TPE).strftime('%H%M')}.xlsx"
         st.download_button(
-            "⬇️ 下載 Excel（PASS/FAIL 矩陣，上色）",
+            "⬇️ 下載 Excel（達標/未達標 矩陣，上色）",
             data=xlsx_bytes,
             file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
 
-        # （可選）若你仍想保留總矩陣預覽
-        with st.expander("📋 展開查看：全體 PASS/FAIL 矩陣（線別+段數）", expanded=False):
+        # （可選）總矩陣預覽
+        with st.expander("📋 展開查看：全體 達標/未達標 矩陣（含姓名）", expanded=False):
             st.dataframe(matrix_pf.style.applymap(_style_pf), use_container_width=True, height=520)
 
     except Exception as e:
