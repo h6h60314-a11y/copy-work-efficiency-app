@@ -108,10 +108,12 @@ def get_ws(wb, sheet_name: Optional[str]):
 
 
 def find_header_col(ws, header_name: str, header_row: int = 1) -> Optional[int]:
+    # exact
     for c in range(1, ws.max_column + 1):
         v = ws.cell(row=header_row, column=c).value
         if isinstance(v, str) and v.strip() == header_name:
             return c
+    # contains
     target = header_name.strip()
     for c in range(1, ws.max_column + 1):
         v = ws.cell(row=header_row, column=c).value
@@ -175,11 +177,7 @@ def normalize_unit(value) -> str:
 
 
 def _infer_digit_width(ws, col_idx: int, scan_limit: int = 50000) -> int:
-    """
-    推斷某欄「應補0的寬度」：
-    - 若有文字且是純數字：取 len(s)（可抓到 0000446502 這種）
-    - 若有 number_format 000000...：取 zero_run_width
-    """
+    """推斷欄位應補0寬度：優先抓到字串長度(0000...)；再抓 number_format 0000..."""
     if col_idx is None:
         return 0
     w = 0
@@ -217,10 +215,22 @@ def _force_column_digits_as_text(ws, col_idx: int, width: int):
         v = cell.value
         if v is None:
             continue
-        s = normalize_unit(v) if isinstance(v, (int, float)) else str(v).strip()
+        s = normalize_unit(v) if not isinstance(v, str) else v.strip()
         if s and s.isdigit():
             cell.value = s.zfill(width)
             cell.number_format = "@"
+
+
+def _force_unit_for_all_sheets(wb: Workbook, unit_width: int):
+    """
+    ✅ 關鍵：整本工作簿只要有欄位名＝可移動單位，就統一補0+轉文字
+    """
+    if unit_width < 2:
+        return
+    for ws in wb.worksheets:
+        col = find_header_col(ws, UNIT_HEADER, 1)
+        if col is not None:
+            _force_column_digits_as_text(ws, col, unit_width)
 
 
 def format_date_value(v) -> str:
@@ -282,10 +292,7 @@ def _load_wb_from_upload(uploaded_file) -> Tuple[str, Workbook]:
         try:
             sheets = pd.read_excel(io.BytesIO(raw), engine="pyxlsb", sheet_name=None)
         except Exception as e:
-            raise ValueError(
-                f"讀取 .xlsb 失敗：{e}\n"
-                "請確認 requirements.txt 有 pyxlsb"
-            )
+            raise ValueError(f"讀取 .xlsb 失敗：{e}\n請確認 requirements.txt 有 pyxlsb")
         wb = _dfs_to_workbook(sheets)
         return name, wb
 
@@ -299,17 +306,11 @@ def _load_wb_from_upload(uploaded_file) -> Tuple[str, Workbook]:
                 "或先用 Excel 另存為 .xlsx 再上傳。"
             )
         except Exception as e:
-            raise ValueError(
-                f"讀取 .xls 失敗：{e}\n"
-                "建議先用 Excel 另存 .xlsx 再上傳。"
-            )
+            raise ValueError(f"讀取 .xls 失敗：{e}\n建議先用 Excel 另存 .xlsx 再上傳。")
         wb = _dfs_to_workbook(sheets)
         return name, wb
 
-    raise ValueError(
-        f"不支援的檔案格式：.{ext}\n"
-        "支援：.xlsx / .xlsm / .xls / .xlsb"
-    )
+    raise ValueError(f"不支援的檔案格式：.{ext}\n支援：.xlsx / .xlsm / .xls / .xlsb")
 
 
 # =============================
@@ -343,9 +344,7 @@ def process_wb(
     if un_date_col is None:
         raise ValueError(f"未上架明細找不到欄位：{UN_DATE_HEADER}")
 
-    # -------------------------
     # 1) 商品碼長（保留 000000）
-    # -------------------------
     code_len = 0
     for r in range(2, un_ws.max_row + 1):
         cell = un_ws.cell(row=r, column=un_key_col)
@@ -354,39 +353,32 @@ def process_wb(
             if s.isdigit():
                 code_len = max(code_len, len(s))
         else:
-            z = zero_run_width(getattr(cell, "number_format", "") or "")
-            code_len = max(code_len, z)
+            code_len = max(code_len, zero_run_width(getattr(cell, "number_format", "") or ""))
     fallback_width = code_len or 6
 
-    # -------------------------
-    # 2) ✅ 可移動單位碼長：以「未上架明細」為準（例如 10 碼）
-    # -------------------------
-    unit_width = _infer_digit_width(un_ws, un_unit_col) or _infer_digit_width(qc_ws, qc_unit_col)
-    # 若兩邊都推不到，至少不要出錯（不補）
+    # 2) ✅ 可移動單位碼長：以「未上架明細」為準（你圖是 10 碼）
+    unit_width = _infer_digit_width(un_ws, un_unit_col)
     if unit_width < 2:
-        unit_width = 0
+        # 萬一未上架明細讀不到，再試 QC
+        unit_width = _infer_digit_width(qc_ws, qc_unit_col)
+    # 仍抓不到就不補（避免亂補），但你圖一定抓得到
+    # unit_width 例如 10
 
-    # ✅ 先把 QC 主表「可移動單位」整欄改成文字並補0（避免輸出仍被 Excel 吃掉）
-    _force_column_digits_as_text(qc_ws, qc_unit_col, unit_width)
+    # ✅ 先整本 QC 全部工作表的「可移動單位」先補0+轉文字（重點修正）
+    _force_unit_for_all_sheets(qc_wb, unit_width)
 
-    # -------------------------
     # 3) 建索引：(商品碼, 可移動單位) -> 進貨日(可多筆合併)
-    # -------------------------
     date_sets = defaultdict(set)
-
     for r in range(2, un_ws.max_row + 1):
-        # 商品碼
         code_cell = un_ws.cell(row=r, column=un_key_col)
         code = normalize_code(code_cell.value, getattr(code_cell, "number_format", ""), fallback_width)
         if code and code.isdigit():
             code = code.zfill(fallback_width)
 
-        # 可移動單位（✅ 一律補到 unit_width，才能跟 QC 對得上）
         unit_cell = un_ws.cell(row=r, column=un_unit_col)
         unit = normalize_unit(unit_cell.value)
         unit = _pad_digits(unit, unit_width)
 
-        # 進貨日
         d_cell = un_ws.cell(row=r, column=un_date_col)
         d_str = format_date_value(d_cell.value)
 
@@ -395,21 +387,16 @@ def process_wb(
 
     date_map: Dict[Tuple[str, str], str] = {k: "、".join(sorted(v)) for k, v in date_sets.items()}
 
-    # -------------------------
     # 4) QC：商品碼強制文字保留 000000
-    # -------------------------
     for r in range(2, qc_ws.max_row + 1):
         cell = qc_ws.cell(row=r, column=qc_key_col)
-        # 直接用 normalize_code 回寫成文字（補0）
         s = normalize_code(cell.value, getattr(cell, "number_format", ""), fallback_width)
         if s and s.isdigit():
             s = s.zfill(fallback_width)
         cell.value = s
         cell.number_format = "@"
 
-    # -------------------------
     # 5) 新增/定位「進貨日」
-    # -------------------------
     qc_date_col = find_header_col(qc_ws, "進貨日", 1)
     if qc_date_col is None:
         qc_date_col = qc_ws.max_column + 1
@@ -421,21 +408,18 @@ def process_wb(
             pass
         hdr.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # -------------------------
-    # 6) 填入進貨日 + 收集 match rows
-    #    ✅ 比對用（商品碼 + 可移動單位）皆已補0後一致
-    # -------------------------
+    # 6) 填入進貨日 + 收集 match rows（商品 + 可移動單位 必須同時符合）
     match_rows = []
     for r in range(2, qc_ws.max_row + 1):
-        # 商品碼（已保留0）
         code = str(qc_ws.cell(row=r, column=qc_key_col).value or "").strip()
         if code and code.isdigit():
             code = code.zfill(fallback_width)
 
-        # 可移動單位（✅ 補到 unit_width，並回寫成文字）
         unit_cell = qc_ws.cell(row=r, column=qc_unit_col)
         unit = normalize_unit(unit_cell.value)
         unit = _pad_digits(unit, unit_width)
+
+        # ✅ 這裡一定回寫成「文字 + 補0」
         if unit_width >= 2 and unit and unit.isdigit():
             unit_cell.value = unit
             unit_cell.number_format = "@"
@@ -448,9 +432,7 @@ def process_wb(
         if d_str:
             match_rows.append(r)
 
-    # -------------------------
     # 7) 產生符合工作表
-    # -------------------------
     if MATCH_SHEET_NAME in qc_wb.sheetnames:
         del qc_wb[MATCH_SHEET_NAME]
     mws = qc_wb.create_sheet(MATCH_SHEET_NAME)
@@ -479,13 +461,10 @@ def process_wb(
             dst.alignment = _copy.copy(getattr(src, "alignment", Alignment()))
         out_r += 1
 
-    # ✅ 新分頁也把「可移動單位」補0並轉文字（保險）
-    mws_unit_col = find_header_col(mws, UNIT_HEADER, 1)
-    _force_column_digits_as_text(mws, mws_unit_col, unit_width)
+    # ✅ 再跑一次：確保新分頁/其他分頁也都補到可移動單位
+    _force_unit_for_all_sheets(qc_wb, unit_width)
 
-    # -------------------------
     # 8) 刪除指定欄位（所有工作表）
-    # -------------------------
     drop_set = {x.strip().lower() for x in DELETE_HEADERS}
 
     def header_map(ws):
@@ -501,6 +480,9 @@ def process_wb(
         cols = [hmap[name] for name in drop_set if name in hmap]
         for col_idx in sorted(set(cols), reverse=True):
             ws.delete_cols(col_idx, 1)
+
+    # ✅ 刪欄後再保險一次（有些檔刪欄後欄位位置變動，但 header 還在）
+    _force_unit_for_all_sheets(qc_wb, unit_width)
 
     out = io.BytesIO()
     qc_wb.save(out)
@@ -522,7 +504,7 @@ set_page(
 )
 
 st.markdown(
-    '<div class="qc-chips">少揀差異<span class="sep">｜</span>庫存儲位展開<span class="sep">｜</span>欄位刪除<span class="sep">｜</span>商品保留前導0<span class="sep">｜</span>可移動單位補0</div>',
+    '<div class="qc-chips">少揀差異<span class="sep">｜</span>欄位刪除<span class="sep">｜</span>商品保留前導0<span class="sep">｜</span>可移動單位補0（全分頁）</div>',
     unsafe_allow_html=True,
 )
 
