@@ -10,6 +10,7 @@ import streamlit as st
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment
 from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
 import copy as _copy
 
 from common_ui import inject_logistics_theme, set_page, card_open, card_close
@@ -299,8 +300,44 @@ def _load_wb_from_upload(uploaded_file) -> Tuple[str, Workbook]:
 
 
 # =============================
+# 小工具：刪除非符合列（保留 header）
+# =============================
+def _delete_non_matched_rows(ws, keep_rows, header_rows: int = 1):
+    """
+    ws：已複製的 QC 工作表
+    keep_rows：要保留的「原始列號」（例如 2,5,9...）
+    header_rows：表頭列數（此專案固定 1）
+    """
+    max_row = ws.max_row
+    start = header_rows + 1
+    keep_set = set(r for r in keep_rows if start <= r <= max_row)
+    keep_sorted = sorted(keep_set)
+
+    # 產生要刪除的連續區間（從上往下找），最後從底部開始刪
+    segs = []
+    cur = start
+    for k in keep_sorted:
+        if cur < k:
+            segs.append((cur, k - 1))
+        cur = k + 1
+    if cur <= max_row:
+        segs.append((cur, max_row))
+
+    for s, e in reversed(segs):
+        ws.delete_rows(s, e - s + 1)
+
+    # 盡量把篩選範圍調整成新表範圍（若原本有）
+    try:
+        if getattr(ws, "auto_filter", None) and ws.auto_filter.ref:
+            ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+    except Exception:
+        pass
+
+
+# =============================
 # 主流程（回傳輸出 bytes）
 # ✅ 保證：不改 QC 原欄位任何值/格式（只新增「進貨日」+ 新分頁）
+# ✅ 「符合未上架明細」改為：複製整張 QC → 刪除不符合列（讓版面100%跟 QC 一樣）
 # =============================
 def process_wb(
     qc_wb,
@@ -370,6 +407,7 @@ def process_wb(
     if qc_date_col is None:
         qc_date_col = qc_ws.max_column + 1
         hdr = qc_ws.cell(row=1, column=qc_date_col, value="進貨日")
+
         # header 樣式：盡量跟「商品」表頭一致
         src_hdr = qc_ws.cell(row=1, column=qc_key_col)
         try:
@@ -378,7 +416,15 @@ def process_wb(
             pass
         hdr.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # 5) 填入進貨日 + 收集 match rows（比對用補0，但不回寫 QC）
+        # 新欄位寬度也盡量跟「商品」欄一致（避免看起來不像原表）
+        try:
+            src_dim = qc_ws.column_dimensions.get(get_column_letter(qc_key_col))
+            if src_dim and src_dim.width:
+                qc_ws.column_dimensions[get_column_letter(qc_date_col)].width = src_dim.width
+        except Exception:
+            pass
+
+    # 5) 填入進貨日 + 收集 match rows（比對用補0，但不回寫 QC 原欄位）
     match_rows = []
     for r in range(2, qc_ws.max_row + 1):
         # 商品（比對用 normalize，不回寫）
@@ -396,40 +442,22 @@ def process_wb(
 
         out_cell = qc_ws.cell(row=r, column=qc_date_col)
         out_cell.value = d_str
-        out_cell.number_format = "@"  # 進貨日欄位本來不存在，這裡設定文字即可
+        out_cell.number_format = "@"  # 新增欄位，當文字
+        out_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
         if d_str:
             match_rows.append(r)
 
-    # 6) 產生符合工作表（內容/格式跟 QC 原列一致，只是挑出符合的列）
+    # 6) 產生符合工作表（✅改成：整張 QC 複製後刪除不符合列 → 完全保留 QC 原版面/格式/000000顯示）
     if MATCH_SHEET_NAME in qc_wb.sheetnames:
         del qc_wb[MATCH_SHEET_NAME]
-    mws = qc_wb.create_sheet(MATCH_SHEET_NAME)
 
-    maxc = qc_ws.max_column
-    # copy header
-    for c in range(1, maxc + 1):
-        src = qc_ws.cell(row=1, column=c)
-        dst = mws.cell(row=1, column=c, value=src.value)
-        try:
-            dst._style = _copy.copy(src._style)
-        except Exception:
-            pass
-        dst.number_format = getattr(src, "number_format", "")
-        dst.alignment = _copy.copy(getattr(src, "alignment", Alignment()))
+    # 直接複製整張 QC（包含欄寬/列高/凍結窗格/篩選/樣式等）
+    mws = qc_wb.copy_worksheet(qc_ws)
+    mws.title = MATCH_SHEET_NAME
 
-    # copy matched rows
-    out_r = 2
-    for r in match_rows:
-        for c in range(1, maxc + 1):
-            src = qc_ws.cell(row=r, column=c)
-            dst = mws.cell(row=out_r, column=c, value=src.value)
-            try:
-                dst._style = _copy.copy(src._style)
-            except Exception:
-                pass
-            dst.number_format = getattr(src, "number_format", "")
-            dst.alignment = _copy.copy(getattr(src, "alignment", Alignment()))
-        out_r += 1
+    # 只保留表頭 + 符合列
+    _delete_non_matched_rows(mws, keep_rows=match_rows, header_rows=1)
 
     out = io.BytesIO()
     qc_wb.save(out)
