@@ -535,17 +535,36 @@ for c in ["A) GM件數", "B) 一般倉零散PCS", "C) GM成箱PCS", "D) 一般�
 st.dataframe(show_df, use_container_width=True, hide_index=True)
 card_close()
 
-card_open("📤 匯出（統計總表 + 合併明細）")
-stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+st.markdown(
+    """
+<style>
+/* 確保 download button 不會被自訂卡片/overlay 蓋掉 */
+div[data-testid="stDownloadButton"]{ display:block !important; position:relative !important; z-index:9999 !important; }
+div[data-testid="stDownloadButton"] button{ width:100% !important; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
-# ✅ 檔名改英文（最穩）
+st.subheader("📤 匯出（統計總表 + 合併明細）")
+
+stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 filename_ascii = f"DaFengKPI_OverallVolume_MultiFiles_{stamp}.xlsx"
 
 xlsx_bytes = make_excel_bytes(summary_all, detail_all)
 
-download_excel_stable("✅ 下載 Excel（含：統計總表 + 合併明細）", xlsx_bytes, filename_ascii)
+# 🔎 先把 bytes 大小顯示出來，確認真的有生成（非 0）
+st.caption(f"Excel bytes：{len(xlsx_bytes):,} bytes")
+
+st.download_button(
+    label="✅ 下載 Excel（含：統計總表 + 合併明細）",
+    data=xlsx_bytes,  # ✅ 用 raw bytes（最穩）
+    file_name=filename_ascii,
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    use_container_width=True,
+    key=f"dl_{stamp}",
+)
 
 with st.expander("🔎 合併明細預覽（前 200 筆）", expanded=False):
     st.dataframe(detail_all.head(200), use_container_width=True)
-
-card_close()
+    
