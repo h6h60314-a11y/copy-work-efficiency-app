@@ -102,9 +102,14 @@ def _safe_time(s: str) -> str:
 # Excel：達標/未達標 上色（只輸出文字）
 # =============================
 def build_excel_bytes_pf(matrix_pf: pd.DataFrame, hour_cols: list[int]) -> bytes:
+    # Excel 不要 None，改空白
+    out_df = matrix_pf.copy()
+    for h in hour_cols:
+        if h in out_df.columns:
+            out_df[h] = out_df[h].fillna("")
     bio = io.BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        matrix_pf.to_excel(writer, index=False, sheet_name="達標_矩陣")
+        out_df.to_excel(writer, index=False, sheet_name="達標_矩陣")
     bio.seek(0)
 
     wb = load_workbook(bio)
@@ -142,7 +147,7 @@ def _style_pf(v):
 
 
 def _kpi_counts(dist_df: pd.DataFrame):
-    # dist_df columns: 小時, 狀態, count
+    # dist_df columns: 線別, 小時, 狀態, count
     if dist_df is None or dist_df.empty:
         return 0, 0, None
     p = int(dist_df.loc[dist_df["狀態"] == STATUS_PASS, "count"].sum())
@@ -151,26 +156,69 @@ def _kpi_counts(dist_df: pd.DataFrame):
     return p, f, rate
 
 
-def _render_dist_chart(dist_df: pd.DataFrame, title: str):
-    # dist_df columns: 小時, 狀態, count
-    if dist_df is None or dist_df.empty:
-        st.info("此區間沒有可呈現的 達標/未達標 分佈。")
+def _render_hbar_person(dist_person: pd.DataFrame, title: str):
+    """
+    dist_person columns: label, 狀態, count, total
+    label = "段X｜姓名"
+    """
+    if dist_person is None or dist_person.empty:
+        st.info("沒有可呈現的橫條圖（此區間沒有達標/未達標判斷）。")
         return
 
+    # 動態高度：每列約 24~28px
+    labels = dist_person["label"].drop_duplicates().tolist()
+    height = min(26 * len(labels) + 40, 520)
+
     chart = (
-        alt.Chart(dist_df)
+        alt.Chart(dist_person)
         .mark_bar()
         .encode(
-            x=alt.X("小時:O", title="小時"),
-            y=alt.Y("count:Q", title="段數數量", stack="zero"),
+            y=alt.Y("label:N", sort=alt.SortField(field="total", order="descending"), title="段數｜姓名"),
+            x=alt.X("count:Q", title="時段數（小時格數）", stack="zero"),
             color=alt.Color(
                 "狀態:N",
                 scale=alt.Scale(domain=[STATUS_PASS, STATUS_FAIL], range=["#2E7D32", "#C62828"]),
                 legend=alt.Legend(title="狀態"),
             ),
-            tooltip=[alt.Tooltip("小時:O"), alt.Tooltip("狀態:N"), alt.Tooltip("count:Q")],
+            tooltip=[
+                alt.Tooltip("label:N", title="段數｜姓名"),
+                alt.Tooltip("狀態:N"),
+                alt.Tooltip("count:Q", title="時段數"),
+            ],
         )
-        .properties(title=title, height=220)
+        .properties(title=title, height=height)
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+def _render_hbar_lines(dist_line: pd.DataFrame, title: str):
+    """
+    dist_line columns: 線別, 狀態, count, total
+    """
+    if dist_line is None or dist_line.empty:
+        st.info("沒有可呈現的全線橫條圖。")
+        return
+
+    height = min(26 * dist_line["線別"].nunique() + 40, 520)
+
+    chart = (
+        alt.Chart(dist_line)
+        .mark_bar()
+        .encode(
+            y=alt.Y("線別:N", sort=alt.SortField(field="total", order="descending"), title="線別"),
+            x=alt.X("count:Q", title="時段數（小時格數）", stack="zero"),
+            color=alt.Color(
+                "狀態:N",
+                scale=alt.Scale(domain=[STATUS_PASS, STATUS_FAIL], range=["#2E7D32", "#C62828"]),
+                legend=alt.Legend(title="狀態"),
+            ),
+            tooltip=[
+                alt.Tooltip("線別:N"),
+                alt.Tooltip("狀態:N"),
+                alt.Tooltip("count:Q", title="時段數"),
+            ],
+        )
+        .properties(title=title, height=height)
     )
     st.altair_chart(chart, use_container_width=True)
 
@@ -181,7 +229,7 @@ def main():
         inject_logistics_theme()
         set_page("📦 出貨課", "⏱️ 29｜各時段作業效率")
 
-    st.markdown("### ⏱️ 各時段作業效率（達標/未達標｜段1~段4 分佈）")
+    st.markdown("### ⏱️ 各時段作業效率（達標/未達標｜段1~段4）")
 
     # --- 固定人員開始時間表 ---
     fixed_time_map = {
@@ -331,7 +379,6 @@ def main():
 
         target = np.maximum(0.01, elapsed) * float(target_hr)
 
-        # ✅ 直接輸出「達標/未達標」
         status = np.where(
             np.isnan(elapsed),
             None,
@@ -351,7 +398,7 @@ def main():
         grid = keys.assign(_k=1).merge(pd.DataFrame({"小時": hour_cols, "_k": 1}), on="_k").drop(columns=["_k"])
         grid = grid.merge(hourly[base_cols + ["小時", "狀態"]], on=base_cols + ["小時"], how="left")
 
-        # ✅ 產出總矩陣：線別+段數+姓名+開始時間 + 每小時 達標/未達標
+        # ✅ 下載用總矩陣
         matrix_pf = (
             grid.pivot(index=base_cols, columns="小時", values="狀態")
             .reset_index()
@@ -363,12 +410,12 @@ def main():
         matrix_pf = matrix_pf[base_cols + hour_cols]
 
         # =========================================================
-        # 5) KPI 圖表：每線（段1~段4 達標/未達標 分佈） + 全作業線總和
+        # 5) KPI（每線）+ 下方表格 + ✅橫條圖（段數｜姓名）
         # =========================================================
-        st.success("計算完成 ✅（呈現：達標/未達標｜段1~段4 分佈）")
-        st.markdown("## 📊 KPI（每線：段1~段4 達標/未達標 分佈）")
+        st.success("計算完成 ✅（呈現：達標/未達標｜段1~段4）")
+        st.markdown("## 📊 KPI（每線：段1~段4 達標/未達標）")
 
-        # dist：每線、每小時 達標/未達標 有幾段
+        # dist：用於 KPI 計數（判斷小時）
         dist = (
             grid[grid["狀態"].isin([STATUS_PASS, STATUS_FAIL])]
             .groupby(["線別", "小時", "狀態"], as_index=False)
@@ -386,7 +433,7 @@ def main():
             else:
                 st.markdown(f"### 📦 {line}")
 
-            # KPI：目前小時的 達標/未達標 段數（段1~段4）
+            # KPI：目前小時
             dist_now = dist[(dist["線別"] == line) & (dist["小時"] == eff_hour)]
             p, f, rate = _kpi_counts(dist_now)
 
@@ -396,11 +443,9 @@ def main():
             c3.metric("未達標 段數", f)
             c4.metric("達標 率", (f"{rate:.1f}%" if rate is not None else "—"))
 
-            # 圖：每小時 達標/未達標 段數（0~4）
-            dist_line = dist[dist["線別"] == line].copy()
-            _render_dist_chart(dist_line, title=f"{line}｜每小時 達標/未達標 段數（段1~段4）")
+            # ✅ 不要上方長條圖（已移除）
 
-            # ✅ 表：段1~段4 × 小時（顯示姓名）
+            # 表：段1~段4 × 小時（顯示姓名）
             tbl = grid[grid["線別"] == line][["段數", "姓名", "小時", "狀態"]].copy()
             tbl["段數"] = pd.to_numeric(tbl["段數"], errors="coerce").astype("Int64")
 
@@ -409,33 +454,44 @@ def main():
                 .reset_index()
             )
             line_matrix.columns = [int(c) if str(c).isdigit() else c for c in line_matrix.columns]
-
-            # 補齊小時欄
             for hh in hour_cols:
                 if hh not in line_matrix.columns:
                     line_matrix[hh] = None
 
-            # 排序：段數 1~4
             line_matrix = line_matrix.sort_values(["段數", "姓名"]).reset_index(drop=True)
             line_matrix = line_matrix[["段數", "姓名"] + hour_cols]
+            # 顯示不要 None
+            show_matrix = line_matrix.copy()
+            for hh in hour_cols:
+                show_matrix[hh] = show_matrix[hh].fillna("")
 
             st.caption("段1~段4 × 每小時：顯示『姓名』與『達標/未達標』（空白=無判斷/未到時段）")
-            st.dataframe(line_matrix.style.applymap(_style_pf), use_container_width=True, height=240)
+            st.dataframe(show_matrix.style.applymap(_style_pf), use_container_width=True, height=240)
+
+            # ✅ 新增：橫條圖（段數｜姓名，統計本範圍內達標/未達標次數）
+            dist_person = (
+                grid[(grid["線別"] == line) & (grid["狀態"].isin([STATUS_PASS, STATUS_FAIL]))]
+                .groupby(["段數", "姓名", "狀態"], as_index=False)
+                .size()
+                .rename(columns={"size": "count"})
+            )
+            if not dist_person.empty:
+                dist_person["label"] = dist_person["段數"].astype(int).astype(str) + "段｜" + dist_person["姓名"].astype(str)
+                totals = dist_person.groupby("label", as_index=False)["count"].sum().rename(columns={"count": "total"})
+                dist_person = dist_person.merge(totals, on="label", how="left")
+
+            st.markdown("#### 📌 橫條圖（段1~段4｜姓名：達標/未達標次數）")
+            _render_hbar_person(dist_person, title=f"{line}｜段1~段4（含姓名）達標/未達標 次數")
 
             if HAS_COMMON_UI:
                 card_close()
 
-        # 全作業線總和
-        st.markdown("## 🧾 全作業線總和（段1~段4 達標/未達標 分佈）")
-        dist_all = (
-            grid[grid["狀態"].isin([STATUS_PASS, STATUS_FAIL])]
-            .groupby(["小時", "狀態"], as_index=False)
-            .size()
-            .rename(columns={"size": "count"})
-            .sort_values(["小時", "狀態"])
-        )
+        # =========================================================
+        # 6) 全作業線總和（只保留 KPI + ✅橫條圖，不要上方長條圖）
+        # =========================================================
+        st.markdown("## 🧾 全作業線總和（達標/未達標）")
 
-        dist_all_now = dist_all[dist_all["小時"] == eff_hour]
+        dist_all_now = dist[dist["小時"] == eff_hour]
         p_all, f_all, rate_all = _kpi_counts(dist_all_now)
 
         c1, c2, c3, c4 = st.columns(4)
@@ -444,10 +500,22 @@ def main():
         c3.metric("未達標 段數", f_all)
         c4.metric("達標 率", (f"{rate_all:.1f}%" if rate_all is not None else "—"))
 
-        _render_dist_chart(dist_all, title="全作業線｜每小時 達標/未達標 段數（所有線別段1~段4）")
+        # ✅ 全線橫條圖：用「線別」作為 Y 軸
+        dist_lines = (
+            grid[grid["狀態"].isin([STATUS_PASS, STATUS_FAIL])]
+            .groupby(["線別", "狀態"], as_index=False)
+            .size()
+            .rename(columns={"size": "count"})
+        )
+        if not dist_lines.empty:
+            totals = dist_lines.groupby("線別", as_index=False)["count"].sum().rename(columns={"count": "total"})
+            dist_lines = dist_lines.merge(totals, on="線別", how="left")
+
+        st.markdown("#### 📌 橫條圖（各線：達標/未達標次數）")
+        _render_hbar_lines(dist_lines, title="全作業線｜各線達標/未達標 次數")
 
         # =========================================================
-        # 6) 下載 Excel（達標/未達標 矩陣）
+        # 7) 下載 Excel（達標/未達標 矩陣）
         # =========================================================
         st.markdown("## ⬇️ 下載")
         xlsx_bytes = build_excel_bytes_pf(matrix_pf, hour_cols)
@@ -460,9 +528,11 @@ def main():
             use_container_width=True,
         )
 
-        # （可選）總矩陣預覽
         with st.expander("📋 展開查看：全體 達標/未達標 矩陣（含姓名）", expanded=False):
-            st.dataframe(matrix_pf.style.applymap(_style_pf), use_container_width=True, height=520)
+            show_all = matrix_pf.copy()
+            for hh in hour_cols:
+                show_all[hh] = show_all[hh].fillna("")
+            st.dataframe(show_all.style.applymap(_style_pf), use_container_width=True, height=520)
 
     except Exception as e:
         st.error(f"發生錯誤：{e}")
