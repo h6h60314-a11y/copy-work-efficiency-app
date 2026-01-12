@@ -117,7 +117,7 @@ def _kpi_counts(dist_df: pd.DataFrame):
 
 
 # =============================
-# 橫條圖（段｜姓名：達標/未達標次數）
+# ✅ 橫條圖（段｜姓名：達標/未達標次數）— 放大版
 # =============================
 def _render_hbar_person(dist_person: pd.DataFrame, title: str):
     if dist_person is None or dist_person.empty:
@@ -125,13 +125,19 @@ def _render_hbar_person(dist_person: pd.DataFrame, title: str):
         return
 
     labels = dist_person["label"].drop_duplicates().tolist()
-    height = min(26 * len(labels) + 40, 520)
+
+    # ✅ 讓畫面更大：每列 42px，上限提高到 900
+    height = min(42 * len(labels) + 80, 900)
 
     chart = (
         alt.Chart(dist_person)
-        .mark_bar()
+        .mark_bar(size=18)
         .encode(
-            y=alt.Y("label:N", sort=alt.SortField(field="total", order="descending"), title="段數｜姓名"),
+            y=alt.Y(
+                "label:N",
+                sort=alt.SortField(field="seg", order="ascending"),
+                title="段數｜姓名"
+            ),
             x=alt.X("count:Q", title="時段數（小時格數）", stack="zero"),
             color=alt.Color(
                 "狀態:N",
@@ -139,7 +145,8 @@ def _render_hbar_person(dist_person: pd.DataFrame, title: str):
                 legend=alt.Legend(title="狀態"),
             ),
             tooltip=[
-                alt.Tooltip("label:N", title="段數｜姓名"),
+                alt.Tooltip("seg:Q", title="段數"),
+                alt.Tooltip("name:N", title="姓名"),
                 alt.Tooltip("狀態:N"),
                 alt.Tooltip("count:Q", title="時段數"),
             ],
@@ -153,10 +160,10 @@ def _render_hbar_lines(dist_line: pd.DataFrame, title: str):
     if dist_line is None or dist_line.empty:
         st.info("沒有可呈現的全線橫條圖。")
         return
-    height = min(26 * dist_line["線別"].nunique() + 40, 520)
+    height = min(40 * dist_line["線別"].nunique() + 80, 700)
     chart = (
         alt.Chart(dist_line)
-        .mark_bar()
+        .mark_bar(size=18)
         .encode(
             y=alt.Y("線別:N", sort=alt.SortField(field="total", order="descending"), title="線別"),
             x=alt.X("count:Q", title="時段數（小時格數）", stack="zero"),
@@ -174,15 +181,12 @@ def _render_hbar_lines(dist_line: pd.DataFrame, title: str):
 
 # =============================
 # ✅ 格子表格（每格=量體；顏色=達標/未達標/未判斷）
-# 修正：'int' object is not iterable（hour_cols 保險轉 list）
-# 修正：Styler apply 回傳格式（axis=None 回傳同 shape DataFrame）
 # =============================
 def render_grid_table(df_line: pd.DataFrame, hour_cols, title: str):
     if df_line is None or df_line.empty:
         st.info("此線別沒有資料可呈現。")
         return
 
-    # ✅ hour_cols 保險
     if isinstance(hour_cols, (int, np.integer)):
         hour_cols = [int(hour_cols)]
     else:
@@ -196,7 +200,6 @@ def render_grid_table(df_line: pd.DataFrame, hour_cols, title: str):
     vol = base.pivot_table(index=["段數", "姓名"], columns="小時", values="當小時加權PCS", aggfunc="first")
     stat = base.pivot_table(index=["段數", "姓名"], columns="小時", values="狀態", aggfunc="first")
 
-    # 補齊每小時欄位
     for h in hour_cols:
         if h not in vol.columns:
             vol[h] = 0.0
@@ -206,21 +209,16 @@ def render_grid_table(df_line: pd.DataFrame, hour_cols, title: str):
     vol = vol[hour_cols].reset_index().sort_values(["段數", "姓名"]).reset_index(drop=True)
     stat = stat[hour_cols].reset_index().sort_values(["段數", "姓名"]).reset_index(drop=True)
 
-    # 顯示：每格顯示量體（0 -> 空白；你要保留 0 可把 "" 改回 f"{...:.2f}"）
     show = vol.copy()
     for h in hour_cols:
         show[h] = show[h].apply(lambda x: "" if abs(float(x)) < 1e-12 else f"{float(x):.2f}")
 
     def _style(_df: pd.DataFrame):
         styles = pd.DataFrame("", index=_df.index, columns=_df.columns)
-
-        # 段數/姓名
         if "段數" in styles.columns:
             styles["段數"] = "text-align:center;font-weight:800;"
         if "姓名" in styles.columns:
             styles["姓名"] = "text-align:left;font-weight:800;"
-
-        # 小時欄位：依狀態上色
         for h in hour_cols:
             if h not in styles.columns:
                 continue
@@ -230,27 +228,20 @@ def render_grid_table(df_line: pd.DataFrame, hour_cols, title: str):
                     s = stat.at[i, h]
                 except Exception:
                     s = None
-
                 if s == STATUS_PASS:
                     styles.at[i, h] = "background-color:#C6EFCE;color:#1b4332;font-weight:900;text-align:center;"
                 elif s == STATUS_FAIL:
                     styles.at[i, h] = "background-color:#FFC7CE;color:#7a0019;font-weight:900;text-align:center;"
                 else:
                     styles.at[i, h] = "background-color:#F2F4F7;color:#667085;text-align:center;"
-
         return styles
 
     st.markdown(f"#### {title}")
-    st.dataframe(
-        show.style.apply(_style, axis=None),
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(show.style.apply(_style, axis=None), use_container_width=True, hide_index=True)
 
 
 # =============================
 # ✅ 方塊圖（框框）：每格=色塊 + 顯示量體
-# Altair v6：不使用巢狀 condition，改用 scale domain/range
 # =============================
 def render_block_grid_chart(df_line: pd.DataFrame, hour_cols, title: str):
     if df_line is None or df_line.empty:
@@ -302,7 +293,7 @@ def render_block_grid_chart(df_line: pd.DataFrame, hour_cols, title: str):
     text = base.mark_text(fontSize=12, fontWeight=900).encode(text="顯示量:N")
 
     n_rows = max(1, plot["row_label"].nunique())
-    height = min(32 * n_rows + 20, 520)
+    height = min(34 * n_rows + 30, 650)
 
     st.altair_chart((rect + text).properties(title=title, height=height), use_container_width=True)
 
@@ -401,7 +392,6 @@ def main():
         st.info("請先上傳兩個檔案：生產資料 + 人員名單。")
         return
 
-    # ✅ 自動同步更新：檔案或設定變更就重算
     prod_sig = _bytes_sig(prod_file.getvalue())
     mem_sig = _bytes_sig(mem_file.getvalue())
     settings_sig = f"{target_hr}-{hour_min}-{use_now}-{now.hour}-{now.minute}-{show_table}-{show_blocks}"
@@ -412,7 +402,6 @@ def main():
     if not should_run:
         st.caption("（目前結果已是最新；如有更新檔案/設定會自動同步）")
         return
-
     st.session_state["_29_last_sig"] = cur
 
     try:
@@ -476,7 +465,6 @@ def main():
         df["開始時間"] = df["開始時間"].fillna("08:00").map(_safe_time)
         df = df.drop_duplicates("__rid", keep="first").copy()
 
-        # 開始時間過濾
         pick_minutes = df["PICKDATE"].dt.hour * 60 + df["PICKDATE"].dt.minute
         st_parts = df["開始時間"].astype(str).str.split(":", n=1, expand=True)
         st_h = pd.to_numeric(st_parts[0], errors="coerce").fillna(8).astype(int)
@@ -486,14 +474,12 @@ def main():
         if df.empty:
             raise ValueError("套用開始時間過濾後沒有資料：請確認 PICKDATE 與開始時間設定。")
 
-        # 每小時加總（當小時量）
         df["小時"] = df["PICKDATE"].dt.hour
         base_cols = ["線別", "段數", "姓名", "開始時間"]
 
         hourly_sum = df.groupby(base_cols + ["小時"], as_index=False)["加權PCS"].sum()
         hourly_sum = hourly_sum.rename(columns={"加權PCS": "當小時加權PCS"})
 
-        # ✅ hour_cols 一定是 list（避免變成 int）
         cur_h, cur_m = now.hour, now.minute
         hour_cols = list(range(int(hour_min), int(cur_h) + 1))
 
@@ -506,7 +492,6 @@ def main():
         hourly_full = hourly_full.sort_values(base_cols + ["小時"]).reset_index(drop=True)
         hourly_full["累計實際量"] = hourly_full.groupby(["線別", "段數", "姓名"])["當小時加權PCS"].cumsum()
 
-        # 判斷達標/未達標（用累計）
         st_parts2 = hourly_full["開始時間"].astype(str).str.split(":", n=1, expand=True)
         s_h = pd.to_numeric(st_parts2[0], errors="coerce").fillna(8).astype(float)
         s_m = pd.to_numeric(st_parts2[1], errors="coerce").fillna(0).astype(float)
@@ -581,19 +566,40 @@ def main():
             if show_blocks:
                 render_block_grid_chart(df_line, hour_cols, "方塊圖：段1~段4 × 每小時（框框內顯示量體；顏色=達標/未達標）")
 
-            dist_person = (
-                hourly_full[(hourly_full["線別"] == line) & (hourly_full["狀態"].isin([STATUS_PASS, STATUS_FAIL]))]
+            # ✅ 橫條圖：這條線的名單（段1~段4 全保留），沒有資料也補 0
+            base_people = (
+                df_members[df_members["線別"] == line][["段數", "姓名"]]
+                .drop_duplicates()
+                .copy()
+            )
+            base_people["段數"] = pd.to_numeric(base_people["段數"], errors="coerce").fillna(0).astype(int)
+            base_people = base_people.sort_values(["段數", "姓名"]).reset_index(drop=True)
+
+            counts = (
+                hourly_full[
+                    (hourly_full["線別"] == line) &
+                    (hourly_full["狀態"].isin([STATUS_PASS, STATUS_FAIL]))
+                ]
                 .groupby(["段數", "姓名", "狀態"], as_index=False)
                 .size()
                 .rename(columns={"size": "count"})
             )
-            if not dist_person.empty:
-                dist_person["label"] = dist_person["段數"].astype(int).astype(str) + "段｜" + dist_person["姓名"].astype(str)
-                totals = dist_person.groupby("label", as_index=False)["count"].sum().rename(columns={"count": "total"})
-                dist_person = dist_person.merge(totals, on="label", how="left")
+
+            statuses = pd.DataFrame({"狀態": [STATUS_PASS, STATUS_FAIL]})
+            base_people2 = base_people.assign(_k=1).merge(statuses.assign(_k=1), on="_k").drop(columns=["_k"])
+
+            dist_person = base_people2.merge(counts, on=["段數", "姓名", "狀態"], how="left")
+            dist_person["count"] = pd.to_numeric(dist_person["count"], errors="coerce").fillna(0).astype(int)
+
+            dist_person["seg"] = dist_person["段數"].astype(int)
+            dist_person["name"] = dist_person["姓名"].astype(str)
+            dist_person["label"] = dist_person["seg"].astype(str) + "段｜" + dist_person["name"]
+
+            totals = dist_person.groupby("label", as_index=False)["count"].sum().rename(columns={"count": "total"})
+            dist_person = dist_person.merge(totals, on="label", how="left")
 
             st.markdown("#### 📌 橫條圖（段1~段4｜姓名：達標/未達標次數）")
-            _render_hbar_person(dist_person, title=f"{line}｜段1~段4（含姓名）達標/未達標 次數")
+            _render_hbar_person(dist_person, title=f"{line}｜段1~段4（名單全列）達標/未達標 次數")
 
             if HAS_COMMON_UI:
                 card_close()
