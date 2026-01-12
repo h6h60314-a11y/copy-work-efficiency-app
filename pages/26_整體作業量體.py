@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from io import BytesIO, StringIO
 from datetime import datetime
+import hashlib
 
 import numpy as np
 import pandas as pd
@@ -16,7 +17,6 @@ from common_ui import (
     render_kpis,
     card_open,
     card_close,
-    download_excel_card,  # ✅ 你現有的 common_ui（但版本參數可能不同）
 )
 
 st.set_page_config(page_title="大豐KPI｜整體作業量體", page_icon="🧹", layout="wide")
@@ -34,7 +34,6 @@ set_page(
 NEED_COLS = ["packqty", "入數", "箱類型", "載具號", "BOXTYPE", "boxid"]
 CANDIDATE_SEPS = ["\t", ",", "|", ";"]
 
-# 編碼候選（台灣常見 + UTF16 + 簡中混碼）
 ENCODING_CANDIDATES = [
     "utf-8-sig",
     "utf-8",
@@ -46,32 +45,6 @@ ENCODING_CANDIDATES = [
     "utf-16le",
     "utf-16be",
 ]
-
-
-# =====================================
-# ✅ download wrapper（修正 TypeError）
-# =====================================
-def download_excel_one_line(label: str, data: bytes, filename: str):
-    """
-    避免 common_ui.download_excel_card 版本不一致導致 TypeError：
-    - 先嘗試常見「位置參數」呼叫
-    - 不行就 fallback 用 st.download_button（一定可用）
-    """
-    try:
-        return download_excel_card(label, data, filename)  # ✅ 最穩：位置參數
-    except TypeError:
-        pass
-    except Exception:
-        # 其它錯誤就直接 fallback
-        pass
-
-    return st.download_button(
-        label=label,
-        data=data,
-        file_name=filename,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
 
 
 # =====================================
@@ -121,21 +94,16 @@ def _has_utf16_nulls(raw: bytes) -> bool:
 
 
 def _score_text(text: str) -> int:
-    # 越像「正常中文/表格」分數越高
-    repl = text.count("\ufffd")  # replacement char
+    repl = text.count("\ufffd")
     ctrl = sum(1 for ch in text if ord(ch) < 32 and ch not in ("\n", "\r", "\t"))
     cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
     lines = [ln for ln in text.splitlines() if ln.strip()]
     first = lines[0] if lines else ""
     sep_bonus = max(first.count("\t"), first.count(","), first.count("|"), first.count(";"))
-
     return (cjk * 2) + (sep_bonus * 3) - (repl * 25) - (ctrl * 10)
 
 
 def detect_best_encoding(raw: bytes) -> tuple[str, str]:
-    """
-    回傳 (best_encoding, preview_head_text)
-    """
     bom = _bom_encoding(raw)
     if bom:
         txt = raw.decode(bom, errors="replace")
@@ -149,7 +117,7 @@ def detect_best_encoding(raw: bytes) -> tuple[str, str]:
             except Exception:
                 continue
 
-    head = raw[:400_000]  # 用前段判斷夠用
+    head = raw[:400_000]
     best_enc = "utf-8"
     best_score = -10**18
     best_txt = ""
@@ -188,9 +156,6 @@ def _detect_sep(text: str) -> str | None:
 
 
 def _read_txt_as_df(text: str, mode: str) -> pd.DataFrame:
-    """
-    mode: auto / sep:\t / sep:, / sep:| / sep:; / ws / fwf
-    """
     if mode.startswith("sep:"):
         sep = mode.split(":", 1)[1]
         return pd.read_csv(StringIO(text), sep=sep, dtype=str, engine="python")
@@ -201,12 +166,10 @@ def _read_txt_as_df(text: str, mode: str) -> pd.DataFrame:
     if mode == "fwf":
         return pd.read_fwf(StringIO(text), dtype=str)
 
-    # auto
     sep = _detect_sep(text)
     if sep is not None:
         return pd.read_csv(StringIO(text), sep=sep, dtype=str, engine="python")
 
-    # fallback：多空白 -> 固定寬度
     try:
         df_ws = pd.read_csv(StringIO(text), sep=r"\s+", dtype=str, engine="python")
         if df_ws.shape[1] >= 2:
@@ -261,7 +224,6 @@ def robust_read_file(uploaded_file, txt_parse_choice: str, txt_encoding_choice: 
 # ✅ Column mapping（欄位對照）
 # =====================================
 def _guess_unit_col(cols: list[str]) -> str | None:
-    # 你檔案常見 unit
     if "unit" in cols:
         return "unit"
     for c in cols:
@@ -271,7 +233,6 @@ def _guess_unit_col(cols: list[str]) -> str | None:
 
 
 def _guess_vehicle_col(df: pd.DataFrame) -> str | None:
-    # 找「值裡面有 GM」的欄位
     sample = df.head(8000)
     for c in sample.columns:
         s = _safe_str(sample[c])
@@ -281,7 +242,6 @@ def _guess_vehicle_col(df: pd.DataFrame) -> str | None:
 
 
 def _guess_box_type_col(df: pd.DataFrame) -> str | None:
-    # 箱類型通常：短字串 + 唯一值少
     sample = df.head(8000)
     best = None
     best_score = -1
@@ -351,11 +311,9 @@ def compute(df_raw: pd.DataFrame) -> dict:
 
     before = len(df_raw)
 
-    # 1) 刪除「箱類型」含「站所」
     df = df_raw[~_safe_str(df_raw["箱類型"]).str.contains("站所", na=False)].copy()
     removed_station = before - len(df)
 
-    # 2) 新增欄位
     pack = pd.to_numeric(df["packqty"], errors="coerce")
     unit = pd.to_numeric(df["入數"], errors="coerce")
 
@@ -365,7 +323,6 @@ def compute(df_raw: pd.DataFrame) -> dict:
     is_int = np.isfinite(v) & np.isclose(v, np.round(v))
     df["出貨單位（判斷後）"] = np.where(is_int, v, pack)
 
-    # 欄位插入位置：入數右邊
     cols = list(df.columns)
     for c in ["計量單位數量", "出貨單位（判斷後）"]:
         if c in cols:
@@ -374,14 +331,12 @@ def compute(df_raw: pd.DataFrame) -> dict:
     cols[ins_pos:ins_pos] = ["計量單位數量", "出貨單位（判斷後）"]
     df = df[cols]
 
-    # 3) 統計遮罩
     mask_gm = _safe_str(df["載具號"]).str.contains("GM", case=False, na=False)
     boxtype = _safe_str(df["BOXTYPE"]).str.strip()
     mask_box1 = boxtype == "1"
     mask_box0 = boxtype == "0"
     mask_not_gm = ~mask_gm
 
-    # 4) 四項統計
     unique_boxid_count = (
         df.loc[mask_gm & mask_box1, "boxid"]
         .astype(str).str.strip().replace("", np.nan).dropna().nunique()
@@ -409,7 +364,33 @@ def make_excel_bytes(summary_all: pd.DataFrame, detail_all: pd.DataFrame) -> byt
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         summary_all.to_excel(writer, index=False, sheet_name="統計總表")
         detail_all.to_excel(writer, index=False, sheet_name="合併明細")
-    return bio.getvalue()
+    bio.seek(0)
+    return bio.read()
+
+
+def download_excel_stable(label: str, xlsx_bytes: bytes, filename_ascii: str):
+    """
+    ✅ 只用 st.download_button（最穩）
+    ✅ 檔名改 ASCII，避免某些環境中文檔名下載失敗/0 bytes
+    ✅ 固定 key，避免 rerun 後按鈕失效
+    """
+    file_obj = BytesIO(xlsx_bytes)
+    file_obj.seek(0)
+
+    md5 = hashlib.md5(xlsx_bytes).hexdigest()[:10]
+    key = f"dl_{md5}_{len(xlsx_bytes)}"
+
+    st.download_button(
+        label=label,
+        data=file_obj,
+        file_name=filename_ascii,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key=key,
+    )
+
+    # 小提示：方便你排查（不影響下載）
+    st.caption(f"檔案大小：{len(xlsx_bytes):,} bytes｜hash：{md5}")
 
 
 # =====================================
@@ -444,7 +425,6 @@ if not uploaded_files:
     st.info("請先上傳檔案（可多選）。")
     st.stop()
 
-# 用第一個檔案做欄位預覽與猜測（給下拉用）
 try:
     df_preview, used_enc_preview = robust_read_file(uploaded_files[0], txt_parse_choice, txt_encoding_choice)
     df_preview = _normalize_columns(df_preview)
@@ -521,7 +501,6 @@ if not results:
 summary_all = pd.DataFrame(results)
 detail_all = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
 
-# KPI（合計）
 total_files_ok = len(summary_all)
 total_in = int(summary_all["讀取列數"].sum())
 total_removed = int(summary_all["刪除站所列數"].sum())
@@ -557,13 +536,14 @@ st.dataframe(show_df, use_container_width=True, hide_index=True)
 card_close()
 
 card_open("📤 匯出（統計總表 + 合併明細）")
-stamp = datetime.now().strftime("%Y%m%d_%H%M")
-filename = f"大豐KPI_整體作業量體_多檔_{stamp}.xlsx"
+stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# ✅ 檔名改英文（最穩）
+filename_ascii = f"DaFengKPI_OverallVolume_MultiFiles_{stamp}.xlsx"
 
 xlsx_bytes = make_excel_bytes(summary_all, detail_all)
 
-# ✅ 不再用 keyword 呼叫（避免 TypeError）
-download_excel_one_line("✅ 下載 Excel（含：統計總表 + 合併明細）", xlsx_bytes, filename)
+download_excel_stable("✅ 下載 Excel（含：統計總表 + 合併明細）", xlsx_bytes, filename_ascii)
 
 with st.expander("🔎 合併明細預覽（前 200 筆）", expanded=False):
     st.dataframe(detail_all.head(200), use_container_width=True)
