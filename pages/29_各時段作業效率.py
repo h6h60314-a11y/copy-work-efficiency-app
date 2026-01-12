@@ -3,7 +3,7 @@
 import io
 import os
 from io import StringIO
-from datetime import datetime, date, time as dtime
+from datetime import datetime, date
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -14,7 +14,7 @@ from openpyxl.styles import PatternFill
 
 # ---- 套用平台風格（有就用，沒有就退回原生）----
 try:
-    from common_ui import inject_logistics_theme, set_page
+    from common_ui import inject_logistics_theme, set_page, card_open, card_close
     HAS_COMMON_UI = True
 except Exception:
     HAS_COMMON_UI = False
@@ -126,6 +126,41 @@ def build_excel_bytes(matrix: pd.DataFrame, hour_cols: list[int]) -> bytes:
     return out.getvalue()
 
 
+def _fmt_4(x) -> str:
+    try:
+        return f"{float(x):,.4f}"
+    except Exception:
+        return "0.0000"
+
+
+def _render_line_block(title: str, icon: str, kpis: dict, chart_df: pd.DataFrame):
+    """
+    kpis keys:
+      people, total_pcs, cur_hour_pcs, pass_rate, eff_hour
+    chart_df: columns=["小時","加權PCS"]
+    """
+    if HAS_COMMON_UI:
+        card_open(f"{icon} {title}")
+    else:
+        st.markdown(f"### {icon} {title}")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("人數", int(kpis.get("people", 0)))
+    c2.metric("總加權PCS", _fmt_4(kpis.get("total_pcs", 0.0)))
+    c3.metric(f"{int(kpis.get('eff_hour', 0))}點 當小時PCS", _fmt_4(kpis.get("cur_hour_pcs", 0.0)))
+    pr = kpis.get("pass_rate", None)
+    c4.metric("PASS率", (f"{pr:.1f}%" if pr is not None else "—"))
+
+    st.caption("圖表：各小時加權PCS（去重後）")
+    if chart_df is None or chart_df.empty:
+        st.info("此區間沒有可呈現的加權PCS。")
+    else:
+        st.bar_chart(chart_df.set_index("小時")["加權PCS"], use_container_width=True)
+
+    if HAS_COMMON_UI:
+        card_close()
+
+
 def main():
     st.set_page_config(page_title="大豐物流 - 出貨課｜各時段作業效率", page_icon="⏱️", layout="wide")
     if HAS_COMMON_UI:
@@ -151,9 +186,8 @@ def main():
         hour_min = st.number_input("起始小時", min_value=0, max_value=23, value=8, step=1)
 
         use_now = st.toggle("用現在時間作為判斷截止（台北時間）", value=True)
-
         if use_now:
-            now = datetime.now(TPE)  # ✅ 重要：用台北時間
+            now = datetime.now(TPE)  # ✅ 台北時間
         else:
             t_in = st.time_input("判斷截止時間（台北時間）", value=datetime.now(TPE).time())
             now = datetime.combine(date.today(), t_in).replace(tzinfo=TPE)
@@ -167,7 +201,6 @@ def main():
         mem_file = st.file_uploader("② 上傳『人員名單』(CSV/Excel)", type=["csv", "xlsx", "xlsm", "xls"])
 
     run = st.button("🚀 開始計算", type="primary", use_container_width=True)
-
     if not run:
         return
     if prod_file is None or mem_file is None:
@@ -303,10 +336,9 @@ def main():
         hour_max = cur_h
         hour_cols = list(range(int(hour_min), int(hour_max) + 1))
 
-        # ✅ keys：一定保留有哪些人（用 hourly 的 index 組合）
         keys = hourly[base_cols].drop_duplicates().copy()
         if keys.empty:
-            raise ValueError("hourly 統計後沒有任何人員列（請檢查 PICKDATE 是否有時間、或開始時間過濾是否太嚴格）。")
+            raise ValueError("hourly 統計後沒有任何人員列（請檢查開始時間過濾）。")
 
         grid = keys.assign(_k=1).merge(pd.DataFrame({"小時": hour_cols, "_k": 1}), on="_k").drop(columns=["_k"])
         grid = grid.merge(hourly[base_cols + ["小時", "顯示"]], on=base_cols + ["小時"], how="left")
@@ -315,7 +347,6 @@ def main():
             grid.pivot(index=base_cols, columns="小時", values="顯示")
             .reset_index()
         )
-
         matrix.columns = [int(c) if str(c).isdigit() else c for c in matrix.columns]
         for hh in hour_cols:
             if hh not in matrix.columns:
@@ -323,11 +354,93 @@ def main():
         matrix = matrix[base_cols + hour_cols]
 
         # =========================================================
-        # 7) 畫面預覽 + 下載
+        # 7) KPI 圖表（每線一區塊 + 全線總和）
         # =========================================================
         st.success("計算完成 ✅（結果已使用：去重後加權PCS）")
-        st.caption("表格顯示為：當小時加權PCS（判斷PASS/FAIL使用累計）")
 
+        st.markdown("## 📊 KPI 圖表（每線一區塊）")
+
+        # 每線：各小時加總
+        line_hour = (
+            df.groupby(["線別", "小時"], as_index=False)["加權PCS"].sum()
+            .sort_values(["線別", "小時"])
+        )
+
+        # 決定 KPI 的判斷小時：以目前小時為主，若資料最大小時更小則用資料最大小時
+        max_data_h = int(df["小時"].max())
+        eff_hour = min(int(cur_h), max_data_h)
+
+        # PASS/FAIL 取「eff_hour」那一小時的狀態
+        hf = hourly[(hourly["小時"] == eff_hour) & hourly["狀態"].notna()].copy()
+
+        lines = sorted(df["線別"].dropna().unique().tolist())
+
+        for line in lines:
+            # KPI：人數（以 df_members 的該線 + 有姓名者為準）
+            people = int(df_members[df_members["線別"] == line].shape[0])
+
+            total_pcs = float(df[df["線別"] == line]["加權PCS"].sum())
+            cur_hour_pcs = float(df[(df["線別"] == line) & (df["小時"] == eff_hour)]["加權PCS"].sum())
+
+            # PASS率
+            sub = hf[hf["線別"] == line]
+            if sub.empty:
+                pass_rate = None
+            else:
+                pass_cnt = int((sub["狀態"] == "PASS").sum())
+                tot_cnt = int(sub["狀態"].isin(["PASS", "FAIL"]).sum())
+                pass_rate = (pass_cnt / tot_cnt * 100.0) if tot_cnt else None
+
+            chart_df = line_hour[line_hour["線別"] == line][["小時", "加權PCS"]].copy()
+
+            _render_line_block(
+                title=f"{line}",
+                icon="📦",
+                kpis={
+                    "people": people,
+                    "total_pcs": total_pcs,
+                    "cur_hour_pcs": cur_hour_pcs,
+                    "pass_rate": pass_rate,
+                    "eff_hour": eff_hour,
+                },
+                chart_df=chart_df,
+            )
+
+        # 全作業線總和
+        all_people = int(df_members.shape[0])
+        all_total = float(df["加權PCS"].sum())
+        all_cur = float(df[df["小時"] == eff_hour]["加權PCS"].sum())
+
+        if hf.empty:
+            all_pass_rate = None
+        else:
+            all_pass_cnt = int((hf["狀態"] == "PASS").sum())
+            all_tot_cnt = int(hf["狀態"].isin(["PASS", "FAIL"]).sum())
+            all_pass_rate = (all_pass_cnt / all_tot_cnt * 100.0) if all_tot_cnt else None
+
+        all_chart = (
+            df.groupby(["小時"], as_index=False)["加權PCS"].sum()
+            .sort_values(["小時"])[["小時", "加權PCS"]]
+        )
+
+        st.markdown("## 🧾 全作業線總和")
+        _render_line_block(
+            title="全作業線",
+            icon="🧾",
+            kpis={
+                "people": all_people,
+                "total_pcs": all_total,
+                "cur_hour_pcs": all_cur,
+                "pass_rate": all_pass_rate,
+                "eff_hour": eff_hour,
+            },
+            chart_df=all_chart,
+        )
+
+        # =========================================================
+        # 8) 矩陣表 + 下載
+        # =========================================================
+        st.markdown("## 📋 明細矩陣（當小時PCS｜判斷PASS/FAIL使用累計）")
         st.dataframe(matrix, use_container_width=True, height=520)
 
         xlsx_bytes = build_excel_bytes(matrix, hour_cols)
@@ -337,7 +450,7 @@ def main():
             data=xlsx_bytes,
             file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
+            use_container_width=True,
         )
 
     except Exception as e:
