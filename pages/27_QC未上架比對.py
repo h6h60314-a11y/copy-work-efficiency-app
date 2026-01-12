@@ -23,6 +23,8 @@ QC_KEY_HEADER = "商品"
 UN_KEY_HEADER = "商品碼"
 UN_DATE_HEADER = "進貨日"
 UNIT_HEADER = "可移動單位"
+BARCODE_HEADER = "國際條碼"
+BATCH_HEADER = "批號"
 
 MATCH_SHEET_NAME = "符合未上架明細"
 
@@ -36,9 +38,6 @@ DELETE_HEADERS = [
     "已試算",
     "已揀取",
 ]
-
-# 這些欄位在 xls/xlsb → pandas 轉檔時，必須強制當文字（避免 000000 消失/科學記號）
-FORCE_TEXT_HEADERS = {"批號", "可移動單位", "國際條碼"}
 
 
 # =============================
@@ -111,7 +110,7 @@ div[data-testid="stButton"] > button{
 
 
 # =============================
-# 工具：定位欄位 / 文字格式（僅用於「比對」，不改原表）
+# 工具：定位欄位 / 文字格式
 # =============================
 def get_ws(wb, sheet_name: Optional[str]):
     return wb[sheet_name] if sheet_name else wb.worksheets[0]
@@ -147,7 +146,7 @@ def zero_run_width(number_format: str) -> int:
 
 
 def normalize_code(value, fmt: str, fallback_width: int = 0) -> str:
-    """⚠️ 只用於比對（不回寫）"""
+    """只用於比對（不回寫）"""
     if value is None:
         return ""
     if isinstance(value, str):
@@ -233,15 +232,9 @@ def format_date_value(v) -> str:
 
 
 # =============================
-# ✅ 輸出用：可移動單位補滿 10 碼（不足補0）
+# ✅ 輸出用：可移動單位補滿 10 碼（不足補0）+ 設文字
 # =============================
 def pad_unit_to_10(ws, unit_col: int, start_row: int = 2, width: int = 10):
-    """
-    直接改「輸出檔」內容：
-    - 純數字 → zfill(10)
-    - 非純數字 → 原樣
-    - 設為文字格式 '@'，避免 000000 被吃掉
-    """
     if not unit_col:
         return
     for r in range(start_row, ws.max_row + 1):
@@ -250,34 +243,80 @@ def pad_unit_to_10(ws, unit_col: int, start_row: int = 2, width: int = 10):
         if v is None:
             continue
 
-        if isinstance(v, (datetime, date)):
-            s = v.strftime("%Y-%m-%d")
-        elif isinstance(v, float) and abs(v - round(v)) < 1e-9:
+        if isinstance(v, float) and abs(v - round(v)) < 1e-9:
             s = str(int(round(v)))
         else:
             s = str(v).strip()
 
         if not s:
             continue
-
         if s.isdigit():
             s = s.zfill(width)
 
         cell.value = s
         cell.number_format = "@"
-        # 不強制重畫整列樣式，只確保不會被 Excel 當數字
         if cell.alignment is None:
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+
+# =============================
+# ✅ 輸出用：把指定欄位強制轉文字（避免科學記號/掉0）
+# - barcode 不補0，只轉成純數字字串
+# - batch 依原本格式/字串長度推寬度後補0
+# =============================
+def force_text_digits(ws, col_idx: int, pad_width: int = 0, start_row: int = 2):
+    if not col_idx:
+        return
+    for r in range(start_row, ws.max_row + 1):
+        cell = ws.cell(row=r, column=col_idx)
+        v = cell.value
+        if v is None:
+            continue
+
+        if isinstance(v, float) and abs(v - round(v)) < 1e-9:
+            s = str(int(round(v)))
+        elif isinstance(v, int):
+            s = str(v)
+        else:
+            s = str(v).strip()
+
+        if not s:
+            continue
+
+        # 如果是純數字，才補0
+        if pad_width >= 2 and s.isdigit():
+            s = s.zfill(pad_width)
+
+        cell.value = s
+        cell.number_format = "@"
+        if cell.alignment is None:
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+
+def infer_col_digit_width(ws, col_idx: int, header_row: int = 1, scan_limit: int = 50000) -> int:
+    """依 number_format 的 0000 或字串長度 推斷該欄最長碼長"""
+    if not col_idx:
+        return 0
+    w = 0
+    end_r = min(ws.max_row, scan_limit)
+    for r in range(header_row + 1, end_r + 1):
+        cell = ws.cell(row=r, column=col_idx)
+        v = cell.value
+        if v is None:
+            continue
+        fmt = getattr(cell, "number_format", "") or ""
+        w = max(w, zero_run_width(fmt))
+        if isinstance(v, str):
+            s = v.strip()
+            if s.isdigit():
+                w = max(w, len(s))
+    return w
 
 
 # =============================
 # ✅ 刪除指定欄位（輸出檔用）
 # =============================
 def delete_columns_by_headers(ws, headers_to_delete, header_row: int = 1):
-    """
-    依表頭名稱刪除欄位（找不到就略過）
-    - 支援 exact / contains（避免表頭有空白或附註）
-    """
     if not headers_to_delete:
         return
 
@@ -307,8 +346,18 @@ def delete_columns_by_headers(ws, headers_to_delete, header_row: int = 1):
         pass
 
 
+def delete_cols_after_header(ws, header_name: str, header_row: int = 1):
+    """把某個表頭右邊全部欄位刪掉（含進貨日右邊全清空）"""
+    col = find_header_col(ws, header_name, header_row)
+    if col is None:
+        return
+    if ws.max_column > col:
+        ws.delete_cols(col + 1, ws.max_column - col)
+
+
 # =============================
 # 轉換：DataFrames -> openpyxl Workbook（xls/xlsb 用）
+# ✅ 用 dtype=str 已在讀取處處理，這裡只負責寫入
 # =============================
 def _dfs_to_workbook(sheets: Dict[str, pd.DataFrame]) -> Workbook:
     wb = Workbook()
@@ -322,8 +371,6 @@ def _dfs_to_workbook(sheets: Dict[str, pd.DataFrame]) -> Workbook:
         headers = [("" if c is None else str(c)) for c in df.columns.tolist()]
         ws.append(headers)
 
-        header_map = {h.strip(): i + 1 for i, h in enumerate(headers) if isinstance(h, str)}
-
         for row in df.itertuples(index=False, name=None):
             out_row = []
             for v in row:
@@ -335,24 +382,21 @@ def _dfs_to_workbook(sheets: Dict[str, pd.DataFrame]) -> Workbook:
                     out_row.append(v)
             ws.append(out_row)
 
-        max_row = ws.max_row
-
-        # 強制文字欄位（避免 000000 / 科學記號）
-        for h in FORCE_TEXT_HEADERS:
-            if h not in header_map:
-                continue
-            cidx = header_map[h]
-            for r in range(2, max_row + 1):
-                cell = ws.cell(row=r, column=cidx)
-                if cell.value is None:
-                    continue
-                cell.value = str(cell.value).strip()
-                cell.number_format = "@"
-                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-        # 可移動單位補滿 10 碼（輸出需求）
-        if UNIT_HEADER in header_map:
-            pad_unit_to_10(ws, header_map[UNIT_HEADER], start_row=2, width=10)
+        # converted 來源：先把國際條碼/批號/可移動單位都當文字（避免 E+12 / 掉0）
+        hmap = {str(h).strip(): i + 1 for i, h in enumerate(headers)}
+        if BARCODE_HEADER in hmap:
+            force_text_digits(ws, hmap[BARCODE_HEADER], pad_width=0)
+        if BATCH_HEADER in hmap:
+            # 批號在 converted 來源：直接依字串長度推最長補0
+            w = 0
+            col = df[BATCH_HEADER].astype(str).tolist()
+            for s in col:
+                s = (s or "").strip()
+                if s.isdigit():
+                    w = max(w, len(s))
+            force_text_digits(ws, hmap[BATCH_HEADER], pad_width=w)
+        if UNIT_HEADER in hmap:
+            pad_unit_to_10(ws, hmap[UNIT_HEADER], width=10)
 
     return wb
 
@@ -437,7 +481,7 @@ def _delete_non_matched_rows(ws, keep_rows, header_rows: int = 1):
 
 
 # =============================
-# 主流程（回傳輸出 bytes）
+# 主流程
 # =============================
 def process_wb(
     qc_wb,
@@ -450,6 +494,9 @@ def process_wb(
 
     qc_key_col = find_header_col(qc_ws, QC_KEY_HEADER, 1)
     qc_unit_col = find_header_col(qc_ws, UNIT_HEADER, 1)
+
+    qc_barcode_col = find_header_col(qc_ws, BARCODE_HEADER, 1)
+    qc_batch_col = find_header_col(qc_ws, BATCH_HEADER, 1)
 
     un_key_col = find_header_col(un_ws, UN_KEY_HEADER, 1)
     un_unit_col = find_header_col(un_ws, UNIT_HEADER, 1)
@@ -482,7 +529,7 @@ def process_wb(
     # 2) 推估可移動單位碼長（比對用）
     unit_width = _infer_digit_width(un_ws, un_unit_col)
 
-    # 3) 建索引：(商品碼, 可移動單位) -> 進貨日(可多筆合併)
+    # 3) 建索引：(商品碼, 可移動單位) -> 進貨日
     date_sets = defaultdict(set)
     for r in range(2, un_ws.max_row + 1):
         code_cell = un_ws.cell(row=r, column=un_key_col)
@@ -536,13 +583,25 @@ def process_wb(
         if d_str:
             match_rows.append(r)
 
-    # ✅ 5.5) 輸出檔：可移動單位補滿 10 碼
+    # ✅ 5.5) 可移動單位：補滿 10 碼 + 設文字
     pad_unit_to_10(qc_ws, qc_unit_col, start_row=2, width=10)
 
-    # ✅ 5.6) 刪除你指定的欄位（輸出檔）
+    # ✅ 5.6) 國際條碼：強制文字（避免 E+12）
+    if qc_barcode_col is not None:
+        force_text_digits(qc_ws, qc_barcode_col, pad_width=0)
+
+    # ✅ 5.7) 批號：依欄位最長碼/number_format 推寬度後補0 + 設文字
+    if qc_batch_col is not None:
+        batch_w = infer_col_digit_width(qc_ws, qc_batch_col)
+        force_text_digits(qc_ws, qc_batch_col, pad_width=batch_w)
+
+    # ✅ 5.8) 刪除你指定的欄位
     delete_columns_by_headers(qc_ws, DELETE_HEADERS, header_row=1)
 
-    # 6) 產生符合分頁：複製 QC → 刪除不符合列
+    # ✅ 5.9) 只保留到「進貨日」為止（右邊全部刪掉 → 輸出就會像你圖）
+    delete_cols_after_header(qc_ws, "進貨日", header_row=1)
+
+    # 6) 產生符合分頁：複製 QC → 刪除不符合列（版面最大程度一致）
     if MATCH_SHEET_NAME in qc_wb.sheetnames:
         del qc_wb[MATCH_SHEET_NAME]
 
@@ -566,11 +625,11 @@ _page_css()
 set_page(
     "QC 未上架比對",
     icon="🧾",
-    subtitle="比對：QC「商品+可移動單位」= 未上架「商品碼+可移動單位」；輸出可移動單位補10碼；並刪除指定欄位。",
+    subtitle="比對：QC「商品+可移動單位」= 未上架「商品碼+可移動單位」；輸出：可移動單位補10碼、刪指定欄位、只保留到進貨日。",
 )
 
 st.markdown(
-    '<div class="qc-chips">雙條件比對<span class="sep">｜</span>可移動單位補10碼<span class="sep">｜</span>刪除指定欄位<span class="sep">｜</span>只新增進貨日/符合分頁</div>',
+    '<div class="qc-chips">雙條件比對<span class="sep">｜</span>可移動單位補10碼<span class="sep">｜</span>國際條碼/批號文字化<span class="sep">｜</span>只保留到進貨日</div>',
     unsafe_allow_html=True,
 )
 
