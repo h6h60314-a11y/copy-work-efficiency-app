@@ -24,10 +24,11 @@ TPE = ZoneInfo("Asia/Taipei")
 
 STATUS_PASS = "達標"
 STATUS_FAIL = "未達標"
+STATUS_NA = "未判斷"
 
 
 # =============================
-# 讀檔
+# 讀檔：CSV/Excel 強韌讀取
 # =============================
 def read_table_robust(file_name: str, raw: bytes, label: str = "檔案") -> pd.DataFrame:
     ext = os.path.splitext(file_name)[1].lower()
@@ -95,58 +96,6 @@ def _safe_time(s: str) -> str:
 
 
 # =============================
-# Excel：輸出「當小時加權PCS」，顏色用達標/未達標
-# =============================
-def build_excel_bytes_volume(matrix_vol: pd.DataFrame, matrix_stat: pd.DataFrame, hour_cols: list[int]) -> bytes:
-    out_df = matrix_vol.copy()
-    # 空白處理
-    for h in hour_cols:
-        if h in out_df.columns:
-            out_df[h] = out_df[h].where(pd.notna(out_df[h]), "")
-
-    bio = io.BytesIO()
-    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        out_df.to_excel(writer, index=False, sheet_name="時段量體_達標色塊")
-    bio.seek(0)
-
-    wb = load_workbook(bio)
-    ws = wb.active
-
-    fill_ok = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    fill_ng = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-
-    base_cols = ["線別", "段數", "姓名", "開始時間"]
-    min_col = len(base_cols) + 1
-    max_col = len(base_cols) + len(hour_cols)
-
-    # 讓數字好看
-    for r in ws.iter_rows(min_row=2, min_col=min_col, max_col=max_col):
-        for c in r:
-            c.alignment = Alignment(horizontal="center", vertical="center")
-
-    # 依狀態著色
-    # matrix_stat 與 matrix_vol 欄位一致（同 index）
-    # 這裡直接用 DataFrame 位置去映射 Excel 儲存格（行列對齊）
-    stat_values = matrix_stat[hour_cols].values.tolist()
-    for i, r in enumerate(ws.iter_rows(min_row=2, min_col=min_col, max_col=max_col)):
-        for j, c in enumerate(r):
-            stat = stat_values[i][j] if i < len(stat_values) and j < len(stat_values[i]) else None
-            if stat == STATUS_PASS:
-                c.fill = fill_ok
-                c.number_format = "0.0000"
-            elif stat == STATUS_FAIL:
-                c.fill = fill_ng
-                c.number_format = "0.0000"
-            else:
-                # 未判斷/未到時段 -> 不上色
-                pass
-
-    out = io.BytesIO()
-    wb.save(out)
-    return out.getvalue()
-
-
-# =============================
 # KPI 計數
 # =============================
 def _kpi_counts(dist_df: pd.DataFrame):
@@ -159,82 +108,13 @@ def _kpi_counts(dist_df: pd.DataFrame):
 
 
 # =============================
-# 長條圖矩陣（取代表格）
-# 每一格顯示「當小時加權PCS」，顏色表示達標/未達標
+# 橫條圖（段｜姓名：達標/未達標次數）
 # =============================
-def render_hourly_matrix_bars(df_line: pd.DataFrame, hour_cols: list[int], title: str):
-    """
-    df_line: columns = 段數, 姓名, 小時, 當小時加權PCS, 狀態
-    """
-    if df_line is None or df_line.empty:
-        st.info("此線別沒有資料可呈現。")
-        return
-
-    plot = df_line.copy()
-    plot["段數"] = pd.to_numeric(plot["段數"], errors="coerce").fillna(0).astype(int)
-    plot["row_label"] = plot["段數"].astype(str) + "段｜" + plot["姓名"].astype(str)
-    plot["小時"] = pd.to_numeric(plot["小時"], errors="coerce").astype(int)
-
-    # 顯示文字：量體（0 就不顯示，避免太亂）
-    def _fmt(v):
-        try:
-            v = float(v)
-        except Exception:
-            return ""
-        return "" if abs(v) < 1e-12 else f"{v:.2f}"
-
-    plot["顯示量"] = plot["當小時加權PCS"].apply(_fmt)
-
-    # 顏色：達標/未達標/未判斷
-    color_cond = alt.condition(
-        alt.datum["狀態"] == STATUS_PASS,
-        alt.value("#2E7D32"),
-        alt.condition(
-            alt.datum["狀態"] == STATUS_FAIL,
-            alt.value("#C62828"),
-            alt.value("#D0D5DD"),  # 未判斷/未到時段
-        ),
-    )
-
-    base = alt.Chart(plot).encode(
-        x=alt.X("小時:O", sort=[str(h) for h in hour_cols], title="小時"),
-        tooltip=[
-            alt.Tooltip("row_label:N", title="段數｜姓名"),
-            alt.Tooltip("小時:O", title="小時"),
-            alt.Tooltip("當小時加權PCS:Q", title="當小時加權PCS", format=",.4f"),
-            alt.Tooltip("狀態:N", title="狀態"),
-        ],
-    )
-
-    bars = base.mark_bar(size=20).encode(
-        y=alt.Y("當小時加權PCS:Q", title="當小時加權PCS"),
-        color=color_cond,
-    )
-
-    labels = base.mark_text(dy=-10, fontSize=11).encode(
-        y=alt.Y("當小時加權PCS:Q"),
-        text=alt.Text("顯示量:N"),
-    )
-
-    layered = (bars + labels).properties(height=120)
-
-    # 每個人一列（段1~段4），用 facet row
-    chart = layered.facet(
-        row=alt.Row("row_label:N", sort=alt.SortField(field="段數", order="ascending"), header=alt.Header(title=None)),
-        spacing=8,
-    ).resolve_scale(
-        y="independent"
-    ).properties(
-        title=title
-    )
-
-    st.altair_chart(chart, use_container_width=True)
-
-
 def _render_hbar_person(dist_person: pd.DataFrame, title: str):
     if dist_person is None or dist_person.empty:
         st.info("沒有可呈現的橫條圖。")
         return
+
     labels = dist_person["label"].drop_duplicates().tolist()
     height = min(26 * len(labels) + 40, 520)
 
@@ -283,22 +163,150 @@ def _render_hbar_lines(dist_line: pd.DataFrame, title: str):
     st.altair_chart(chart, use_container_width=True)
 
 
+# =============================
+# ✅ 長條圖矩陣（取代表格）
+# 每格顯示「當小時加權PCS」，顏色表示達標/未達標
+# Altair v6：不用巢狀 condition，改用 scale domain/range
+# =============================
+def render_hourly_matrix_bars(df_line: pd.DataFrame, hour_cols: list[int], title: str):
+    """
+    df_line columns: 段數, 姓名, 小時, 當小時加權PCS, 狀態
+    """
+    if df_line is None or df_line.empty:
+        st.info("此線別沒有資料可呈現。")
+        return
+
+    plot = df_line.copy()
+    plot["段數"] = pd.to_numeric(plot["段數"], errors="coerce").fillna(0).astype(int)
+    plot["小時"] = pd.to_numeric(plot["小時"], errors="coerce").fillna(0).astype(int)
+    plot["row_label"] = plot["段數"].astype(str) + "段｜" + plot["姓名"].astype(str)
+
+    # 顯示文字：量體（0 就不顯示）
+    def _fmt(v):
+        try:
+            v = float(v)
+        except Exception:
+            return ""
+        return "" if abs(v) < 1e-12 else f"{v:.2f}"
+
+    plot["顯示量"] = plot["當小時加權PCS"].apply(_fmt)
+
+    # ✅ 狀態補齊
+    plot["狀態_色"] = plot["狀態"].fillna(STATUS_NA)
+
+    # row 排序：依段數，再依姓名
+    row_order = (
+        plot[["row_label", "段數", "姓名"]]
+        .drop_duplicates()
+        .sort_values(["段數", "姓名"])
+        ["row_label"]
+        .tolist()
+    )
+
+    color_enc = alt.Color(
+        "狀態_色:N",
+        scale=alt.Scale(
+            domain=[STATUS_PASS, STATUS_FAIL, STATUS_NA],
+            range=["#2E7D32", "#C62828", "#D0D5DD"],
+        ),
+        legend=alt.Legend(title="狀態"),
+    )
+
+    base = alt.Chart(plot).encode(
+        x=alt.X("小時:O", sort=[str(h) for h in hour_cols], title="小時"),
+        tooltip=[
+            alt.Tooltip("row_label:N", title="段數｜姓名"),
+            alt.Tooltip("小時:O", title="小時"),
+            alt.Tooltip("當小時加權PCS:Q", title="當小時加權PCS", format=",.4f"),
+            alt.Tooltip("狀態:N", title="狀態"),
+        ],
+    )
+
+    bars = base.mark_bar(size=20).encode(
+        y=alt.Y("當小時加權PCS:Q", title="當小時加權PCS"),
+        color=color_enc,
+    )
+
+    labels = base.mark_text(dy=-10, fontSize=11).encode(
+        y=alt.Y("當小時加權PCS:Q"),
+        text=alt.Text("顯示量:N"),
+    )
+
+    layered = (bars + labels).properties(height=120)
+
+    chart = layered.facet(
+        row=alt.Row("row_label:N", sort=row_order, header=alt.Header(title=None)),
+        spacing=8,
+    ).resolve_scale(
+        y="independent"
+    ).properties(
+        title=title
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+
+
+# =============================
+# Excel：輸出「當小時加權PCS」，顏色用達標/未達標
+# =============================
+def build_excel_bytes_volume(matrix_vol: pd.DataFrame, matrix_stat: pd.DataFrame, hour_cols: list[int]) -> bytes:
+    out_df = matrix_vol.copy()
+    for h in hour_cols:
+        if h in out_df.columns:
+            out_df[h] = out_df[h].where(pd.notna(out_df[h]), "")
+
+    bio = io.BytesIO()
+    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+        out_df.to_excel(writer, index=False, sheet_name="時段量體_達標色塊")
+    bio.seek(0)
+
+    wb = load_workbook(bio)
+    ws = wb.active
+
+    fill_ok = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    fill_ng = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
+    base_cols = ["線別", "段數", "姓名", "開始時間"]
+    min_col = len(base_cols) + 1
+    max_col = len(base_cols) + len(hour_cols)
+
+    # 對齊
+    for r in ws.iter_rows(min_row=2, min_col=min_col, max_col=max_col):
+        for c in r:
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.number_format = "0.0000"
+
+    stat_values = matrix_stat[hour_cols].values.tolist()
+    for i, r in enumerate(ws.iter_rows(min_row=2, min_col=min_col, max_col=max_col)):
+        for j, c in enumerate(r):
+            stat = stat_values[i][j] if i < len(stat_values) and j < len(stat_values[i]) else None
+            if stat == STATUS_PASS:
+                c.fill = fill_ok
+            elif stat == STATUS_FAIL:
+                c.fill = fill_ng
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
 def main():
     st.set_page_config(page_title="大豐物流 - 出貨課｜各時段作業效率", page_icon="⏱️", layout="wide")
     if HAS_COMMON_UI:
         inject_logistics_theme()
         set_page("📦 出貨課", "⏱️ 29｜各時段作業效率")
 
-    st.markdown("### ⏱️ 各時段作業效率（量體＋達標色塊｜段1~段4）")
+    st.markdown("### ⏱️ 各時段作業效率（每格顯示量體｜顏色表示達標/未達標）")
 
+    # 固定人員開始時間表
     fixed_time_map = {
         '范明俊': '08:00', '阮玉名': '08:00', '李茂銓': '08:00', '河文強': '08:00',
         '蔡麗珠': '08:00', '潘文一': '08:00', '阮伊黃': '08:00', '葉欲弘': '09:00',
         '阮武玉玄': '08:00', '吳黃金珠': '08:30', '潘氏青江': '08:00', '陳國慶': '08:30',
         '楊心如': '08:00', '阮瑞美黃緣': '08:00', '周芸蓁': '08:00', '黎氏瓊': '08:00',
         '王文楷': '08:30', '潘氏慶平': '08:00', '阮氏美麗': '08:00', '岳子恆': '08:30',
-        '郭雙燕': '08:30', '阮孟勇': '08:00', '廖永成':'08:30', '楊浩傑':'08:30', '黃日康':'08:30',
-        '蔣金妮':'08:30', '柴家欣':'08:30',
+        '郭雙燕': '08:30', '阮孟勇': '08:00', '廖永成': '08:30', '楊浩傑': '08:30', '黃日康': '08:30',
+        '蔣金妮': '08:30', '柴家欣': '08:30',
     }
 
     with st.sidebar:
@@ -331,6 +339,7 @@ def main():
     try:
         # 1) 人員名單
         df_mem_raw = _norm_cols(read_table_robust(mem_file.name, mem_file.getvalue(), label="人員名單檔案"))
+
         line_col_candidates = ["LINEID", "線別", "LineID", "LINE Id", "Line Id"]
         line_col = next((c for c in line_col_candidates if c in df_mem_raw.columns), None)
         if line_col is None:
@@ -360,6 +369,8 @@ def main():
         df_members["線別"] = clean_line(df_members["線別"])
         df_members["段數"] = clean_zone_1to4(df_members["段數"])
         df_members = df_members[df_members["段數"].notna()].copy()
+
+        # 同線別+段數只取第一筆
         df_members = df_members.drop_duplicates(["線別", "段數"], keep="first").copy()
 
         # 2) 生產資料（去重後加權PCS）
@@ -405,13 +416,15 @@ def main():
         hourly_sum = df.groupby(base_cols + ["小時"], as_index=False)["加權PCS"].sum()
         hourly_sum = hourly_sum.rename(columns={"加權PCS": "當小時加權PCS"})
 
-        # ✅ 補齊每小時（就算該小時沒有資料，也要有 0 才能判斷未達標）
+        # ✅ 補齊每小時（缺資料也補 0）
         cur_h, cur_m = now.hour, now.minute
         hour_cols = list(range(int(hour_min), int(cur_h) + 1))
 
         keys = df_members[base_cols].drop_duplicates().copy()
-        grid_hours = keys.assign(_k=1).merge(pd.DataFrame({"小時": hour_cols, "_k": 1}), on="_k").drop(columns=["_k"])
+        if keys.empty:
+            raise ValueError("人員名單 keys 為空，請確認名單檔格式。")
 
+        grid_hours = keys.assign(_k=1).merge(pd.DataFrame({"小時": hour_cols, "_k": 1}), on="_k").drop(columns=["_k"])
         hourly_full = grid_hours.merge(hourly_sum, on=base_cols + ["小時"], how="left")
         hourly_full["當小時加權PCS"] = pd.to_numeric(hourly_full["當小時加權PCS"], errors="coerce").fillna(0.0)
 
@@ -434,18 +447,17 @@ def main():
             )
         )
 
-        # ✅ elapsed <= 0 代表尚未開始（例如 08:30 在 08:00）
+        # elapsed <= 0：尚未開始（例如 08:30 的 08 點） -> 未判斷
         valid = (~np.isnan(elapsed)) & (elapsed > 0)
         target = np.where(valid, elapsed * float(target_hr), np.nan)
 
-        status = np.where(
+        hourly_full["狀態"] = np.where(
             ~valid,
             None,
             np.where(hourly_full["累計實際量"].values >= target, STATUS_PASS, STATUS_FAIL)
         )
-        hourly_full["狀態"] = status
 
-        # 供 KPI 計數使用
+        # KPI 計數
         dist = (
             hourly_full[hourly_full["狀態"].isin([STATUS_PASS, STATUS_FAIL])]
             .groupby(["線別", "小時", "狀態"], as_index=False)
@@ -454,7 +466,7 @@ def main():
             .sort_values(["線別", "小時", "狀態"])
         )
 
-        # 下載用：輸出「當小時加權PCS」矩陣 + 狀態矩陣（用於上色）
+        # 下載用矩陣：量體 + 狀態
         matrix_vol = hourly_full.pivot(index=base_cols, columns="小時", values="當小時加權PCS").reset_index()
         matrix_stat = hourly_full.pivot(index=base_cols, columns="小時", values="狀態").reset_index()
 
@@ -489,11 +501,11 @@ def main():
             c3.metric("未達標 段數", f)
             c4.metric("達標 率", (f"{rate:.1f}%" if rate is not None else "—"))
 
-            # ✅ 用長條圖矩陣取代表格
+            # ✅ 用「長條圖矩陣」取代原表格
             df_line = hourly_full[hourly_full["線別"] == line][["段數", "姓名", "小時", "當小時加權PCS", "狀態"]].copy()
             render_hourly_matrix_bars(df_line, hour_cols, title=f"{line}｜段1~段4 × 每小時（量體＋達標色塊）")
 
-            # 你原本要的橫條圖（仍保留）
+            # 橫條圖（統計達標/未達標次數）
             dist_person = (
                 hourly_full[(hourly_full["線別"] == line) & (hourly_full["狀態"].isin([STATUS_PASS, STATUS_FAIL]))]
                 .groupby(["段數", "姓名", "狀態"], as_index=False)
@@ -513,6 +525,7 @@ def main():
 
         # 全作業線總和
         st.markdown("## 🧾 全作業線總和（達標/未達標）")
+
         dist_all_now = dist[dist["小時"] == eff_hour]
         p_all, f_all, rate_all = _kpi_counts(dist_all_now)
 
@@ -535,7 +548,7 @@ def main():
         st.markdown("#### 📌 橫條圖（各線：達標/未達標次數）")
         _render_hbar_lines(dist_lines, title="全作業線｜各線達標/未達標 次數")
 
-        # 下載 Excel（現在輸出量體，顏色表示達標/未達標）
+        # 下載 Excel（每格=量體，顏色=達標/未達標）
         st.markdown("## ⬇️ 下載")
         xlsx_bytes = build_excel_bytes_volume(matrix_vol, matrix_stat, hour_cols)
         filename = f"產能時段_量體達標色塊_{datetime.now(TPE).strftime('%H%M')}.xlsx"
