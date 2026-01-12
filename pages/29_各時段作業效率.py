@@ -24,7 +24,10 @@ TPE = ZoneInfo("Asia/Taipei")
 
 STATUS_PASS = "達標"
 STATUS_FAIL = "未達標"
-STATUS_NA = "未判斷"  # 尚未開始/尚未到判斷時段
+STATUS_NA = "未判斷"
+
+# ✅ 特殊工時（分鐘）：12點、13點只有 30 分鐘
+WORK_MINUTES_BY_HOUR = {12: 30, 13: 30}
 
 
 # =============================
@@ -117,7 +120,7 @@ def _kpi_counts(dist_df: pd.DataFrame):
 
 
 # =============================
-# ✅ 每小時橫向圖（段1~段4｜姓名）：X軸=小時、格內顯示量體、顏色=達標/未達標/未判斷
+# ✅ 每小時橫向圖：X=小時，格內=量體，色=達標/未達標/未判斷
 # =============================
 def render_hourly_timeline(df_line_hourly: pd.DataFrame, hour_cols, title: str):
     if df_line_hourly is None or df_line_hourly.empty:
@@ -147,10 +150,7 @@ def render_hourly_timeline(df_line_hourly: pd.DataFrame, hour_cols, title: str):
 
     color_enc = alt.Color(
         "狀態_色:N",
-        scale=alt.Scale(
-            domain=[STATUS_PASS, STATUS_FAIL, STATUS_NA],
-            range=["#2E7D32", "#C62828", "#D0D5DD"],
-        ),
+        scale=alt.Scale(domain=[STATUS_PASS, STATUS_FAIL, STATUS_NA], range=["#2E7D32", "#C62828", "#D0D5DD"]),
         legend=alt.Legend(title="狀態"),
     )
 
@@ -161,6 +161,7 @@ def render_hourly_timeline(df_line_hourly: pd.DataFrame, hour_cols, title: str):
             alt.Tooltip("label:N", title="段數｜姓名"),
             alt.Tooltip("小時:O", title="小時"),
             alt.Tooltip("當小時加權PCS:Q", title="當小時加權PCS", format=",.4f"),
+            alt.Tooltip("本小時目標:Q", title="本小時目標", format=",.2f"),
             alt.Tooltip("狀態:N", title="狀態"),
         ],
     )
@@ -169,13 +170,12 @@ def render_hourly_timeline(df_line_hourly: pd.DataFrame, hour_cols, title: str):
     text = base.mark_text(fontSize=12, fontWeight=900).encode(text="顯示量:N")
 
     n_rows = max(1, plot["label"].nunique())
-    height = min(42 * n_rows + 80, 900)  # ✅ 畫面加大
-
+    height = min(42 * n_rows + 80, 900)
     st.altair_chart((rect + text).properties(title=title, height=height), use_container_width=True)
 
 
 # =============================
-# ✅ 格子表格（每格=量體；顏色=達標/未達標/未判斷）
+# ✅ 表格（每格=量體；色=達標/未達標/未判斷）
 # =============================
 def render_grid_table(df_line: pd.DataFrame, hour_cols, title: str):
     if df_line is None or df_line.empty:
@@ -235,13 +235,10 @@ def render_grid_table(df_line: pd.DataFrame, hour_cols, title: str):
 
 
 # =============================
-# Excel：輸出「當小時加權PCS」，顏色用達標/未達標
+# Excel：輸出「當小時加權PCS」，顏色用達標/未達標（每小時判斷）
 # =============================
 def build_excel_bytes_volume(matrix_vol: pd.DataFrame, matrix_stat: pd.DataFrame, hour_cols: list[int]) -> bytes:
     out_df = matrix_vol.copy()
-    for h in hour_cols:
-        if h in out_df.columns:
-            out_df[h] = out_df[h].where(pd.notna(out_df[h]), "")
 
     bio = io.BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
@@ -278,8 +275,16 @@ def build_excel_bytes_volume(matrix_vol: pd.DataFrame, matrix_stat: pd.DataFrame
 
 
 # =============================
-# 主程式
+# ✅ 每小時判斷：計算「本小時有效分鐘」與「本小時目標」
+# - 12/13：slot=30分鐘
+# - 其他：slot=60分鐘
+# - 起始時間：若開始在該小時內，扣掉開始分鐘
+# - 當下小時：用目前分鐘，但 12/13 cap 到 30
 # =============================
+def _slot_minutes(hour: int) -> int:
+    return int(WORK_MINUTES_BY_HOUR.get(int(hour), 60))
+
+
 def main():
     st.set_page_config(page_title="大豐物流 - 出貨課｜各時段作業效率", page_icon="⏱️", layout="wide")
     if HAS_COMMON_UI:
@@ -313,7 +318,7 @@ def main():
         st.caption(f"目前採用時間：{now.strftime('%Y-%m-%d %H:%M:%S')} (Asia/Taipei)")
 
         auto_calc = st.toggle("上傳/設定變更後自動更新", value=True)
-        show_table = st.toggle("顯示格子表格（段1~段4×每小時）", value=True)
+        show_table = st.toggle("顯示表格（段1~段4×每小時）", value=True)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -332,15 +337,15 @@ def main():
     settings_sig = f"{target_hr}-{hour_min}-{use_now}-{now.hour}-{now.minute}-{show_table}"
 
     last = st.session_state.get("_29_last_sig", None)
-    cur = (prod_sig, mem_sig, settings_sig)
-    should_run = manual or (auto_calc and (last != cur))
+    cur_sig = (prod_sig, mem_sig, settings_sig)
+    should_run = manual or (auto_calc and (last != cur_sig))
     if not should_run:
         st.caption("（目前結果已是最新；如有更新檔案/設定會自動同步）")
         return
-    st.session_state["_29_last_sig"] = cur
+    st.session_state["_29_last_sig"] = cur_sig
 
     try:
-        # 1) 人員名單
+        # ========= 1) 人員名單 =========
         df_mem_raw = _norm_cols(read_table_robust(mem_file.name, mem_file.getvalue(), label="人員名單檔案"))
 
         line_col_candidates = ["LINEID", "線別", "LineID", "LINE Id", "Line Id"]
@@ -372,9 +377,11 @@ def main():
         df_members["線別"] = clean_line(df_members["線別"])
         df_members["段數"] = clean_zone_1to4(df_members["段數"])
         df_members = df_members[df_members["段數"].notna()].copy()
-        df_members = df_members.drop_duplicates(["線別", "段數", "姓名"], keep="first").copy()
 
-        # 2) 生產資料（去重後加權PCS）
+        # ✅ 避免 merge 展開：同線別+段數只取第一筆（名單格式本來就一段一人）
+        df_members = df_members.drop_duplicates(["線別", "段數"], keep="first").copy()
+
+        # ========= 2) 生產資料（去重後加權PCS） =========
         df_raw = read_table_robust(prod_file.name, prod_file.getvalue(), label="生產資料檔案")
         require_columns(df_raw, ["PICKDATE", "LINEID", "ZONEID", "PACKQTY", "Cweight"], "生產資料檔案")
 
@@ -392,14 +399,16 @@ def main():
         df_raw["Cweight"] = pd.to_numeric(df_raw["Cweight"], errors="coerce").fillna(0)
         df_raw["加權PCS"] = df_raw["PACKQTY"] * df_raw["Cweight"]
 
+        # ✅ 唯一指紋去重
         rid_cols = [c for c in df_raw.columns if c not in ("姓名", "開始時間", "小時", "__rid")]
         df_raw["__rid"] = pd.util.hash_pandas_object(df_raw[rid_cols], index=False)
 
-        df = pd.merge(df_raw, df_members, on=["線別", "段數"], how="left")
+        df = pd.merge(df_raw, df_members, on=["線別", "段數"], how="left", validate="m:1")
         df["姓名"] = df["姓名"].fillna("未設定")
         df["開始時間"] = df["開始時間"].fillna("08:00").map(_safe_time)
         df = df.drop_duplicates("__rid", keep="first").copy()
 
+        # 開始時間過濾
         pick_minutes = df["PICKDATE"].dt.hour * 60 + df["PICKDATE"].dt.minute
         st_parts = df["開始時間"].astype(str).str.split(":", n=1, expand=True)
         st_h = pd.to_numeric(st_parts[0], errors="coerce").fillna(8).astype(int)
@@ -409,6 +418,7 @@ def main():
         if df.empty:
             raise ValueError("套用開始時間過濾後沒有資料：請確認 PICKDATE 與開始時間設定。")
 
+        # ========= 3) 每小時量體 =========
         df["小時"] = df["PICKDATE"].dt.hour
         base_cols = ["線別", "段數", "姓名", "開始時間"]
 
@@ -418,38 +428,57 @@ def main():
         cur_h, cur_m = now.hour, now.minute
         hour_cols = list(range(int(hour_min), int(cur_h) + 1))
 
-        # ✅ 保證：名單上的每個人、每小時都要有一格（即使 0 也要）
+        # ✅ 名單上的每個人、每小時都補齊
         keys = df_members[base_cols].drop_duplicates().copy()
         grid_hours = keys.assign(_k=1).merge(pd.DataFrame({"小時": hour_cols, "_k": 1}), on="_k").drop(columns=["_k"])
 
         hourly_full = grid_hours.merge(hourly_sum, on=base_cols + ["小時"], how="left")
         hourly_full["當小時加權PCS"] = pd.to_numeric(hourly_full["當小時加權PCS"], errors="coerce").fillna(0.0)
-        hourly_full = hourly_full.sort_values(base_cols + ["小時"]).reset_index(drop=True)
-        hourly_full["累計實際量"] = hourly_full.groupby(["線別", "段數", "姓名"])["當小時加權PCS"].cumsum()
 
-        # 判斷達標/未達標（用累計）
-        st_parts2 = hourly_full["開始時間"].astype(str).str.split(":", n=1, expand=True)
-        s_h = pd.to_numeric(st_parts2[0], errors="coerce").fillna(8).astype(float)
-        s_m = pd.to_numeric(st_parts2[1], errors="coerce").fillna(0).astype(float)
-        h = hourly_full["小時"].astype(float)
+        # ========= 4) ✅ 每小時判斷（修正：>=790 仍紅色問題） =========
+        # 目標改為「本小時目標」，不再用累計
+        parts = hourly_full["開始時間"].astype(str).str.split(":", n=1, expand=True)
+        s_h = pd.to_numeric(parts[0], errors="coerce").fillna(8).astype(int)
+        s_m = pd.to_numeric(parts[1], errors="coerce").fillna(0).astype(int)
 
-        elapsed = np.where(
-            h < cur_h,
-            (h - s_h + 1.0) - (s_m / 60.0),
+        hh = pd.to_numeric(hourly_full["小時"], errors="coerce").fillna(0).astype(int)
+
+        slot = hh.map(lambda x: _slot_minutes(int(x))).astype(int)  # 60 or 30
+
+        # end_m：若是目前小時，用現在分鐘，但要 cap 到 slot（12/13 最多 30）
+        end_m = np.where(hh == cur_h, np.minimum(cur_m, slot), slot).astype(int)
+
+        # minutes_worked in this hour:
+        # 1) 未到小時（future）→ NA
+        # 2) 小時 < start_hour → NA
+        # 3) 小時 == start_hour → max(0, end_m - start_min)
+        # 4) 小時 > start_hour → end_m（past=slot；current=cap後分鐘）
+        minutes_worked = np.where(
+            hh > cur_h,
+            0,
             np.where(
-                h == cur_h,
-                (h - s_h) + ((cur_m - s_m) / 60.0),
-                np.nan
+                hh < s_h,
+                0,
+                np.where(
+                    hh == s_h,
+                    np.maximum(0, end_m - s_m),
+                    end_m
+                )
             )
-        )
+        ).astype(float)
 
-        valid = (~np.isnan(elapsed)) & (elapsed > 0)
-        target = np.where(valid, elapsed * float(target_hr), np.nan)
+        hourly_full["本小時有效分鐘"] = minutes_worked
+        hourly_full["本小時目標"] = (minutes_worked / 60.0) * float(target_hr)
 
+        # 狀態：有效分鐘>0 才判斷；否則未判斷
         hourly_full["狀態"] = np.where(
-            ~valid,
+            hourly_full["本小時有效分鐘"] <= 0,
             None,
-            np.where(hourly_full["累計實際量"].values >= target, STATUS_PASS, STATUS_FAIL)
+            np.where(
+                hourly_full["當小時加權PCS"] >= hourly_full["本小時目標"],
+                STATUS_PASS,
+                STATUS_FAIL
+            )
         )
 
         # KPI（某小時）
@@ -460,20 +489,21 @@ def main():
             .rename(columns={"size": "count"})
         )
 
-        # 匯出用矩陣
+        # 匯出用矩陣（量體 + 狀態）
         matrix_vol = hourly_full.pivot(index=base_cols, columns="小時", values="當小時加權PCS").reset_index()
         matrix_stat = hourly_full.pivot(index=base_cols, columns="小時", values="狀態").reset_index()
+
         matrix_vol.columns = [int(c) if str(c).isdigit() else c for c in matrix_vol.columns]
         matrix_stat.columns = [int(c) if str(c).isdigit() else c for c in matrix_stat.columns]
-        for hh in hour_cols:
-            if hh not in matrix_vol.columns:
-                matrix_vol[hh] = np.nan
-            if hh not in matrix_stat.columns:
-                matrix_stat[hh] = None
+        for k in hour_cols:
+            if k not in matrix_vol.columns:
+                matrix_vol[k] = np.nan
+            if k not in matrix_stat.columns:
+                matrix_stat[k] = None
         matrix_vol = matrix_vol[base_cols + hour_cols]
         matrix_stat = matrix_stat[base_cols + hour_cols]
 
-        st.success("計算完成 ✅（橫向圖已改為『每小時』）")
+        st.success("計算完成 ✅（12/13 點 = 30 分鐘；狀態改為『每小時獨立判斷』）")
         st.markdown("## 📊 KPI（每線：段1~段4）")
 
         eff_hour = int(cur_h)
@@ -494,17 +524,17 @@ def main():
             c3.metric("未達標 段數", f)
             c4.metric("達標 率", (f"{rate:.1f}%" if rate is not None else "—"))
 
-            df_line = hourly_full[hourly_full["線別"] == line][["段數", "姓名", "小時", "當小時加權PCS", "狀態"]].copy()
+            df_line = hourly_full[hourly_full["線別"] == line][
+                ["段數", "姓名", "小時", "當小時加權PCS", "本小時目標", "狀態"]
+            ].copy()
 
-            # ✅ 橫向圖：每小時
             st.markdown("#### 📌 橫向圖（段1~段4｜姓名：每小時達標/未達標＋量體）")
             render_hourly_timeline(
                 df_line_hourly=df_line,
                 hour_cols=hour_cols,
-                title=f"{line}｜段1~段4（每小時：顏色=達標/未達標｜格內=量體）"
+                title=f"{line}｜每小時（顏色=達標/未達標｜格內=量體；12/13=30分）"
             )
 
-            # ✅ 保留表格（你原本也要）
             if show_table:
                 render_grid_table(df_line, hour_cols, "段1~段4 × 每小時（表格：每格=量體；顏色=達標/未達標）")
 
