@@ -26,7 +26,18 @@ UNIT_HEADER = "可移動單位"
 
 MATCH_SHEET_NAME = "符合未上架明細"
 
-# 這些欄位在「轉檔（xls/xlsb/xls）」時必須強制當文字，避免 000000 消失/科學記號
+# ✅ 你指定要刪除的欄位
+DELETE_HEADERS = [
+    "移動的數量",
+    "目的儲位",
+    "可移動單位至",
+    "計量單位由",
+    "到包裝碼",
+    "已試算",
+    "已揀取",
+]
+
+# 這些欄位在 xls/xlsb → pandas 轉檔時，必須強制當文字（避免 000000 消失/科學記號）
 FORCE_TEXT_HEADERS = {"批號", "可移動單位", "國際條碼"}
 
 
@@ -254,16 +265,50 @@ def pad_unit_to_10(ws, unit_col: int, start_row: int = 2, width: int = 10):
 
         cell.value = s
         cell.number_format = "@"
-        # 不強制改樣式，只把對齊補成置中（避免亂）
+        # 不強制重畫整列樣式，只確保不會被 Excel 當數字
         if cell.alignment is None:
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        else:
-            cell.alignment = _copy.copy(cell.alignment)
+
+
+# =============================
+# ✅ 刪除指定欄位（輸出檔用）
+# =============================
+def delete_columns_by_headers(ws, headers_to_delete, header_row: int = 1):
+    """
+    依表頭名稱刪除欄位（找不到就略過）
+    - 支援 exact / contains（避免表頭有空白或附註）
+    """
+    if not headers_to_delete:
+        return
+
+    headers = []
+    for c in range(1, ws.max_column + 1):
+        v = ws.cell(row=header_row, column=c).value
+        headers.append("" if v is None else str(v).strip())
+
+    to_delete_cols = set()
+    for target in headers_to_delete:
+        t = str(target).strip()
+        if not t:
+            continue
+        for idx, h in enumerate(headers, start=1):
+            if not h:
+                continue
+            if h == t or (t in h):
+                to_delete_cols.add(idx)
+
+    for col_idx in sorted(to_delete_cols, reverse=True):
+        ws.delete_cols(col_idx, 1)
+
+    try:
+        if getattr(ws, "auto_filter", None) and ws.auto_filter.ref:
+            ws.auto_filter.ref = f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+    except Exception:
+        pass
 
 
 # =============================
 # 轉換：DataFrames -> openpyxl Workbook（xls/xlsb 用）
-# ✅ 增加：保留 000000 / 避免條碼變科學記號（先以字串讀入）
 # =============================
 def _dfs_to_workbook(sheets: Dict[str, pd.DataFrame]) -> Workbook:
     wb = Workbook()
@@ -277,7 +322,6 @@ def _dfs_to_workbook(sheets: Dict[str, pd.DataFrame]) -> Workbook:
         headers = [("" if c is None else str(c)) for c in df.columns.tolist()]
         ws.append(headers)
 
-        # 建一份 header -> col_idx
         header_map = {h.strip(): i + 1 for i, h in enumerate(headers) if isinstance(h, str)}
 
         for row in df.itertuples(index=False, name=None):
@@ -285,16 +329,15 @@ def _dfs_to_workbook(sheets: Dict[str, pd.DataFrame]) -> Workbook:
             for v in row:
                 if v is None:
                     out_row.append(None)
-                    continue
-                if isinstance(v, float) and pd.isna(v):
+                elif isinstance(v, float) and pd.isna(v):
                     out_row.append(None)
-                    continue
-                out_row.append(v)
+                else:
+                    out_row.append(v)
             ws.append(out_row)
 
         max_row = ws.max_row
 
-        # 套用：強制文字欄位（批號/可移動單位/國際條碼）
+        # 強制文字欄位（避免 000000 / 科學記號）
         for h in FORCE_TEXT_HEADERS:
             if h not in header_map:
                 continue
@@ -303,38 +346,19 @@ def _dfs_to_workbook(sheets: Dict[str, pd.DataFrame]) -> Workbook:
                 cell = ws.cell(row=r, column=cidx)
                 if cell.value is None:
                     continue
-                s = str(cell.value).strip()
-                cell.value = s
+                cell.value = str(cell.value).strip()
                 cell.number_format = "@"
                 cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-        # 效期：如果有「商品效期」，把顯示統一成 yyyy/mm/dd（避免 00:00:00）
-        if "商品效期" in header_map:
-            cidx = header_map["商品效期"]
-            for r in range(2, max_row + 1):
-                cell = ws.cell(row=r, column=cidx)
-                if cell.value is None:
-                    continue
-                try:
-                    dtv = pd.to_datetime(str(cell.value).strip(), errors="raise")
-                    cell.value = dtv.to_pydatetime()
-                    cell.number_format = "yyyy/mm/dd"
-                except Exception:
-                    cell.value = str(cell.value).strip()
-                    cell.number_format = "@"
-                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-        # 可移動單位：強制補滿 10 碼（輸出要求）
-        if "可移動單位" in header_map:
-            pad_unit_to_10(ws, header_map["可移動單位"], start_row=2, width=10)
+        # 可移動單位補滿 10 碼（輸出需求）
+        if UNIT_HEADER in header_map:
+            pad_unit_to_10(ws, header_map[UNIT_HEADER], start_row=2, width=10)
 
     return wb
 
 
 # =============================
-# 讀取：支援 xlsx/xlsm/xls/xlsb
-# ✅ 回傳 mode（native / converted）
-# ✅ xls/xlsb/xls 用 dtype=str 先讀入，避免 000000 直接被吃掉
+# 讀取：支援 xlsx/xlsm/xls/xlsb（回傳 mode）
 # =============================
 def _load_wb_from_upload(uploaded_file) -> Tuple[str, Workbook, str]:
     name = uploaded_file.name
@@ -357,10 +381,7 @@ def _load_wb_from_upload(uploaded_file) -> Tuple[str, Workbook, str]:
                 keep_default_na=False,
             )
         except Exception as e:
-            raise ValueError(
-                f"讀取 .xlsb 失敗：{e}\n"
-                "請確認 requirements.txt 有 pyxlsb"
-            )
+            raise ValueError(f"讀取 .xlsb 失敗：{e}\n請確認 requirements.txt 有 pyxlsb")
         wb = _dfs_to_workbook(sheets)
         return name, wb, "converted"
 
@@ -380,17 +401,11 @@ def _load_wb_from_upload(uploaded_file) -> Tuple[str, Workbook, str]:
                 "或先用 Excel 另存為 .xlsx 再上傳。"
             )
         except Exception as e:
-            raise ValueError(
-                f"讀取 .xls 失敗：{e}\n"
-                "建議先用 Excel 另存 .xlsx 再上傳。"
-            )
+            raise ValueError(f"讀取 .xls 失敗：{e}\n建議先用 Excel 另存 .xlsx 再上傳。")
         wb = _dfs_to_workbook(sheets)
         return name, wb, "converted"
 
-    raise ValueError(
-        f"不支援的檔案格式：.{ext}\n"
-        "支援：.xlsx / .xlsm / .xls / .xlsb"
-    )
+    raise ValueError(f"不支援的檔案格式：.{ext}\n支援：.xlsx / .xlsm / .xls / .xlsb")
 
 
 # =============================
@@ -423,8 +438,6 @@ def _delete_non_matched_rows(ws, keep_rows, header_rows: int = 1):
 
 # =============================
 # 主流程（回傳輸出 bytes）
-# ✅ 輸出：可移動單位補滿 10 碼（不足補0）
-# ✅ 符合分頁：複製整張 QC → 刪除不符合列（版面最大程度跟 QC 一樣）
 # =============================
 def process_wb(
     qc_wb,
@@ -454,7 +467,7 @@ def process_wb(
     if un_date_col is None:
         raise ValueError(f"未上架明細找不到欄位：{UN_DATE_HEADER}")
 
-    # 1) 推估商品碼長（僅用於比對，不回寫）
+    # 1) 推估商品碼長（比對用）
     code_len = 0
     for r in range(2, un_ws.max_row + 1):
         cell = un_ws.cell(row=r, column=un_key_col)
@@ -466,7 +479,7 @@ def process_wb(
             code_len = max(code_len, zero_run_width(getattr(cell, "number_format", "") or ""))
     fallback_width = code_len or 6
 
-    # 2) 推估可移動單位碼長（僅用於比對，不回寫）
+    # 2) 推估可移動單位碼長（比對用）
     unit_width = _infer_digit_width(un_ws, un_unit_col)
 
     # 3) 建索引：(商品碼, 可移動單位) -> 進貨日(可多筆合併)
@@ -489,7 +502,7 @@ def process_wb(
 
     date_map: Dict[Tuple[str, str], str] = {k: "、".join(sorted(v)) for k, v in date_sets.items()}
 
-    # 4) 新增/定位「進貨日」（只新增這一欄）
+    # 4) 新增/定位「進貨日」
     qc_date_col = find_header_col(qc_ws, "進貨日", 1)
     if qc_date_col is None:
         qc_date_col = qc_ws.max_column + 1
@@ -523,10 +536,13 @@ def process_wb(
         if d_str:
             match_rows.append(r)
 
-    # ✅ 5.5) 輸出檔：可移動單位補滿 10 碼（不足補0）
+    # ✅ 5.5) 輸出檔：可移動單位補滿 10 碼
     pad_unit_to_10(qc_ws, qc_unit_col, start_row=2, width=10)
 
-    # 6) 產生符合工作表：整張 QC 複製後刪除不符合列
+    # ✅ 5.6) 刪除你指定的欄位（輸出檔）
+    delete_columns_by_headers(qc_ws, DELETE_HEADERS, header_row=1)
+
+    # 6) 產生符合分頁：複製 QC → 刪除不符合列
     if MATCH_SHEET_NAME in qc_wb.sheetnames:
         del qc_wb[MATCH_SHEET_NAME]
 
@@ -550,11 +566,11 @@ _page_css()
 set_page(
     "QC 未上架比對",
     icon="🧾",
-    subtitle="比對條件：QC「商品+可移動單位」= 未上架明細「商品碼+可移動單位」；輸出時「可移動單位」一律補滿10碼。",
+    subtitle="比對：QC「商品+可移動單位」= 未上架「商品碼+可移動單位」；輸出可移動單位補10碼；並刪除指定欄位。",
 )
 
 st.markdown(
-    '<div class="qc-chips">雙條件比對<span class="sep">｜</span>只新增進貨日/符合分頁<span class="sep">｜</span>可移動單位補滿10碼</div>',
+    '<div class="qc-chips">雙條件比對<span class="sep">｜</span>可移動單位補10碼<span class="sep">｜</span>刪除指定欄位<span class="sep">｜</span>只新增進貨日/符合分頁</div>',
     unsafe_allow_html=True,
 )
 
@@ -615,23 +631,8 @@ if ready:
 if run:
     try:
         with st.spinner("處理中…"):
-            _, qc_wb, qc_mode = _load_wb_from_upload(qc_file)
+            _, qc_wb, _ = _load_wb_from_upload(qc_file)
             _, un_wb, _ = _load_wb_from_upload(un_file)
-
-            # ✅ 若 QC 是 converted（xls/xlsb/xls），先把關鍵欄位固定成文字（避免 000000/科學記號）
-            if qc_mode == "converted":
-                qc_ws_fix = get_ws(qc_wb, qc_sheet_name)
-                for h in FORCE_TEXT_HEADERS:
-                    cidx = find_header_col(qc_ws_fix, h, 1)
-                    if cidx is None:
-                        continue
-                    for rr in range(2, qc_ws_fix.max_row + 1):
-                        cell = qc_ws_fix.cell(row=rr, column=cidx)
-                        if cell.value is None:
-                            continue
-                        cell.value = str(cell.value).strip()
-                        cell.number_format = "@"
-                        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
             matched, xlsx_bytes = process_wb(
                 qc_wb=qc_wb,
