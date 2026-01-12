@@ -149,20 +149,9 @@ home_page = page_if_exists("pages/0_首頁.py", "首頁", "🏠", default=True, 
 # 出貨課
 outbound_home = page_if_exists("pages/7_出貨課首頁.py", "出貨課首頁", "📦", url_path="outbound-home")
 transfer_diff_page = page_if_exists("pages/6_撥貨差異.py", "撥貨差異", "📦", url_path="outbound-transfer-diff")
-outbound_vendor_store_diff = page_if_exists(
-    "pages/23_採品門市差異量.py",
-    "採品門市差異量",
-    "📄",
-    url_path="outbound-vendor-store-diff-23",
-)
-
-# ✅ 24_出貨作業線產能（放在「出貨課」底下）
-outbound_line_productivity = page_if_exists(
-    "pages/24_出貨作業線產能.py",
-    "出貨作業線產能",
-    "📦",
-    url_path="outbound-line-productivity-24",
-)
+outbound_vendor_store_diff = page_if_exists("pages/23_採品門市差異量.py","採品門市差異量","📄",url_path="outbound-vendor-store-diff-23")
+outbound_line_productivity = page_if_exists("pages/24_出貨作業線產能.py","出貨作業線產能","📦", url_path="outbound-line-productivity-24")
+outbound_hourly_efficiency = page_if_exists( "pages/29_各時段作業效率.py",  "各時段作業效率", "⏱️",url_path="outbound-hourly-efficiency-29")
 
 # 進貨課
 inbound_home = page_if_exists("pages/8_進貨課首頁.py", "進貨課首頁", "🚚", url_path="inbound-home")
@@ -226,7 +215,8 @@ pg = st.navigation(
                 outbound_home,
                 transfer_diff_page,
                 outbound_vendor_store_diff,
-                outbound_line_productivity,   # ✅ 24 放在出貨課下
+                outbound_line_productivity, 
+                outbound_hourly_efficiency,
             ] if p
         ],
         "進貨課": [p for p in [inbound_home, qc_page, putaway_page, pick_page, diff_page,qc_unputaway_compare] if p],
@@ -241,6 +231,7 @@ pg = st.navigation(
 )
 
 pg.run()
+
 
 
 
