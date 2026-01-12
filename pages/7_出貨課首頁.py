@@ -11,6 +11,7 @@ ALLOW_PAGES = {
     "pages/6_撥貨差異.py",
     "pages/23_採品門市差異量.py",
     "pages/24_出貨作業線產能.py",
+    "pages/29_各時段作業效率.py",
 }
 
 
@@ -159,6 +160,13 @@ def main():
         "出貨作業線產能", 
         "pages/24_出貨作業線產能.py",
         "每日各作業線產力狀況，輸出每日達標檔",
+    )
+
+    _nav_item(
+        "⏱️",
+        "各時段作業效率",
+        "pages/29_各時段作業效率.py",
+        "依 LINEID/ZONEID(1~4) 計算去重後加權PCS，逐時段 PASS/FAIL 著色並可下載 Excel",
     )
     
     st.markdown("</div>", unsafe_allow_html=True)
