@@ -3,7 +3,8 @@
 import io
 import os
 from io import StringIO
-from datetime import datetime
+from datetime import datetime, date, time as dtime
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -13,10 +14,12 @@ from openpyxl.styles import PatternFill
 
 # ---- 套用平台風格（有就用，沒有就退回原生）----
 try:
-    from common_ui import inject_logistics_theme, set_page, card_open, card_close
+    from common_ui import inject_logistics_theme, set_page
     HAS_COMMON_UI = True
 except Exception:
     HAS_COMMON_UI = False
+
+TPE = ZoneInfo("Asia/Taipei")
 
 
 # =============================
@@ -91,10 +94,6 @@ def _safe_time(s: str) -> str:
 
 
 def build_excel_bytes(matrix: pd.DataFrame, hour_cols: list[int]) -> bytes:
-    """
-    matrix 內的小時欄位目前是字串 "數值|PASS/FAIL" 或 None
-    這裡輸出 Excel：把數值寫成 float、固定 4 位小數、PASS/FAIL 上色
-    """
     bio = io.BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         matrix.to_excel(writer, index=False, sheet_name="各時段作業效率")
@@ -114,18 +113,12 @@ def build_excel_bytes(matrix: pd.DataFrame, hour_cols: list[int]) -> bytes:
         for c in r:
             if c.value and "|" in str(c.value):
                 val, stat = str(c.value).split("|", 1)
-
-                # 寫入數值：四捨五入到小數點 4 位
                 try:
                     c.value = round(float(val), 4)
                 except Exception:
                     c.value = None
                     continue
-
-                # 顯示格式：固定 4 位小數
                 c.number_format = "0.0000"
-
-                # 著色
                 c.fill = fill_ok if stat == "PASS" else fill_ng
 
     out = io.BytesIO()
@@ -156,12 +149,16 @@ def main():
         st.markdown("### 設定")
         target_hr = st.number_input("每小時目標（加權PCS/小時）", min_value=1.0, value=790.0, step=10.0)
         hour_min = st.number_input("起始小時", min_value=0, max_value=23, value=8, step=1)
-        use_now = st.toggle("用現在時間作為判斷截止", value=True)
+
+        use_now = st.toggle("用現在時間作為判斷截止（台北時間）", value=True)
+
         if use_now:
-            now = datetime.now()
+            now = datetime.now(TPE)  # ✅ 重要：用台北時間
         else:
-            dt_in = st.time_input("判斷截止時間", value=datetime.now().time())
-            now = datetime.combine(datetime.today(), dt_in)
+            t_in = st.time_input("判斷截止時間（台北時間）", value=datetime.now(TPE).time())
+            now = datetime.combine(date.today(), t_in).replace(tzinfo=TPE)
+
+        st.caption(f"目前採用時間：{now.strftime('%Y-%m-%d %H:%M:%S')} (Asia/Taipei)")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -213,8 +210,6 @@ def main():
         df_members["線別"] = clean_line(df_members["線別"])
         df_members["段數"] = clean_zone_1to4(df_members["段數"])
         df_members = df_members[df_members["段數"].notna()].copy()
-
-        # ✅ 名單鍵值唯一：同線別+段數只取第一筆，避免 merge 展開
         df_members = df_members.drop_duplicates(["線別", "段數"], keep="first").copy()
 
         # =========================================================
@@ -238,22 +233,20 @@ def main():
         df_raw["Cweight"] = pd.to_numeric(df_raw["Cweight"], errors="coerce").fillna(0)
         df_raw["加權PCS"] = df_raw["PACKQTY"] * df_raw["Cweight"]
 
-        # ✅ 生產資料唯一指紋：用全部欄位 hash（避免翻倍）
         rid_cols = [c for c in df_raw.columns if c not in ("姓名", "開始時間", "小時", "__rid")]
         df_raw["__rid"] = pd.util.hash_pandas_object(df_raw[rid_cols], index=False)
 
         # =========================================================
-        # 3) 合併（m:1）+ 先去重（結果一定用去重後加權PCS）
+        # 3) 合併（m:1）+ 去重
         # =========================================================
         df = pd.merge(df_raw, df_members, on=["線別", "段數"], how="left", validate="m:1")
         df["姓名"] = df["姓名"].fillna("未設定")
         df["開始時間"] = df["開始時間"].fillna("08:00").map(_safe_time)
 
-        # ✅ 去重（核心）
         df = df.drop_duplicates("__rid", keep="first").copy()
 
         # =========================================================
-        # 4) 開始時間過濾（在去重後） - 向量化
+        # 4) 開始時間過濾（在去重後）
         # =========================================================
         pick_minutes = df["PICKDATE"].dt.hour * 60 + df["PICKDATE"].dt.minute
         st_parts = df["開始時間"].astype(str).str.split(":", n=1, expand=True)
@@ -275,7 +268,7 @@ def main():
         hourly = hourly.sort_values(base_cols + ["小時"])
         hourly["累計實際量"] = hourly.groupby(["線別", "段數", "姓名"])["加權PCS"].cumsum()
 
-        cur_h, cur_m = now.hour, now.minute
+        cur_h, cur_m = now.hour, now.minute  # ✅ 台北時間
 
         st_parts2 = hourly["開始時間"].astype(str).str.split(":", n=1, expand=True)
         s_h = pd.to_numeric(st_parts2[0], errors="coerce").fillna(8).astype(float)
@@ -297,49 +290,48 @@ def main():
         status = np.where(np.isnan(elapsed), None, np.where(hourly["累計實際量"].values >= target, "PASS", "FAIL"))
         hourly["狀態"] = status
 
-        # 顯示用：當小時量（四捨五入到小數點 4 位）+ 狀態
         val4 = hourly["加權PCS"].round(4)
         hourly["顯示"] = np.where(
-            hourly["狀態"].isna(),
+            pd.isna(hourly["狀態"]),
             None,
             val4.map(lambda x: f"{x:.4f}") + "|" + hourly["狀態"].astype(str)
         )
 
         # =========================================================
-        # 6) 轉矩陣（補齊小時）
+        # 6) 轉矩陣（保證不會 pivot 成空表）
         # =========================================================
         hour_max = cur_h
         hour_cols = list(range(int(hour_min), int(hour_max) + 1))
 
-        matrix = hourly.pivot_table(
-            index=base_cols,
-            columns="小時",
-            values="顯示",
-            aggfunc="first"
-        ).reset_index()
+        # ✅ keys：一定保留有哪些人（用 hourly 的 index 組合）
+        keys = hourly[base_cols].drop_duplicates().copy()
+        if keys.empty:
+            raise ValueError("hourly 統計後沒有任何人員列（請檢查 PICKDATE 是否有時間、或開始時間過濾是否太嚴格）。")
 
-        # 欄位轉成 int（小時欄）
+        grid = keys.assign(_k=1).merge(pd.DataFrame({"小時": hour_cols, "_k": 1}), on="_k").drop(columns=["_k"])
+        grid = grid.merge(hourly[base_cols + ["小時", "顯示"]], on=base_cols + ["小時"], how="left")
+
+        matrix = (
+            grid.pivot(index=base_cols, columns="小時", values="顯示")
+            .reset_index()
+        )
+
         matrix.columns = [int(c) if str(c).isdigit() else c for c in matrix.columns]
-
         for hh in hour_cols:
             if hh not in matrix.columns:
                 matrix[hh] = None
-
         matrix = matrix[base_cols + hour_cols]
 
         # =========================================================
-        # 7) 畫面預覽
+        # 7) 畫面預覽 + 下載
         # =========================================================
         st.success("計算完成 ✅（結果已使用：去重後加權PCS）")
-
         st.caption("表格顯示為：當小時加權PCS（判斷PASS/FAIL使用累計）")
+
         st.dataframe(matrix, use_container_width=True, height=520)
 
-        # =========================================================
-        # 8) 下載 Excel（PASS/FAIL 上色 + 固定 4 位小數）
-        # =========================================================
         xlsx_bytes = build_excel_bytes(matrix, hour_cols)
-        filename = f"產能時段分析_{datetime.now().strftime('%H%M')}.xlsx"
+        filename = f"產能時段分析_{datetime.now(TPE).strftime('%H%M')}.xlsx"
         st.download_button(
             "⬇️ 下載 Excel（PASS/FAIL 上色）",
             data=xlsx_bytes,
