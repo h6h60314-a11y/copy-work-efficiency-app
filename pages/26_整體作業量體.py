@@ -22,6 +22,37 @@ from common_ui import (
 st.set_page_config(page_title="大豐KPI｜整體作業量體", page_icon="🧹", layout="wide")
 inject_logistics_theme()
 
+# ✅ 強制把 Streamlit 的 download/button 顯示回來（避免 theme 把按鈕藏掉）
+st.markdown(
+    r"""
+<style>
+/* download button 容器 */
+div[data-testid="stDownloadButton"]{
+  display:block !important;
+  visibility:visible !important;
+  opacity:1 !important;
+  position:relative !important;
+  z-index:99999 !important;
+}
+/* download button 本體 */
+div[data-testid="stDownloadButton"] button{
+  display:inline-flex !important;
+  visibility:visible !important;
+  opacity:1 !important;
+  width:100% !important;
+}
+
+/* 保險：如果 theme 把全站 button 隱藏，這裡救回來（僅確保能看見/可點） */
+section[data-testid="stAppViewContainer"] button{
+  display:inline-flex !important;
+  visibility:visible !important;
+  opacity:1 !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 set_page(
     "整體作業量體",
     icon="🧹",
@@ -94,7 +125,7 @@ def _has_utf16_nulls(raw: bytes) -> bool:
 
 
 def _score_text(text: str) -> int:
-    repl = text.count("\ufffd")
+    repl = text.count("\ufffd")  # replacement char
     ctrl = sum(1 for ch in text if ord(ch) < 32 and ch not in ("\n", "\r", "\t"))
     cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
     lines = [ln for ln in text.splitlines() if ln.strip()]
@@ -156,6 +187,9 @@ def _detect_sep(text: str) -> str | None:
 
 
 def _read_txt_as_df(text: str, mode: str) -> pd.DataFrame:
+    """
+    mode: auto / sep:\t / sep:, / sep:| / sep:; / ws / fwf
+    """
     if mode.startswith("sep:"):
         sep = mode.split(":", 1)[1]
         return pd.read_csv(StringIO(text), sep=sep, dtype=str, engine="python")
@@ -166,10 +200,12 @@ def _read_txt_as_df(text: str, mode: str) -> pd.DataFrame:
     if mode == "fwf":
         return pd.read_fwf(StringIO(text), dtype=str)
 
+    # auto
     sep = _detect_sep(text)
     if sep is not None:
         return pd.read_csv(StringIO(text), sep=sep, dtype=str, engine="python")
 
+    # fallback：多空白 -> 固定寬度
     try:
         df_ws = pd.read_csv(StringIO(text), sep=r"\s+", dtype=str, engine="python")
         if df_ws.shape[1] >= 2:
@@ -247,9 +283,26 @@ def _guess_box_type_col(df: pd.DataFrame) -> str | None:
     best_score = -1
 
     skip = {
-        "Facility", "Storerkey", "orderdate", "storeid", "storename", "shippeddate",
-        "deliverydate", "deliverytime", "boxid", "externorderkey", "SKU", "manufacturersku",
-        "descr", "susr2", "outqty", "packqty", "memo", "price", "buyersreference", "BOXTYPE"
+        "Facility",
+        "Storerkey",
+        "orderdate",
+        "storeid",
+        "storename",
+        "shippeddate",
+        "deliverydate",
+        "deliverytime",
+        "boxid",
+        "externorderkey",
+        "SKU",
+        "manufacturersku",
+        "descr",
+        "susr2",
+        "outqty",
+        "packqty",
+        "memo",
+        "price",
+        "buyersreference",
+        "BOXTYPE",
     }
 
     for c in sample.columns:
@@ -311,9 +364,11 @@ def compute(df_raw: pd.DataFrame) -> dict:
 
     before = len(df_raw)
 
+    # 1) 刪除「箱類型」含「站所」
     df = df_raw[~_safe_str(df_raw["箱類型"]).str.contains("站所", na=False)].copy()
     removed_station = before - len(df)
 
+    # 2) 新增欄位
     pack = pd.to_numeric(df["packqty"], errors="coerce")
     unit = pd.to_numeric(df["入數"], errors="coerce")
 
@@ -323,6 +378,7 @@ def compute(df_raw: pd.DataFrame) -> dict:
     is_int = np.isfinite(v) & np.isclose(v, np.round(v))
     df["出貨單位（判斷後）"] = np.where(is_int, v, pack)
 
+    # 欄位插入位置：入數右邊
     cols = list(df.columns)
     for c in ["計量單位數量", "出貨單位（判斷後）"]:
         if c in cols:
@@ -331,15 +387,16 @@ def compute(df_raw: pd.DataFrame) -> dict:
     cols[ins_pos:ins_pos] = ["計量單位數量", "出貨單位（判斷後）"]
     df = df[cols]
 
+    # 3) 統計遮罩
     mask_gm = _safe_str(df["載具號"]).str.contains("GM", case=False, na=False)
     boxtype = _safe_str(df["BOXTYPE"]).str.strip()
     mask_box1 = boxtype == "1"
     mask_box0 = boxtype == "0"
     mask_not_gm = ~mask_gm
 
+    # 4) 四項統計
     unique_boxid_count = (
-        df.loc[mask_gm & mask_box1, "boxid"]
-        .astype(str).str.strip().replace("", np.nan).dropna().nunique()
+        df.loc[mask_gm & mask_box1, "boxid"].astype(str).str.strip().replace("", np.nan).dropna().nunique()
     )
 
     ship_unit = pd.to_numeric(df["出貨單位（判斷後）"], errors="coerce")
@@ -368,34 +425,20 @@ def make_excel_bytes(summary_all: pd.DataFrame, detail_all: pd.DataFrame) -> byt
     return bio.read()
 
 
-def download_excel_stable(label: str, xlsx_bytes: bytes, filename_ascii: str):
-    """
-    ✅ 只用 st.download_button（最穩）
-    ✅ 檔名改 ASCII，避免某些環境中文檔名下載失敗/0 bytes
-    ✅ 固定 key，避免 rerun 後按鈕失效
-    """
-    file_obj = BytesIO(xlsx_bytes)
-    file_obj.seek(0)
-
-    md5 = hashlib.md5(xlsx_bytes).hexdigest()[:10]
-    key = f"dl_{md5}_{len(xlsx_bytes)}"
-
-    st.download_button(
-        label=label,
-        data=file_obj,
-        file_name=filename_ascii,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-        key=key,
-    )
-
-    # 小提示：方便你排查（不影響下載）
-    st.caption(f"檔案大小：{len(xlsx_bytes):,} bytes｜hash：{md5}")
-
-
 # =====================================
 # ✅ UI
 # =====================================
+# ✅ 額外提供測試按鈕（若這顆看不到 = theme 還在藏按鈕）
+with st.expander("🧪 下載按鈕測試（若看不到按鈕＝theme 把按鈕藏了）", expanded=False):
+    st.download_button(
+        "✅ 測試下載 hello.txt",
+        data="hello",
+        file_name="hello.txt",
+        mime="text/plain",
+        key="dl_test_hello",
+        use_container_width=True,
+    )
+
 card_open("📥 上傳明細（Excel / TXT，可多檔）")
 colA, colB = st.columns(2)
 
@@ -425,6 +468,7 @@ if not uploaded_files:
     st.info("請先上傳檔案（可多選）。")
     st.stop()
 
+# 用第一個檔案做欄位預覽與猜測（給下拉用）
 try:
     df_preview, used_enc_preview = robust_read_file(uploaded_files[0], txt_parse_choice, txt_encoding_choice)
     df_preview = _normalize_columns(df_preview)
@@ -501,6 +545,7 @@ if not results:
 summary_all = pd.DataFrame(results)
 detail_all = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
 
+# KPI（合計）
 total_files_ok = len(summary_all)
 total_in = int(summary_all["讀取列數"].sum())
 total_removed = int(summary_all["刪除站所列數"].sum())
@@ -535,17 +580,9 @@ for c in ["A) GM件數", "B) 一般倉零散PCS", "C) GM成箱PCS", "D) 一般�
 st.dataframe(show_df, use_container_width=True, hide_index=True)
 card_close()
 
-st.markdown(
-    """
-<style>
-/* 確保 download button 不會被自訂卡片/overlay 蓋掉 */
-div[data-testid="stDownloadButton"]{ display:block !important; position:relative !important; z-index:9999 !important; }
-div[data-testid="stDownloadButton"] button{ width:100% !important; }
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
+# =====================================
+# ✅ 匯出（不要包在 card_open/card_close 內，避免 theme/卡片把按鈕吃掉）
+# =====================================
 st.subheader("📤 匯出（統計總表 + 合併明細）")
 
 stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -553,18 +590,18 @@ filename_ascii = f"DaFengKPI_OverallVolume_MultiFiles_{stamp}.xlsx"
 
 xlsx_bytes = make_excel_bytes(summary_all, detail_all)
 
-# 🔎 先把 bytes 大小顯示出來，確認真的有生成（非 0）
-st.caption(f"Excel bytes：{len(xlsx_bytes):,} bytes")
+# 顯示 bytes，方便你判斷是否有產出
+md5 = hashlib.md5(xlsx_bytes).hexdigest()[:10]
+st.caption(f"Excel bytes：{len(xlsx_bytes):,}｜hash：{md5}")
 
 st.download_button(
     label="✅ 下載 Excel（含：統計總表 + 合併明細）",
-    data=xlsx_bytes,  # ✅ 用 raw bytes（最穩）
+    data=xlsx_bytes,  # ✅ raw bytes 最穩
     file_name=filename_ascii,
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=True,
-    key=f"dl_{stamp}",
+    key=f"dl_excel_{stamp}",
 )
 
 with st.expander("🔎 合併明細預覽（前 200 筆）", expanded=False):
     st.dataframe(detail_all.head(200), use_container_width=True)
-    
