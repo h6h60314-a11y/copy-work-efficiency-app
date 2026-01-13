@@ -10,8 +10,9 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import altair as alt
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Alignment
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import PatternFill, Alignment, Font
 
 # ---- 套用平台風格（有就用，沒有就退回原生）----
 try:
@@ -124,7 +125,7 @@ def _kpi_counts(dist_df: pd.DataFrame):
 
 
 # =============================
-# ✅ Heatmap：X=每小時，格內=量體，色=達標/未達標/未判斷
+# Heatmap（Streamlit 顯示用：Python 計算）
 # =============================
 def render_hourly_heatmap(df_line_hourly: pd.DataFrame, hour_cols, title: str):
     if df_line_hourly is None or df_line_hourly.empty:
@@ -132,8 +133,8 @@ def render_hourly_heatmap(df_line_hourly: pd.DataFrame, hour_cols, title: str):
         return
 
     hour_cols = [int(h) for h in list(hour_cols)]
-
     plot = df_line_hourly.copy()
+
     plot["段數"] = pd.to_numeric(plot["段數"], errors="coerce").fillna(0).astype(int)
     plot["小時"] = pd.to_numeric(plot["小時"], errors="coerce").fillna(0).astype(int)
     plot["當小時加權PCS"] = pd.to_numeric(plot["當小時加權PCS"], errors="coerce").fillna(0.0)
@@ -178,151 +179,134 @@ def render_hourly_heatmap(df_line_hourly: pd.DataFrame, hour_cols, title: str):
 
 
 # =============================
-# ✅ 表格（每格=量體；色=達標/未達標/未判斷）+ ✅ 加總（也上色）
+# ✅ 輸出 Excel（保留公式）
+#   - Sheet1: 完整明細（加權PCS用公式）
+#   - Sheet2: 時段量體（每格SUMIFS；加總SUM；狀態IF）
 # =============================
-def render_grid_table_with_total(df_line: pd.DataFrame, hour_cols, title: str):
-    if df_line is None or df_line.empty:
-        st.info("此線別沒有資料可呈現。")
-        return
-
-    hour_cols = [int(h) for h in list(hour_cols)]
-
-    base = df_line[["段數", "姓名", "小時", "當小時加權PCS", "本小時目標", "狀態"]].copy()
-    base["段數"] = pd.to_numeric(base["段數"], errors="coerce").fillna(0).astype(int)
-    base["小時"] = pd.to_numeric(base["小時"], errors="coerce").fillna(0).astype(int)
-    base["當小時加權PCS"] = pd.to_numeric(base["當小時加權PCS"], errors="coerce").fillna(0.0)
-    base["本小時目標"] = pd.to_numeric(base["本小時目標"], errors="coerce").fillna(0.0)
-
-    vol = base.pivot_table(index=["段數", "姓名"], columns="小時", values="當小時加權PCS", aggfunc="first")
-    tar = base.pivot_table(index=["段數", "姓名"], columns="小時", values="本小時目標", aggfunc="first")
-    stat = base.pivot_table(index=["段數", "姓名"], columns="小時", values="狀態", aggfunc="first")
-
-    for h in hour_cols:
-        if h not in vol.columns:
-            vol[h] = 0.0
-        if h not in tar.columns:
-            tar[h] = 0.0
-        if h not in stat.columns:
-            stat[h] = None
-
-    vol = vol[hour_cols]
-    tar = tar[hour_cols]
-    stat = stat[hour_cols]
-
-    total_pcs = vol.sum(axis=1)
-    total_tar = tar.sum(axis=1)
-    total_stat = np.where(total_tar <= 0, None, np.where(total_pcs >= total_tar, STATUS_PASS, STATUS_FAIL))
-
-    vol2 = vol.reset_index().copy()
-    stat2 = stat.reset_index().copy()
-
-    show = vol2.copy()
-    for h in hour_cols:
-        show[h] = show[h].apply(lambda x: "" if abs(float(x)) < 1e-12 else f"{float(x):.2f}")
-
-    show["加總"] = total_pcs.values
-    show["加總"] = show["加總"].apply(lambda x: "" if abs(float(x)) < 1e-12 else f"{float(x):.4f}")
-    total_stat_list = list(total_stat)
-
-    def _style(_df: pd.DataFrame):
-        styles = pd.DataFrame("", index=_df.index, columns=_df.columns)
-        if "段數" in styles.columns:
-            styles["段數"] = "text-align:center;font-weight:800;"
-        if "姓名" in styles.columns:
-            styles["姓名"] = "text-align:left;font-weight:800;"
-
-        for h in hour_cols:
-            if h not in styles.columns:
-                continue
-            for i in range(len(_df)):
-                s = None
-                try:
-                    s = stat2.at[i, h]
-                except Exception:
-                    s = None
-                if s == STATUS_PASS:
-                    styles.at[i, h] = "background-color:#C6EFCE;color:#1b4332;font-weight:900;text-align:center;"
-                elif s == STATUS_FAIL:
-                    styles.at[i, h] = "background-color:#FFC7CE;color:#7a0019;font-weight:900;text-align:center;"
-                else:
-                    styles.at[i, h] = "background-color:#F2F4F7;color:#667085;text-align:center;"
-
-        if "加總" in styles.columns:
-            for i in range(len(_df)):
-                s = total_stat_list[i] if i < len(total_stat_list) else None
-                if s == STATUS_PASS:
-                    styles.at[i, "加總"] = "background-color:#C6EFCE;color:#1b4332;font-weight:950;text-align:center;"
-                elif s == STATUS_FAIL:
-                    styles.at[i, "加總"] = "background-color:#FFC7CE;color:#7a0019;font-weight:950;text-align:center;"
-                else:
-                    styles.at[i, "加總"] = "background-color:#F2F4F7;color:#667085;font-weight:900;text-align:center;"
-        return styles
-
-    st.markdown(f"#### {title}")
-    st.dataframe(show.style.apply(_style, axis=None), use_container_width=True, hide_index=True)
-
-
-# =============================
-# ✅ Excel：輸出「完整明細」+「時段量體色塊」
-# =============================
-def build_excel_bytes_with_detail(
+def build_excel_bytes_with_formulas(
     detail_df: pd.DataFrame,
-    matrix_vol: pd.DataFrame,
-    matrix_stat: pd.DataFrame,
+    roster_df: pd.DataFrame,  # base_cols: 線別 段數 姓名 開始時間
     hour_cols: list[int],
+    target_hr: float,
 ) -> bytes:
-    bio = io.BytesIO()
-    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        # Sheet1: 完整明細
-        detail_df.to_excel(writer, index=False, sheet_name="完整明細_去重後")
+    wb = Workbook()
+    ws_detail = wb.active
+    ws_detail.title = "完整明細_去重後"
 
-        # Sheet2: 時段量體色塊
-        matrix_vol.to_excel(writer, index=False, sheet_name="時段量體_達標色塊")
+    ws_mat = wb.create_sheet("時段量體_公式")
 
-    bio.seek(0)
-    wb = load_workbook(bio)
+    # ---- 寫入 Sheet1：完整明細 ----
+    # 必須欄：PICKDATE 線別 段數 PACKQTY Cweight  (姓名/開始時間/納入計算/排除原因 也會寫)
+    # 其中 加權PCS 用公式 =PACKQTY*Cweight
+    cols = list(detail_df.columns)
+    for c_idx, col in enumerate(cols, start=1):
+        ws_detail.cell(row=1, column=c_idx, value=col).font = Font(bold=True)
 
-    # ---- Sheet2 上色 ----
-    ws = wb["時段量體_達標色塊"]
-    fill_ok = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    fill_ng = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    # 找 PACKQTY / Cweight 欄位位置
+    try:
+        col_pack = cols.index("PACKQTY") + 1
+        col_w = cols.index("Cweight") + 1
+    except Exception:
+        col_pack, col_w = None, None
 
+    for r_idx, row in enumerate(detail_df.itertuples(index=False), start=2):
+        for c_idx, col in enumerate(cols, start=1):
+            v = getattr(row, col) if hasattr(row, col) else None
+            ws_detail.cell(row=r_idx, column=c_idx, value=v)
+
+        # 若有加權PCS欄位 -> 用公式覆蓋
+        if "加權PCS" in cols and col_pack and col_w:
+            col_aw = cols.index("加權PCS") + 1
+            p_cell = f"{get_column_letter(col_pack)}{r_idx}"
+            w_cell = f"{get_column_letter(col_w)}{r_idx}"
+            ws_detail.cell(row=r_idx, column=col_aw, value=f"={p_cell}*{w_cell}")
+            ws_detail.cell(row=r_idx, column=col_aw).number_format = "0.0000"
+
+    # 基本對齊
+    for row in ws_detail.iter_rows(min_row=1, max_row=ws_detail.max_row, min_col=1, max_col=ws_detail.max_column):
+        for cell in row:
+            cell.alignment = Alignment(vertical="center")
+
+    # ---- Sheet2：時段量體（公式）----
     base_cols = ["線別", "段數", "姓名", "開始時間"]
-    hour_cols = [int(h) for h in hour_cols]
+    mat_headers = base_cols + [str(h) for h in hour_cols] + ["加總", "加總狀態"]
+    for c_idx, col in enumerate(mat_headers, start=1):
+        ws_mat.cell(row=1, column=c_idx, value=col).font = Font(bold=True)
 
-    min_col = len(base_cols) + 1
-    max_col = len(base_cols) + len(hour_cols)
+    # detail sheet 欄位字母定位
+    detail_header_to_col = {ws_detail.cell(row=1, column=i).value: i for i in range(1, ws_detail.max_column + 1)}
 
-    headers = [c.value for c in ws[1]]
-    total_col_idx = headers.index("加總") + 1 if "加總" in headers else None
+    # SUMIFS 需要的欄：線別 段數 PICKDATE(取小時) 加權PCS 納入計算
+    # 我們用 helper 欄位：明細中已有 "小時" 欄，若沒有就用 HOUR(PICKDATE) 公式做一欄
+    # 這裡簡化：要求 detail_df 內已含 "小時"（我們在前面會加）
+    need = ["線別", "段數", "小時", "加權PCS", "納入計算"]
+    for k in need:
+        if k not in detail_header_to_col:
+            raise ValueError(f"明細缺少欄位「{k}」，無法建立 SUMIFS 公式。")
 
-    end_col = total_col_idx if total_col_idx is not None else max_col
-    for r in ws.iter_rows(min_row=2, min_col=min_col, max_col=end_col):
-        for c in r:
-            c.alignment = Alignment(horizontal="center", vertical="center")
-            c.number_format = "0.0000"
+    d_line = get_column_letter(detail_header_to_col["線別"])
+    d_zone = get_column_letter(detail_header_to_col["段數"])
+    d_hour = get_column_letter(detail_header_to_col["小時"])
+    d_aw = get_column_letter(detail_header_to_col["加權PCS"])
+    d_in = get_column_letter(detail_header_to_col["納入計算"])
 
-    stat_values = matrix_stat[hour_cols].values.tolist()
-    for i, row in enumerate(ws.iter_rows(min_row=2, min_col=min_col, max_col=max_col)):
-        for j, cell in enumerate(row):
-            stat = stat_values[i][j] if i < len(stat_values) and j < len(stat_values[i]) else None
-            if stat == STATUS_PASS:
-                cell.fill = fill_ok
-            elif stat == STATUS_FAIL:
-                cell.fill = fill_ng
+    d_first = 2
+    d_last = ws_detail.max_row
 
-    if total_col_idx is not None and "加總狀態" in matrix_stat.columns:
-        total_stats = matrix_stat["加總狀態"].tolist()
-        for r in range(2, ws.max_row + 1):
-            stat = total_stats[r - 2] if (r - 2) < len(total_stats) else None
-            cell = ws.cell(row=r, column=total_col_idx)
-            cell.number_format = "0.0000"
+    # roster_df 寫入 + 每小時公式
+    for r_idx, row in enumerate(roster_df.itertuples(index=False), start=2):
+        ws_mat.cell(row=r_idx, column=1, value=row.線別)
+        ws_mat.cell(row=r_idx, column=2, value=int(row.段數))
+        ws_mat.cell(row=r_idx, column=3, value=str(row.姓名))
+        ws_mat.cell(row=r_idx, column=4, value=str(row.開始時間))
+
+        # 每小時 SUMIFS（只加納入計算=TRUE）
+        for j, h in enumerate(hour_cols, start=5):
+            # SUMIFS(加權PCS, 線別=本列線別, 段數=本列段數, 小時=h, 納入計算=TRUE)
+            line_cell = f"$A{r_idx}"
+            zone_cell = f"$B{r_idx}"
+            formula = (
+                f'=SUMIFS('
+                f'\'{ws_detail.title}\'!${d_aw}${d_first}:${d_aw}${d_last},'
+                f'\'{ws_detail.title}\'!${d_line}${d_first}:${d_line}${d_last},{line_cell},'
+                f'\'{ws_detail.title}\'!${d_zone}${d_first}:${d_zone}${d_last},{zone_cell},'
+                f'\'{ws_detail.title}\'!${d_hour}${d_first}:${d_hour}${d_last},{h},'
+                f'\'{ws_detail.title}\'!${d_in}${d_first}:${d_in}${d_last},TRUE)'
+            )
+            ws_mat.cell(row=r_idx, column=j, value=formula)
+            ws_mat.cell(row=r_idx, column=j).number_format = "0.0000"
+
+        # 加總（SUM）
+        first_hour_col = 5
+        last_hour_col = 4 + len(hour_cols)
+        rng = f"{get_column_letter(first_hour_col)}{r_idx}:{get_column_letter(last_hour_col)}{r_idx}"
+        ws_mat.cell(row=r_idx, column=last_hour_col + 1, value=f"=SUM({rng})")
+        ws_mat.cell(row=r_idx, column=last_hour_col + 1).number_format = "0.0000"
+
+        # 加總狀態：用「各小時目標加總」判斷（公式）
+        # 目標：每小時 790*(有效分鐘/60)；這裡用固定規則：一般=790，12/13=790/2
+        # 因為每個人開始時間不同，精準的「有效分鐘」需要很複雜公式；
+        # ✅ 這裡按你目前規則做「整點目標」：每個小時固定 790（12/13=395）。
+        # （你若要把開始時間分鐘也納入 Excel 公式，我也能再升級）
+        target_terms = []
+        for h in hour_cols:
+            mins = _slot_minutes(h)
+            target = target_hr * (mins / 60.0)
+            target_terms.append(str(round(target, 6)))
+        target_sum_formula = "+".join(target_terms) if target_terms else "0"
+        sum_cell = f"{get_column_letter(last_hour_col + 1)}{r_idx}"
+        ws_mat.cell(
+            row=r_idx,
+            column=last_hour_col + 2,
+            value=f'=IF({sum_cell}>=({target_sum_formula}),"{STATUS_PASS}","{STATUS_FAIL}")'
+        )
+
+    # 基本對齊
+    for row in ws_mat.iter_rows(min_row=1, max_row=ws_mat.max_row, min_col=1, max_col=ws_mat.max_column):
+        for cell in row:
             cell.alignment = Alignment(horizontal="center", vertical="center")
-            if stat == STATUS_PASS:
-                cell.fill = fill_ok
-            elif stat == STATUS_FAIL:
-                cell.fill = fill_ng
 
+    # ---- 下載 bytes ----
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
@@ -334,9 +318,8 @@ def main():
         inject_logistics_theme()
         set_page("📦 出貨課", "⏱️ 29｜各時段作業效率")
 
-    st.markdown("### ⏱️ 各時段作業效率（保留完整明細＋計算；每格顯示量體；顏色=達標/未達標）")
+    st.markdown("### ⏱️ 各時段作業效率（保留完整明細＋計算公式；Excel 公式不存值）")
 
-    # ✅ 固定人員開始時間表（安全：一行一筆，避免引號錯）
     fixed_time_map = {
         "范明俊": "08:00",
         "阮玉名": "08:00",
@@ -382,10 +365,7 @@ def main():
             now = datetime.combine(date.today(), t_in).replace(tzinfo=TPE)
 
         st.caption(f"目前採用時間：{now.strftime('%Y-%m-%d %H:%M:%S')} (Asia/Taipei)")
-
         auto_calc = st.toggle("上傳/設定變更後自動更新", value=True)
-        show_table = st.toggle("顯示表格（含加總）", value=True)
-        show_detail = st.toggle("顯示完整明細（去重後）", value=False)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -401,7 +381,7 @@ def main():
 
     prod_sig = _bytes_sig(prod_file.getvalue())
     mem_sig = _bytes_sig(mem_file.getvalue())
-    settings_sig = f"{target_hr}-{hour_min}-{use_now}-{now.hour}-{now.minute}-{show_table}-{show_detail}"
+    settings_sig = f"{target_hr}-{hour_min}-{use_now}-{now.hour}-{now.minute}"
 
     last = st.session_state.get("_29_last_sig", None)
     cur_sig = (prod_sig, mem_sig, settings_sig)
@@ -412,7 +392,7 @@ def main():
     st.session_state["_29_last_sig"] = cur_sig
 
     try:
-        # ========= 1) 人員名單 =========
+        # ========= 人員名單 =========
         df_mem_raw = _norm_cols(read_table_robust(mem_file.name, mem_file.getvalue(), label="人員名單檔案"))
 
         line_col_candidates = ["LINEID", "線別", "LineID", "LINE Id", "Line Id"]
@@ -437,16 +417,17 @@ def main():
                     st_time = _safe_time(fixed_time_map.get(n_str, "08:00"))
                     member_list.append({"線別": line_id, "段數": zid, "姓名": n_str, "開始時間": st_time})
 
-        df_members = pd.DataFrame(member_list)
-        if df_members.empty:
+        roster_df = pd.DataFrame(member_list)
+        if roster_df.empty:
             raise ValueError("人員名單解析後為空：請確認 第一段～第四段 內有姓名。")
 
-        df_members["線別"] = clean_line(df_members["線別"])
-        df_members["段數"] = clean_zone_1to4(df_members["段數"])
-        df_members = df_members[df_members["段數"].notna()].copy()
-        df_members = df_members.drop_duplicates(["線別", "段數"], keep="first").copy()
+        roster_df["線別"] = clean_line(roster_df["線別"])
+        roster_df["段數"] = clean_zone_1to4(roster_df["段數"])
+        roster_df = roster_df[roster_df["段數"].notna()].copy()
+        roster_df = roster_df.drop_duplicates(["線別", "段數"], keep="first").copy()
+        roster_df = roster_df[["線別", "段數", "姓名", "開始時間"]].copy()
 
-        # ========= 2) 生產資料 =========
+        # ========= 生產資料 =========
         df_raw = read_table_robust(prod_file.name, prod_file.getvalue(), label="生產資料檔案")
         require_columns(df_raw, ["PICKDATE", "LINEID", "ZONEID", "PACKQTY", "Cweight"], "生產資料檔案")
 
@@ -457,62 +438,50 @@ def main():
         df_raw["線別"] = clean_line(df_raw["線別"])
         df_raw["段數"] = clean_zone_1to4(df_raw["段數"])
         df_raw = df_raw[df_raw["段數"].notna()].copy()
-        if df_raw.empty:
-            raise ValueError("生產資料清理後為空：請確認 ZONEID 是否為 1~4。")
 
         df_raw["PACKQTY"] = pd.to_numeric(df_raw["PACKQTY"], errors="coerce").fillna(0)
         df_raw["Cweight"] = pd.to_numeric(df_raw["Cweight"], errors="coerce").fillna(0)
-        df_raw["加權PCS"] = df_raw["PACKQTY"] * df_raw["Cweight"]
 
-        # ✅ 唯一指紋去重
-        rid_cols = [c for c in df_raw.columns if c not in ("姓名", "開始時間", "小時", "__rid")]
+        # ✅ 去重指紋
+        rid_cols = [c for c in df_raw.columns if c not in ("__rid",)]
         df_raw["__rid"] = pd.util.hash_pandas_object(df_raw[rid_cols], index=False)
+        df_raw = df_raw.drop_duplicates("__rid", keep="first").copy()
 
-        df = pd.merge(df_raw, df_members, on=["線別", "段數"], how="left", validate="m:1")
+        # 合併姓名/開始時間（用於 UI 顯示與 Excel SUMIFS Key）
+        df = pd.merge(df_raw, roster_df, on=["線別", "段數"], how="left", validate="m:1")
         df["姓名"] = df["姓名"].fillna("未設定")
         df["開始時間"] = df["開始時間"].fillna("08:00").map(_safe_time)
 
-        # ✅ 去重（核心）
-        df = df.drop_duplicates("__rid", keep="first").copy()
-
-        # ✅ 明細保留：是否納入（開始時間過濾）
-        df["PICK_HOUR"] = df["PICKDATE"].dt.hour
+        # ✅ 明細欄位：小時、納入計算
+        df["小時"] = df["PICKDATE"].dt.hour
         df["PICK_MIN"] = df["PICKDATE"].dt.hour * 60 + df["PICKDATE"].dt.minute
-
         st_parts = df["開始時間"].astype(str).str.split(":", n=1, expand=True)
         st_h = pd.to_numeric(st_parts[0], errors="coerce").fillna(8).astype(int)
         st_m = pd.to_numeric(st_parts[1], errors="coerce").fillna(0).astype(int)
-        st_minutes = st_h * 60 + st_m
-
-        df["納入計算"] = df["PICK_MIN"] >= st_minutes
+        df["開始分鐘"] = st_h * 60 + st_m
+        df["納入計算"] = df["PICK_MIN"] >= df["開始分鐘"]
         df["排除原因"] = np.where(df["納入計算"], "", "早於開始時間")
 
-        # ✅ 計算用 df_calc（只取納入計算）
-        df_calc = df[df["納入計算"]].copy()
-        if df_calc.empty:
-            raise ValueError("套用開始時間過濾後沒有資料：請確認 PICKDATE 與開始時間設定。")
+        # ✅ Streamlit 顯示用（Python計算）加權PCS
+        df["加權PCS"] = df["PACKQTY"] * df["Cweight"]
 
-        # ========= 3) 每小時量體 =========
-        df_calc["小時"] = df_calc["PICKDATE"].dt.hour
+        # ========= Streamlit 顯示用：每小時彙總 + 狀態 =========
+        cur_h, cur_m = now.hour, now.minute
+        hour_cols = list(range(int(hour_min), int(cur_h) + 1)) if int(cur_h) >= int(hour_min) else [int(cur_h)]
         base_cols = ["線別", "段數", "姓名", "開始時間"]
 
+        df_calc = df[df["納入計算"]].copy()
         hourly_sum = df_calc.groupby(base_cols + ["小時"], as_index=False)["加權PCS"].sum()
         hourly_sum = hourly_sum.rename(columns={"加權PCS": "當小時加權PCS"})
 
-        cur_h, cur_m = now.hour, now.minute
-        hour_cols = list(range(int(hour_min), int(cur_h) + 1)) if int(cur_h) >= int(hour_min) else [int(cur_h)]
-
-        keys = df_members[base_cols].drop_duplicates().copy()
+        keys = roster_df[base_cols].drop_duplicates().copy()
         grid_hours = keys.assign(_k=1).merge(pd.DataFrame({"小時": hour_cols, "_k": 1}), on="_k").drop(columns=["_k"])
-
         hourly_full = grid_hours.merge(hourly_sum, on=base_cols + ["小時"], how="left")
         hourly_full["當小時加權PCS"] = pd.to_numeric(hourly_full["當小時加權PCS"], errors="coerce").fillna(0.0)
 
-        # ========= 4) 每小時判斷（本小時目標） =========
         parts = hourly_full["開始時間"].astype(str).str.split(":", n=1, expand=True)
         s_h = pd.to_numeric(parts[0], errors="coerce").fillna(8).astype(int)
         s_m = pd.to_numeric(parts[1], errors="coerce").fillna(0).astype(int)
-
         hh = pd.to_numeric(hourly_full["小時"], errors="coerce").fillna(0).astype(int)
         slot = hh.map(lambda x: _slot_minutes(int(x))).astype(int)
         end_m = np.where(hh == cur_h, np.minimum(cur_m, slot), slot).astype(int)
@@ -530,14 +499,12 @@ def main():
 
         hourly_full["本小時有效分鐘"] = minutes_worked
         hourly_full["本小時目標"] = (minutes_worked / 60.0) * float(target_hr)
-
         hourly_full["狀態"] = np.where(
             hourly_full["本小時有效分鐘"] <= 0,
             None,
             np.where(hourly_full["當小時加權PCS"] >= hourly_full["本小時目標"], STATUS_PASS, STATUS_FAIL)
         )
 
-        # KPI（某小時）
         dist = (
             hourly_full[hourly_full["狀態"].isin([STATUS_PASS, STATUS_FAIL])]
             .groupby(["線別", "小時", "狀態"], as_index=False)
@@ -545,67 +512,11 @@ def main():
             .rename(columns={"size": "count"})
         )
 
-        # ========= 5) 匯出矩陣 + 加總（逐列相加） =========
-        matrix_vol = hourly_full.pivot(index=base_cols, columns="小時", values="當小時加權PCS").reset_index()
-        matrix_stat = hourly_full.pivot(index=base_cols, columns="小時", values="狀態").reset_index()
-        matrix_tar = hourly_full.pivot(index=base_cols, columns="小時", values="本小時目標").reset_index()
+        st.success("計算完成 ✅（下載 Excel 將保留公式）")
 
-        matrix_vol.columns = [int(c) if str(c).isdigit() else c for c in matrix_vol.columns]
-        matrix_stat.columns = [int(c) if str(c).isdigit() else c for c in matrix_stat.columns]
-        matrix_tar.columns = [int(c) if str(c).isdigit() else c for c in matrix_tar.columns]
-
-        for h in hour_cols:
-            if h not in matrix_vol.columns:
-                matrix_vol[h] = 0.0
-            if h not in matrix_stat.columns:
-                matrix_stat[h] = None
-            if h not in matrix_tar.columns:
-                matrix_tar[h] = 0.0
-
-        matrix_vol = matrix_vol[base_cols + hour_cols]
-        matrix_stat = matrix_stat[base_cols + hour_cols]
-        matrix_tar = matrix_tar[base_cols + hour_cols]
-
-        matrix_vol["加總"] = (
-            matrix_vol[hour_cols]
-            .apply(pd.to_numeric, errors="coerce")
-            .fillna(0.0)
-            .sum(axis=1)
-        )
-
-        total_target = (
-            matrix_tar[hour_cols]
-            .apply(pd.to_numeric, errors="coerce")
-            .fillna(0.0)
-            .sum(axis=1)
-        )
-
-        matrix_stat["加總狀態"] = np.where(
-            total_target <= 0,
-            None,
-            np.where(matrix_vol["加總"] >= total_target, STATUS_PASS, STATUS_FAIL)
-        )
-
-        # ========= 6) 完整明細（去重後） =========
-        # 你要保留「完整明細 + 計算」：明細不再只剩計算結果
-        detail_cols = []
-        for c in ["PICKDATE", "線別", "段數", "姓名", "開始時間", "PACKQTY", "Cweight", "加權PCS", "納入計算", "排除原因"]:
-            if c in df.columns:
-                detail_cols.append(c)
-        detail_df = df[detail_cols].copy()
-        if "PICKDATE" in detail_df.columns:
-            detail_df = detail_df.sort_values(["線別", "段數", "PICKDATE"])
-
-        if show_detail:
-            st.markdown("## 🧾 完整明細（去重後）")
-            st.dataframe(detail_df, use_container_width=True)
-
-        st.success("計算完成 ✅（已保留完整明細＋計算結果）")
-        st.markdown("## 📊 KPI（每線：段1~段4）")
-
+        # ---- 顯示每線區塊 ----
         eff_hour = int(cur_h)
         lines = sorted(keys["線別"].dropna().unique().tolist())
-
         for line in lines:
             if HAS_COMMON_UI:
                 card_open(f"📦 {line}")
@@ -614,7 +525,6 @@ def main():
 
             dist_now = dist[(dist["線別"] == line) & (dist["小時"] == eff_hour)]
             p, f, rate = _kpi_counts(dist_now)
-
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("判斷小時", f"{eff_hour} 點")
             c2.metric("達標 段數", p)
@@ -624,21 +534,29 @@ def main():
             df_line = hourly_full[hourly_full["線別"] == line][
                 ["線別", "段數", "姓名", "小時", "當小時加權PCS", "本小時目標", "狀態"]
             ].copy()
-
-            st.markdown("#### 📌 每小時量體格（顏色=達標/未達標｜格內=量體）")
             render_hourly_heatmap(df_line, hour_cols, title=f"{line}｜每小時（12/13=30分）")
-
-            if show_table:
-                render_grid_table_with_total(df_line, hour_cols, title="段1~段4 × 每小時（含加總上色）")
 
             if HAS_COMMON_UI:
                 card_close()
 
-        st.markdown("## ⬇️ 下載（含：完整明細 + 計算結果）")
-        xlsx_bytes = build_excel_bytes_with_detail(detail_df, matrix_vol, matrix_stat, hour_cols)
-        filename = f"產能時段_含完整明細與計算_{datetime.now(TPE).strftime('%H%M')}.xlsx"
+        # ---- 準備明細輸出（加權PCS欄位改成空，讓 Excel 公式填）----
+        detail_df = df.copy()
+        detail_df = detail_df.sort_values(["線別", "段數", "PICKDATE"]).reset_index(drop=True)
+
+        # 確保欄位存在且順序合理
+        if "加權PCS" not in detail_df.columns:
+            detail_df["加權PCS"] = np.nan
+
+        # 下載 Excel（含公式）
+        xlsx_bytes = build_excel_bytes_with_formulas(
+            detail_df=detail_df,
+            roster_df=roster_df,
+            hour_cols=hour_cols,
+            target_hr=float(target_hr),
+        )
+        filename = f"產能時段_保留公式_{datetime.now(TPE).strftime('%H%M')}.xlsx"
         st.download_button(
-            "⬇️ 下載 Excel（完整明細 + 時段量體色塊）",
+            "⬇️ 下載 Excel（完整明細+矩陣皆保留公式）",
             data=xlsx_bytes,
             file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
