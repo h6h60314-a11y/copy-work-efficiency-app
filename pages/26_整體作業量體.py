@@ -585,23 +585,85 @@ card_close()
 # =====================================
 st.subheader("📤 匯出（統計總表 + 合併明細）")
 
+export_detail = st.checkbox("包含合併明細（明細很大時可能下載失敗）", value=True)
+
 stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-filename_ascii = f"DaFengKPI_OverallVolume_MultiFiles_{stamp}.xlsx"
+fn_summary = f"DaFengKPI_OverallVolume_Summary_{stamp}.xlsx"
+fn_full = f"DaFengKPI_OverallVolume_Full_{stamp}.xlsx"
+fn_detail_gz = f"DaFengKPI_OverallVolume_Detail_{stamp}.csv.gz"
 
-xlsx_bytes = make_excel_bytes(summary_all, detail_all)
-
-# 顯示 bytes，方便你判斷是否有產出
-md5 = hashlib.md5(xlsx_bytes).hexdigest()[:10]
-st.caption(f"Excel bytes：{len(xlsx_bytes):,}｜hash：{md5}")
+# 1) ✅ 統計總表：永遠提供 Excel（通常很小、最穩）
+bio_sum = BytesIO()
+with pd.ExcelWriter(bio_sum, engine="openpyxl") as writer:
+    summary_all.to_excel(writer, index=False, sheet_name="統計總表")
+bio_sum.seek(0)
+xlsx_sum = bio_sum.read()
 
 st.download_button(
-    label="✅ 下載 Excel（含：統計總表 + 合併明細）",
-    data=xlsx_bytes,  # ✅ raw bytes 最穩
-    file_name=filename_ascii,
+    label="✅ 下載 Excel（只含：統計總表）",
+    data=xlsx_sum,
+    file_name=fn_summary,
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=True,
-    key=f"dl_excel_{stamp}",
+    key=f"dl_sum_{stamp}",
 )
+st.caption(f"統計總表大小：{len(xlsx_sum)/1024/1024:.2f} MB")
+
+# 2) ✅ 合併明細：提供兩種路徑
+if export_detail:
+    # 2-1) 先嘗試做「完整 Excel」（可能很大）
+    try:
+        bio_full = BytesIO()
+        with pd.ExcelWriter(bio_full, engine="openpyxl") as writer:
+            summary_all.to_excel(writer, index=False, sheet_name="統計總表")
+            detail_all.to_excel(writer, index=False, sheet_name="合併明細")
+        bio_full.seek(0)
+        xlsx_full = bio_full.read()
+
+        size_mb = len(xlsx_full) / 1024 / 1024
+        st.caption(f"完整 Excel 大小：{size_mb:.2f} MB")
+
+        # ⚠️ 太大就建議改走 CSV.gz（更穩）
+        if size_mb > 25:
+            st.warning("完整 Excel 檔案偏大（> 25MB），若你點了沒反應，請改用下方「明細 CSV.gz」下載（更穩）。")
+
+        st.download_button(
+            label="⬇️ 下載 Excel（含：統計總表 + 合併明細）",
+            data=xlsx_full,
+            file_name=fn_full,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key=f"dl_full_{stamp}",
+        )
+
+    except Exception as e:
+        st.error(f"產生完整 Excel 失敗：{e}")
+
+    # 2-2) ✅ 明細 CSV.gz（最穩備援）
+    try:
+        # 用 gzip 壓縮的 CSV，通常比 xlsx 更小、更不容易被卡
+        gz_bytes = detail_all.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+        # 若你希望更小，可以改用 gzip 壓縮（下面是 gzip 版本）
+        import gzip
+        gz_buf = BytesIO()
+        with gzip.GzipFile(fileobj=gz_buf, mode="wb") as gz:
+            gz.write(detail_all.to_csv(index=False).encode("utf-8"))
+        gz_buf.seek(0)
+        detail_csv_gz = gz_buf.read()
+
+        st.download_button(
+            label="⬇️ 下載 明細（CSV.gz，推薦／更穩）",
+            data=detail_csv_gz,
+            file_name=fn_detail_gz,
+            mime="application/gzip",
+            use_container_width=True,
+            key=f"dl_detail_gz_{stamp}",
+        )
+        st.caption(f"明細 CSV.gz 大小：{len(detail_csv_gz)/1024/1024:.2f} MB")
+
+    except Exception as e:
+        st.error(f"產生明細 CSV.gz 失敗：{e}")
 
 with st.expander("🔎 合併明細預覽（前 200 筆）", expanded=False):
     st.dataframe(detail_all.head(200), use_container_width=True)
+    
