@@ -34,51 +34,18 @@ WORK_MINUTES_BY_HOUR = {12: 30, 13: 30}
 
 
 # =============================
-# 讀檔：CSV/Excel 強韌讀取
+# 欄位整理
 # =============================
-def read_table_robust(file_name: str, raw: bytes, label: str = "檔案") -> pd.DataFrame:
-    ext = os.path.splitext(file_name)[1].lower()
-
-    if ext in (".xlsx", ".xlsm", ".xltx", ".xltm", ".xls"):
-        try:
-            return pd.read_excel(io.BytesIO(raw))
-        except Exception as e:
-            raise ValueError(f"{label} 讀取 Excel 失敗：{e}")
-
-    encodings = ["utf-8-sig", "utf-8", "cp950", "big5", "ms950", "gb18030", "latin1"]
-    seps = [",", "\t", ";", "|"]
-
-    last_err = None
-    for enc in encodings:
-        for sep in seps:
-            try:
-                df = pd.read_csv(io.BytesIO(raw), encoding=enc, sep=sep, engine="python", low_memory=False)
-                if df.shape[1] <= 1:
-                    continue
-                return df
-            except Exception as e:
-                last_err = e
-
-    try:
-        text = raw.decode("utf-8", errors="replace")
-        df = pd.read_csv(StringIO(text), sep=None, engine="python", low_memory=False)
-        if df.shape[1] <= 1:
-            raise ValueError("偵測不到有效分隔符，請確認檔案是否為真正 CSV。")
-        return df
-    except Exception as e:
-        raise ValueError(f"{label} 讀取 CSV 失敗（已嘗試多種編碼/分隔符）：{last_err} / 最終：{e}")
+def _norm_cols(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
 
 
 def require_columns(df: pd.DataFrame, required: list, label: str):
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"{label} 缺少欄位：{missing}\n目前欄位：{list(df.columns)}")
-
-
-def _norm_cols(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
 
 
 def clean_line(series: pd.Series) -> pd.Series:
@@ -112,6 +79,125 @@ def _bytes_sig(b: bytes) -> str:
 
 def _slot_minutes(hour: int) -> int:
     return int(WORK_MINUTES_BY_HOUR.get(int(hour), 60))
+
+
+# =============================
+# ✅ 讀檔：CSV/Excel（含 .xls 假檔）強韌讀取
+# =============================
+def _looks_like_html(raw: bytes) -> bool:
+    head = raw[:4096].lstrip().lower()
+    return (b"<html" in head) or (b"<!doctype" in head) or (b"<table" in head)
+
+
+def _read_csv_guess(raw: bytes) -> pd.DataFrame:
+    encodings = ["utf-8-sig", "utf-8", "cp950", "big5", "ms950", "gb18030", "latin1"]
+    seps = [",", "\t", ";", "|"]
+    last_err = None
+
+    for enc in encodings:
+        for sep in seps:
+            try:
+                df = pd.read_csv(io.BytesIO(raw), encoding=enc, sep=sep, engine="python", low_memory=False)
+                if df.shape[1] <= 1:
+                    continue
+                return df
+            except Exception as e:
+                last_err = e
+
+    # 最後：讓 pandas 自己猜分隔符
+    try:
+        text = raw.decode("utf-8", errors="replace")
+        df = pd.read_csv(StringIO(text), sep=None, engine="python", low_memory=False)
+        if df.shape[1] <= 1:
+            raise ValueError("偵測不到有效分隔符，請確認檔案內容。")
+        return df
+    except Exception as e:
+        raise ValueError(f"讀取為 CSV 失敗：{last_err} / 最終：{e}")
+
+
+def _read_html_table(raw: bytes) -> pd.DataFrame:
+    # 嘗試多種解碼，避免中文亂碼造成解析失敗
+    for enc in ["utf-8-sig", "utf-8", "cp950", "big5", "ms950", "latin1"]:
+        try:
+            text = raw.decode(enc, errors="ignore")
+            tables = pd.read_html(StringIO(text))
+            if not tables:
+                continue
+            # 取最大張表（最常見是第一張，但有些前面是空表）
+            tables = [t for t in tables if isinstance(t, pd.DataFrame) and t.shape[1] >= 2]
+            if not tables:
+                continue
+            df = max(tables, key=lambda x: x.shape[0] * x.shape[1])
+            return df
+        except Exception:
+            continue
+    raise ValueError("偵測為 HTML 但解析表格失敗（read_html 失敗）。")
+
+
+def read_table_robust(file_name: str, raw: bytes, label: str = "檔案") -> pd.DataFrame:
+    ext = os.path.splitext(file_name)[1].lower()
+
+    # ---- Excel 類（xlsx/xlsm/等）----
+    if ext in (".xlsx", ".xlsm", ".xltx", ".xltm"):
+        try:
+            df = pd.read_excel(io.BytesIO(raw), engine="openpyxl")
+            return df
+        except Exception as e:
+            # 有些檔案其實不是 xlsx 結構（被改副檔名）
+            # → 往下走，嘗試 html/csv
+            last_excel_err = e
+        # fallback html/csv
+        if _looks_like_html(raw):
+            try:
+                return _read_html_table(raw)
+            except Exception:
+                pass
+        try:
+            return _read_csv_guess(raw)
+        except Exception as e2:
+            raise ValueError(f"{label} 讀取 Excel 失敗：{last_excel_err}；並且 fallback 也失敗：{e2}")
+
+    # ---- .xls：可能是真 xls（BIFF），也可能是 HTML/TSV 假檔 ----
+    if ext == ".xls":
+        # 1) 真正 xls：用 xlrd（若環境有裝）
+        try:
+            import xlrd  # noqa: F401
+            df = pd.read_excel(io.BytesIO(raw), engine="xlrd")
+            return df
+        except Exception as e_xls:
+            # 2) 假 xls：HTML
+            if _looks_like_html(raw):
+                try:
+                    return _read_html_table(raw)
+                except Exception as e_html:
+                    # 3) 假 xls：其實是 csv/tsv
+                    try:
+                        return _read_csv_guess(raw)
+                    except Exception as e_csv:
+                        raise ValueError(
+                            f"{label} 讀取 .xls 失敗：\n"
+                            f"- xlrd/Excel 解析失敗：{e_xls}\n"
+                            f"- HTML 解析失敗：{e_html}\n"
+                            f"- CSV/TSV fallback 失敗：{e_csv}\n"
+                            f"建議：若你確定它是傳統 Excel，請另存為 .xlsx 再上傳。"
+                        )
+
+            # 3) 不是 HTML → 當成 CSV/TSV 猜
+            try:
+                return _read_csv_guess(raw)
+            except Exception as e_csv:
+                raise ValueError(
+                    f"{label} 讀取 .xls 失敗：\n"
+                    f"- Excel 解析失敗（可能缺 xlrd 或檔案不是傳統 xls）：{e_xls}\n"
+                    f"- CSV/TSV fallback 失敗：{e_csv}\n"
+                    f"建議：請把檔案用 Excel『另存新檔』成 .xlsx 再上傳。"
+                )
+
+    # ---- 其他：先當 CSV 猜 ----
+    try:
+        return _read_csv_guess(raw)
+    except Exception as e:
+        raise ValueError(f"{label} 讀取失敗（未知副檔名 {ext}）：{e}")
 
 
 # =============================
@@ -264,7 +350,6 @@ def build_excel_bytes_with_formulas_and_colors(
         ws_mat.cell(row=r_idx, column=2, value=int(row.段數))
         ws_mat.cell(row=r_idx, column=3, value=str(row.姓名))
 
-        # D 欄：Time
         hh, mm = str(row.開始時間).split(":")
         ws_mat.cell(row=r_idx, column=4, value=f"=TIME({int(hh)},{int(mm)},0)")
 
@@ -282,7 +367,6 @@ def build_excel_bytes_with_formulas_and_colors(
             vol_cell = f"{get_column_letter(vol_col)}{r_idx}"
             tgt_cell = f"{get_column_letter(tgt_col)}{r_idx}"
 
-            # 量體 SUMIFS
             line_cell = f"$A{r_idx}"
             zone_cell = f"$B{r_idx}"
             vol_formula = (
@@ -296,8 +380,6 @@ def build_excel_bytes_with_formulas_and_colors(
             ws_mat.cell(row=r_idx, column=vol_col, value=vol_formula)
             ws_mat.cell(row=r_idx, column=vol_col).number_format = "0.0000"
 
-            # ✅ 目標（不使用 LET；舊 Excel OK）
-            # slot = IF(OR(h=12,h=13),30,60)
             slot = f'IF(OR({h}=12,{h}=13),30,60)'
             endm = f'IF({h}={now_h_cell},MIN({now_m_cell},{slot}),{slot})'
             sh = f'HOUR({start_time_cell})'
@@ -307,7 +389,6 @@ def build_excel_bytes_with_formulas_and_colors(
             ws_mat.cell(row=r_idx, column=tgt_col, value=tgt_formula)
             ws_mat.cell(row=r_idx, column=tgt_col).number_format = "0.0000"
 
-            # 狀態
             st_formula = f'=IF({tgt_cell}<=0,"",IF({vol_cell}>={tgt_cell},"{STATUS_PASS}","{STATUS_FAIL}"))'
             ws_mat.cell(row=r_idx, column=st_col, value=st_formula)
 
@@ -315,7 +396,6 @@ def build_excel_bytes_with_formulas_and_colors(
             tgt_cells.append(tgt_cell)
             col_ptr += 3
 
-        # 加總欄
         sum_col = col_ptr
         sum_tgt_col = col_ptr + 1
         sum_st_col = col_ptr + 2
@@ -331,7 +411,6 @@ def build_excel_bytes_with_formulas_and_colors(
 
         ws_mat.cell(row=r_idx, column=sum_st_col, value=f'=IF({sum_tgt_cell}<=0,"",IF({sum_cell}>={sum_tgt_cell},"{STATUS_PASS}","{STATUS_FAIL}"))')
 
-    # 欄寬 / 對齊
     ws_mat.column_dimensions["A"].width = 10
     ws_mat.column_dimensions["B"].width = 6
     ws_mat.column_dimensions["C"].width = 14
@@ -341,7 +420,6 @@ def build_excel_bytes_with_formulas_and_colors(
         for cell in row:
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # 隱藏目標/狀態欄，只留量體 + 加總
     start_col = 5
     for i, _h in enumerate(hour_cols):
         vol_col = start_col + i * 3
@@ -358,7 +436,6 @@ def build_excel_bytes_with_formulas_and_colors(
     ws_mat.column_dimensions[get_column_letter(sum_tgt_col)].hidden = True
     ws_mat.column_dimensions[get_column_letter(sum_st_col)].hidden = True
 
-    # ✅ 條件格式：依隱藏狀態欄 → 把量體欄上色
     max_r = ws_mat.max_row
     for i, _h in enumerate(hour_cols):
         vol_col = start_col + i * 3
@@ -366,26 +443,21 @@ def build_excel_bytes_with_formulas_and_colors(
 
         vol_letter = get_column_letter(vol_col)
         st_letter = get_column_letter(st_col)
-
         rng = f"{vol_letter}2:{vol_letter}{max_r}"
 
-        # 達標綠
         ws_mat.conditional_formatting.add(
             rng,
             FormulaRule(formula=[f'${st_letter}2="{STATUS_PASS}"'], fill=fill_ok, stopIfTrue=True),
         )
-        # 未達標紅
         ws_mat.conditional_formatting.add(
             rng,
             FormulaRule(formula=[f'${st_letter}2="{STATUS_FAIL}"'], fill=fill_ng, stopIfTrue=True),
         )
-        # 無判斷灰（空白）
         ws_mat.conditional_formatting.add(
             rng,
             FormulaRule(formula=[f'${st_letter}2=""'], fill=fill_na, stopIfTrue=True),
         )
 
-    # 加總欄也上色
     sum_letter = get_column_letter(sum_col)
     sum_st_letter = get_column_letter(sum_st_col)
     sum_rng = f"{sum_letter}2:{sum_letter}{max_r}"
@@ -502,8 +574,9 @@ def main():
         roster_df = roster_df.drop_duplicates(["線別", "段數"], keep="first").copy()
         roster_df = roster_df[["線別", "段數", "姓名", "開始時間"]].copy()
 
-        # 生產資料
+        # 生產資料（✅先 norm 欄位，避免 PICKDATE 變成 'PICKDATE '）
         df_raw = read_table_robust(prod_file.name, prod_file.getvalue(), label="生產資料檔案")
+        df_raw = _norm_cols(df_raw)
         require_columns(df_raw, ["PICKDATE", "LINEID", "ZONEID", "PACKQTY", "Cweight"], "生產資料檔案")
 
         df_raw["PICKDATE"] = pd.to_datetime(df_raw["PICKDATE"], errors="coerce")
