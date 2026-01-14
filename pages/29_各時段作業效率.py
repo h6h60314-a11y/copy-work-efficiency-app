@@ -34,7 +34,7 @@ WORK_MINUTES_BY_HOUR = {12: 30, 13: 30}
 
 
 # =============================
-# 欄位整理
+# 欄位整理 / 檢查
 # =============================
 def _norm_cols(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -82,22 +82,37 @@ def _slot_minutes(hour: int) -> int:
 
 
 # =============================
-# ✅ 讀檔：CSV/Excel（含 .xls 假檔）強韌讀取
+# ✅ 讀檔：CSV/TSV/Excel（含 .xls 假檔）強韌讀取
+#   - 你的 .xls 其實是 TSV：檔頭像 b'BOXID\\tOR...'
+#   - 修正：python engine 不支援 low_memory → 不再傳入
 # =============================
 def _looks_like_html(raw: bytes) -> bool:
     head = raw[:4096].lstrip().lower()
     return (b"<html" in head) or (b"<!doctype" in head) or (b"<table" in head)
 
 
+def _read_html_table(raw: bytes) -> pd.DataFrame:
+    for enc in ["utf-8-sig", "utf-8", "cp950", "big5", "ms950", "latin1", "gb18030"]:
+        try:
+            text = raw.decode(enc, errors="ignore")
+            tables = pd.read_html(StringIO(text))
+            tables = [t for t in tables if isinstance(t, pd.DataFrame) and t.shape[1] >= 2]
+            if not tables:
+                continue
+            return max(tables, key=lambda x: x.shape[0] * x.shape[1])
+        except Exception:
+            continue
+    raise ValueError("偵測為 HTML 但解析表格失敗（read_html 失敗）。")
+
+
 def _read_csv_guess(raw: bytes) -> pd.DataFrame:
     encodings = ["utf-8-sig", "utf-8", "cp950", "big5", "ms950", "gb18030", "latin1"]
-    seps = ["\t", ",", ";", "|"]  # ✅ 你這檔案是 \t，放第一優先
-
+    seps = ["\t", ",", ";", "|"]  # ✅ tab 放第一優先
     last_err = None
 
     for enc in encodings:
         for sep in seps:
-            # 先用預設 C engine（最快、最穩），失敗再換 python
+            # 先用 C engine（最快、最穩），失敗再換 python
             for engine in ["c", "python"]:
                 try:
                     kwargs = dict(encoding=enc, sep=sep, engine=engine)
@@ -113,7 +128,7 @@ def _read_csv_guess(raw: bytes) -> pd.DataFrame:
                 except Exception as e:
                     last_err = e
 
-    # 最後：讓 pandas 自己猜分隔符（用 python engine 才支援 sep=None）
+    # 最後：讓 pandas 自己猜分隔符（sep=None 只能用 python）
     try:
         text = raw.decode("utf-8", errors="replace")
         df = pd.read_csv(StringIO(text), sep=None, engine="python")
@@ -124,30 +139,8 @@ def _read_csv_guess(raw: bytes) -> pd.DataFrame:
         raise ValueError(f"讀取為 CSV/TSV 失敗：{last_err} / 最終：{e}")
 
 
-
-def _read_html_table(raw: bytes) -> pd.DataFrame:
-    # 嘗試多種解碼，避免中文亂碼造成解析失敗
-    for enc in ["utf-8-sig", "utf-8", "cp950", "big5", "ms950", "latin1"]:
-        try:
-            text = raw.decode(enc, errors="ignore")
-            tables = pd.read_html(StringIO(text))
-            if not tables:
-                continue
-            # 取最大張表（最常見是第一張，但有些前面是空表）
-            tables = [t for t in tables if isinstance(t, pd.DataFrame) and t.shape[1] >= 2]
-            if not tables:
-                continue
-            df = max(tables, key=lambda x: x.shape[0] * x.shape[1])
-            return df
-        except Exception:
-            continue
-    raise ValueError("偵測為 HTML 但解析表格失敗（read_html 失敗）。")
-
-
 def read_table_robust(file_name: str, raw: bytes, label: str = "檔案") -> pd.DataFrame:
     ext = os.path.splitext(file_name)[1].lower()
-
-    # ✅ 先判斷：內容看起來就是 TSV/CSV（你的檔頭 BOXID\tOR...）
     head = raw[:2048]
     looks_tsv = (b"\t" in head) and (head.count(b"\t") >= 2)
 
@@ -157,37 +150,46 @@ def read_table_robust(file_name: str, raw: bytes, label: str = "檔案") -> pd.D
             return pd.read_excel(io.BytesIO(raw), engine="openpyxl")
         except Exception:
             # 有些被改副檔名 → 當文字檔讀
+            if _looks_like_html(raw):
+                return _read_html_table(raw)
             return _read_csv_guess(raw)
 
-    # ---- xls：先當文字檔（TSV/CSV）讀；不行再嘗試 xlrd ----
+    # ---- .xls：先當文字檔（你這種最常見）----
     if ext == ".xls":
-        # ✅ 1) 先當 TSV/CSV（你這種最常見）
+        # 1) 優先 TSV/CSV（你的檔頭 BOXID\tOR...）
         try:
             if looks_tsv:
-                # 直接指定 tab，讀起來更快更穩
-                for enc in ["utf-8-sig", "utf-8", "cp950", "big5", "ms950", "gb18030", "latin1"]:
+                for enc in ["utf-8-sig", "utf-8", "cp950", "big5", "ms950", "latin1", "gb18030"]:
                     try:
-                        return pd.read_csv(io.BytesIO(raw), sep="\t", encoding=enc, engine="c", low_memory=False)
+                        df = pd.read_csv(io.BytesIO(raw), sep="\t", encoding=enc, engine="c", low_memory=False)
+                        if df.shape[1] > 1:
+                            return df
                     except Exception:
                         pass
-            # 若不是明顯 TSV 或上面失敗 → 交給猜測器
+            # 不是明顯 TSV 或上面失敗 → 交給猜測器
             return _read_csv_guess(raw)
         except Exception as e_text:
-            # ✅ 2) 再嘗試真正 xls（如果環境有 xlrd 且真的是 xls）
+            # 2) 再嘗試真正 xls（需要 xlrd，且檔案真的是 BIFF xls）
             try:
                 import xlrd  # noqa: F401
                 return pd.read_excel(io.BytesIO(raw), engine="xlrd")
             except Exception as e_xls:
+                if _looks_like_html(raw):
+                    try:
+                        return _read_html_table(raw)
+                    except Exception:
+                        pass
                 raise ValueError(
                     f"{label} 讀取 .xls 失敗：\n"
                     f"- 文字檔(TSV/CSV) 解析失敗：{e_text}\n"
                     f"- Excel(xlrd) 解析失敗：{e_xls}\n"
-                    f"（此檔看起來像 WMS 匯出的 TSV 文字檔，只是副檔名叫 .xls）"
+                    f"（此檔很可能是 TSV 文字檔，只是副檔名叫 .xls）"
                 )
 
-    # ---- 其他：當文字檔 ----
+    # ---- 其他：先當文字檔 ----
+    if _looks_like_html(raw):
+        return _read_html_table(raw)
     return _read_csv_guess(raw)
-
 
 
 # =============================
@@ -399,8 +401,13 @@ def build_excel_bytes_with_formulas_and_colors(
         ws_mat.cell(row=r_idx, column=sum_tgt_col, value=f"=SUM({','.join(tgt_cells)})")
         ws_mat.cell(row=r_idx, column=sum_tgt_col).number_format = "0.0000"
 
-        ws_mat.cell(row=r_idx, column=sum_st_col, value=f'=IF({sum_tgt_cell}<=0,"",IF({sum_cell}>={sum_tgt_cell},"{STATUS_PASS}","{STATUS_FAIL}"))')
+        ws_mat.cell(
+            row=r_idx,
+            column=sum_st_col,
+            value=f'=IF({sum_tgt_cell}<=0,"",IF({sum_cell}>={sum_tgt_cell},"{STATUS_PASS}","{STATUS_FAIL}"))',
+        )
 
+    # 欄寬 / 對齊
     ws_mat.column_dimensions["A"].width = 10
     ws_mat.column_dimensions["B"].width = 6
     ws_mat.column_dimensions["C"].width = 14
@@ -410,6 +417,7 @@ def build_excel_bytes_with_formulas_and_colors(
         for cell in row:
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
+    # 隱藏目標/狀態欄，只留量體 + 加總
     start_col = 5
     for i, _h in enumerate(hour_cols):
         vol_col = start_col + i * 3
@@ -426,6 +434,7 @@ def build_excel_bytes_with_formulas_and_colors(
     ws_mat.column_dimensions[get_column_letter(sum_tgt_col)].hidden = True
     ws_mat.column_dimensions[get_column_letter(sum_st_col)].hidden = True
 
+    # ✅ 條件格式：依隱藏狀態欄 → 把量體欄上色
     max_r = ws_mat.max_row
     for i, _h in enumerate(hour_cols):
         vol_col = start_col + i * 3
@@ -448,6 +457,7 @@ def build_excel_bytes_with_formulas_and_colors(
             FormulaRule(formula=[f'${st_letter}2=""'], fill=fill_na, stopIfTrue=True),
         )
 
+    # 加總欄也上色
     sum_letter = get_column_letter(sum_col)
     sum_st_letter = get_column_letter(sum_st_col)
     sum_rng = f"{sum_letter}2:{sum_letter}{max_r}"
@@ -564,9 +574,10 @@ def main():
         roster_df = roster_df.drop_duplicates(["線別", "段數"], keep="first").copy()
         roster_df = roster_df[["線別", "段數", "姓名", "開始時間"]].copy()
 
-        # 生產資料（✅先 norm 欄位，避免 PICKDATE 變成 'PICKDATE '）
+        # 生產資料（✅ 這裡已支援 .xls 假檔 TSV）
         df_raw = read_table_robust(prod_file.name, prod_file.getvalue(), label="生產資料檔案")
-        df_raw = _norm_cols(df_raw)
+        df_raw = _norm_cols(df_raw)  # ✅ 避免欄位尾巴空白
+
         require_columns(df_raw, ["PICKDATE", "LINEID", "ZONEID", "PACKQTY", "Cweight"], "生產資料檔案")
 
         df_raw["PICKDATE"] = pd.to_datetime(df_raw["PICKDATE"], errors="coerce")
@@ -676,7 +687,7 @@ def main():
             if HAS_COMMON_UI:
                 card_close()
 
-        # 明細輸出（Excel會用公式重算加權PCS）
+        # 明細輸出（Excel 會用公式重算加權PCS）
         detail_df = df.copy().sort_values(["線別", "段數", "PICKDATE"]).reset_index(drop=True)
         if "加權PCS" not in detail_df.columns:
             detail_df["加權PCS"] = np.nan
