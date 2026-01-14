@@ -91,28 +91,38 @@ def _looks_like_html(raw: bytes) -> bool:
 
 def _read_csv_guess(raw: bytes) -> pd.DataFrame:
     encodings = ["utf-8-sig", "utf-8", "cp950", "big5", "ms950", "gb18030", "latin1"]
-    seps = [",", "\t", ";", "|"]
+    seps = ["\t", ",", ";", "|"]  # ✅ 你這檔案是 \t，放第一優先
+
     last_err = None
 
     for enc in encodings:
         for sep in seps:
-            try:
-                df = pd.read_csv(io.BytesIO(raw), encoding=enc, sep=sep, engine="python", low_memory=False)
-                if df.shape[1] <= 1:
-                    continue
-                return df
-            except Exception as e:
-                last_err = e
+            # 先用預設 C engine（最快、最穩），失敗再換 python
+            for engine in ["c", "python"]:
+                try:
+                    kwargs = dict(encoding=enc, sep=sep, engine=engine)
 
-    # 最後：讓 pandas 自己猜分隔符
+                    # ✅ low_memory 只有 C engine 才能用；python engine 不能帶
+                    if engine == "c":
+                        kwargs["low_memory"] = False
+
+                    df = pd.read_csv(io.BytesIO(raw), **kwargs)
+                    if df.shape[1] <= 1:
+                        continue
+                    return df
+                except Exception as e:
+                    last_err = e
+
+    # 最後：讓 pandas 自己猜分隔符（用 python engine 才支援 sep=None）
     try:
         text = raw.decode("utf-8", errors="replace")
-        df = pd.read_csv(StringIO(text), sep=None, engine="python", low_memory=False)
+        df = pd.read_csv(StringIO(text), sep=None, engine="python")
         if df.shape[1] <= 1:
             raise ValueError("偵測不到有效分隔符，請確認檔案內容。")
         return df
     except Exception as e:
-        raise ValueError(f"讀取為 CSV 失敗：{last_err} / 最終：{e}")
+        raise ValueError(f"讀取為 CSV/TSV 失敗：{last_err} / 最終：{e}")
+
 
 
 def _read_html_table(raw: bytes) -> pd.DataFrame:
@@ -137,67 +147,47 @@ def _read_html_table(raw: bytes) -> pd.DataFrame:
 def read_table_robust(file_name: str, raw: bytes, label: str = "檔案") -> pd.DataFrame:
     ext = os.path.splitext(file_name)[1].lower()
 
-    # ---- Excel 類（xlsx/xlsm/等）----
+    # ✅ 先判斷：內容看起來就是 TSV/CSV（你的檔頭 BOXID\tOR...）
+    head = raw[:2048]
+    looks_tsv = (b"\t" in head) and (head.count(b"\t") >= 2)
+
+    # ---- xlsx 類 ----
     if ext in (".xlsx", ".xlsm", ".xltx", ".xltm"):
         try:
-            df = pd.read_excel(io.BytesIO(raw), engine="openpyxl")
-            return df
-        except Exception as e:
-            # 有些檔案其實不是 xlsx 結構（被改副檔名）
-            # → 往下走，嘗試 html/csv
-            last_excel_err = e
-        # fallback html/csv
-        if _looks_like_html(raw):
-            try:
-                return _read_html_table(raw)
-            except Exception:
-                pass
-        try:
+            return pd.read_excel(io.BytesIO(raw), engine="openpyxl")
+        except Exception:
+            # 有些被改副檔名 → 當文字檔讀
             return _read_csv_guess(raw)
-        except Exception as e2:
-            raise ValueError(f"{label} 讀取 Excel 失敗：{last_excel_err}；並且 fallback 也失敗：{e2}")
 
-    # ---- .xls：可能是真 xls（BIFF），也可能是 HTML/TSV 假檔 ----
+    # ---- xls：先當文字檔（TSV/CSV）讀；不行再嘗試 xlrd ----
     if ext == ".xls":
-        # 1) 真正 xls：用 xlrd（若環境有裝）
+        # ✅ 1) 先當 TSV/CSV（你這種最常見）
         try:
-            import xlrd  # noqa: F401
-            df = pd.read_excel(io.BytesIO(raw), engine="xlrd")
-            return df
-        except Exception as e_xls:
-            # 2) 假 xls：HTML
-            if _looks_like_html(raw):
-                try:
-                    return _read_html_table(raw)
-                except Exception as e_html:
-                    # 3) 假 xls：其實是 csv/tsv
+            if looks_tsv:
+                # 直接指定 tab，讀起來更快更穩
+                for enc in ["utf-8-sig", "utf-8", "cp950", "big5", "ms950", "gb18030", "latin1"]:
                     try:
-                        return _read_csv_guess(raw)
-                    except Exception as e_csv:
-                        raise ValueError(
-                            f"{label} 讀取 .xls 失敗：\n"
-                            f"- xlrd/Excel 解析失敗：{e_xls}\n"
-                            f"- HTML 解析失敗：{e_html}\n"
-                            f"- CSV/TSV fallback 失敗：{e_csv}\n"
-                            f"建議：若你確定它是傳統 Excel，請另存為 .xlsx 再上傳。"
-                        )
-
-            # 3) 不是 HTML → 當成 CSV/TSV 猜
+                        return pd.read_csv(io.BytesIO(raw), sep="\t", encoding=enc, engine="c", low_memory=False)
+                    except Exception:
+                        pass
+            # 若不是明顯 TSV 或上面失敗 → 交給猜測器
+            return _read_csv_guess(raw)
+        except Exception as e_text:
+            # ✅ 2) 再嘗試真正 xls（如果環境有 xlrd 且真的是 xls）
             try:
-                return _read_csv_guess(raw)
-            except Exception as e_csv:
+                import xlrd  # noqa: F401
+                return pd.read_excel(io.BytesIO(raw), engine="xlrd")
+            except Exception as e_xls:
                 raise ValueError(
                     f"{label} 讀取 .xls 失敗：\n"
-                    f"- Excel 解析失敗（可能缺 xlrd 或檔案不是傳統 xls）：{e_xls}\n"
-                    f"- CSV/TSV fallback 失敗：{e_csv}\n"
-                    f"建議：請把檔案用 Excel『另存新檔』成 .xlsx 再上傳。"
+                    f"- 文字檔(TSV/CSV) 解析失敗：{e_text}\n"
+                    f"- Excel(xlrd) 解析失敗：{e_xls}\n"
+                    f"（此檔看起來像 WMS 匯出的 TSV 文字檔，只是副檔名叫 .xls）"
                 )
 
-    # ---- 其他：先當 CSV 猜 ----
-    try:
-        return _read_csv_guess(raw)
-    except Exception as e:
-        raise ValueError(f"{label} 讀取失敗（未知副檔名 {ext}）：{e}")
+    # ---- 其他：當文字檔 ----
+    return _read_csv_guess(raw)
+
 
 
 # =============================
