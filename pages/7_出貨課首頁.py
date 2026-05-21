@@ -12,6 +12,7 @@ ALLOW_PAGES = {
     "pages/23_採品門市差異量.py",
     "pages/24_出貨作業線產能.py",
     "pages/29_各時段作業效率.py",
+    "pages/30_客訂差異.py",
 }
 
 
@@ -141,6 +142,7 @@ def main():
     _css_and_js()
 
     st.markdown('<div class="dept-list">', unsafe_allow_html=True)
+
     _nav_item(
         "📦",
         "撥貨差異",
@@ -157,7 +159,7 @@ def main():
 
     _nav_item(
         "📦",
-        "出貨作業線產能", 
+        "出貨作業線產能",
         "pages/24_出貨作業線產能.py",
         "每日各作業線產力狀況，輸出每日達標檔",
     )
@@ -168,7 +170,14 @@ def main():
         "pages/29_各時段作業效率.py",
         "依 LINEID/ZONEID(1~4) 計算去重後加權PCS，逐時段 PASS/FAIL 著色並可下載 Excel",
     )
-    
+
+    _nav_item(
+        "🧾",
+        "客訂差異",
+        "pages/30_客訂差異.py",
+        "客訂差異篩選、商品主檔比對、其他儲位短效優先、棚別回填並輸出最後篩選明細",
+    )
+
     st.markdown("</div>", unsafe_allow_html=True)
 
     card_close()
