@@ -65,6 +65,7 @@ preset_picker_info: Dict[str, Dict[str, str]] = {
     "20220421002": {"姓名": "楊文點", "起始時間": "8:05:00", "區域": "低空"},
     "20220505001": {"姓名": "阮伊黃", "起始時間": "8:05:00", "區域": "低空"},
     "20220505002": {"姓名": "阮文青明", "起始時間": "7:05:00", "區域": "高空"},
+    "001": {"姓名": "阮孟雄", "起始時間": "7:05:00", "區域": "高空"},
     "20221222005": {"姓名": "謝忠龍", "起始時間": "8:05:00", "區域": "高空"},
     "20221222009": {"姓名": "潘文一", "起始時間": "8:05:00", "區域": "低空"},
     "20221221001": {"姓名": "阮文全", "起始時間": "7:05:00", "區域": "高空"},
@@ -522,8 +523,8 @@ def build_export_xlsx_bytes(
     title: str,
     morning_df: pd.DataFrame,
     afternoon_df: pd.DataFrame,
-    low_threshold: float = 48.0,
-    high_threshold: float = 20.0,
+    low_threshold: float = 57.0,
+    high_threshold: float = 21.0,
 ) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -752,9 +753,9 @@ def main():
         st.divider()
         st.subheader("⚙️ 報表設定")
         report_title = st.text_input("報表標題", value="總揀達標獎金計算報表（合併版）")
-        st.caption("達標門檻（沿用你原本條件）：高空 20、低空 48")
-        high_threshold = st.number_input("高空達標（效率）", min_value=0.0, max_value=9999.0, value=20.0, step=1.0)
-        low_threshold = st.number_input("低空達標（效率）", min_value=0.0, max_value=9999.0, value=48.0, step=1.0)
+        st.caption("達標門檻（沿用你原本條件）：高空 21、低空 57")
+        high_threshold = st.number_input("高空達標（效率）", min_value=0.0, max_value=9999.0, value=21.0, step=1.0)
+        low_threshold = st.number_input("低空達標（效率）", min_value=0.0, max_value=9999.0, value=57.0, step=1.0)
 
     # Upload
     card_open("📤 上傳原始資料（可多檔合併）")
@@ -814,8 +815,8 @@ def main():
 
     morning_stats = result["morning_stats"]
     afternoon_stats = result["afternoon_stats"]
-    low_thr = float(result.get("low_threshold", 48.0))
-    high_thr = float(result.get("high_threshold", 20.0))
+    low_thr = float(result.get("low_threshold", 57.0))
+    high_thr = float(result.get("high_threshold", 21.0))
 
     # KPI 表格（整列紅綠底）
     card_open("📊 第一階段（上午）")
