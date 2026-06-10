@@ -9,6 +9,7 @@ inject_logistics_theme()
 
 # ✅ 只允許導去這三個入口（避免 switch_page 找不到而整頁空白）
 ALLOW = {
+    "pages/31_企劃課首頁.py",
     "pages/7_出貨課首頁.py",
     "pages/8_進貨課首頁.py",
     "pages/9_大樹KPI首頁.py",
@@ -138,6 +139,7 @@ def main():
     _css_and_js()
 
     tiles = [
+        _tile("📈", "企劃課", "", "pages/31_大樹企劃課首頁.py"),
         _tile("📦", "出貨課", "撥貨差異｜出貨/包裝/異常（進入後以條列式顯示）", "pages/7_出貨課首頁.py"),
         _tile("🚚", "進貨課", "驗收/上架/總揀/儲位/差異代庫存（進入後以條列式顯示）", "pages/8_進貨課首頁.py"),
         _tile("📈", "大樹KPI", "KPI 模組入口｜匯總｜趨勢（進入後以條列式顯示）", "pages/9_大樹KPI首頁.py"),
