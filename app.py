@@ -62,11 +62,13 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h4{
 section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"]{ gap: 8px !important; }
 
 /* 隱藏群組首頁 */
+section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="planning-home"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="outbound-home"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="inbound-home"]){  display:none !important; }
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="gt-kpi-home"]){    display:none !important; }
 section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="df-kpi-home"]){    display:none !important; }
 
+section[data-testid="stSidebar"] li:has(span[label="企劃課首頁"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(span[label="出貨課首頁"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(span[label="進貨課首頁"]){ display:none !important; }
 section[data-testid="stSidebar"] li:has(span[label="大樹KPI首頁"]){ display:none !important; }
@@ -75,8 +77,8 @@ section[data-testid="stSidebar"] li:has(span[label="大豐KPI首頁"]){ display:
 
 <script>
 (function () {
-  const HIDE_LABELS = ["出貨課首頁", "進貨課首頁", "大樹KPI首頁", "大豐KPI首頁"];
-  const HIDE_KEYS   = ["outbound-home", "inbound-home", "gt-kpi-home", "df-kpi-home"];
+  const HIDE_LABELS = ["企劃課首頁", "出貨課首頁", "進貨課首頁", "大樹KPI首頁", "大豐KPI首頁"];
+  const HIDE_KEYS   = ["planning-home", "outbound-home", "inbound-home", "gt-kpi-home", "df-kpi-home"];
   
   function hideByHrefAndLabel(){
     const sidebar = document.querySelector('section[data-testid="stSidebar"]');
@@ -113,7 +115,7 @@ section[data-testid="stSidebar"] li:has(span[label="大豐KPI首頁"]){ display:
 )
 
 # =========================
-# ✅ Preflight: 語法/縮排檢查（避免某頁壞掉整站掛）
+# ✅ Preflight: 語法/縮排檢查
 # =========================
 BROKEN_PAGES: list[tuple[str, str]] = []
 MISSING_PAGES: list[str] = []
@@ -152,6 +154,23 @@ home_page = page_if_exists(
     "🏠",
     default=True,
     url_path="home",
+)
+
+# =========================
+# 企劃課
+# =========================
+planning_home = page_if_exists(
+    "pages/31_企劃課首頁.py",
+    "企劃課首頁",
+    "🧩",
+    url_path="planning-home",
+)
+
+planning_pull_detail = page_if_exists(
+    "pages/32_拉單明細.py",
+    "拉單明細",
+    "📄",
+    url_path="planning-pull-detail-32",
 )
 
 # =========================
@@ -400,6 +419,14 @@ pg = st.navigation(
             p
             for p in [
                 home_page,
+            ]
+            if p
+        ],
+        "企劃課": [
+            p
+            for p in [
+                planning_home,
+                planning_pull_detail,
             ]
             if p
         ],
