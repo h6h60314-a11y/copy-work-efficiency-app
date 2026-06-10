@@ -7,14 +7,15 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 st.set_page_config(page_title="大豐物流 - 作業平台", page_icon="🚚", layout="wide")
 inject_logistics_theme()
 
-# ✅ 只允許導去這三個入口（避免 switch_page 找不到而整頁空白）
+# ✅ 只允許導去這些入口
 ALLOW = {
     "pages/31_企劃課首頁.py",
     "pages/7_出貨課首頁.py",
     "pages/8_進貨課首頁.py",
     "pages/9_大樹KPI首頁.py",
-    "pages/19_大豐KPI首頁.py", 
+    "pages/19_大豐KPI首頁.py",
 }
+
 
 def _route_by_query():
     qp = st.query_params
@@ -30,7 +31,6 @@ def _route_by_query():
     st.query_params.clear()
 
     if target not in ALLOW:
-        # 不要讓錯誤路徑把首頁打掛
         return
 
     try:
@@ -38,11 +38,11 @@ def _route_by_query():
     except Exception:
         return
 
+
 def _css_and_js():
     st.markdown(
         r"""
 <style>
-/* 入口方框（並排） */
 .entry-grid{
   display:grid;
   grid-template-columns: repeat(3, minmax(220px, 1fr));
@@ -111,6 +111,7 @@ div[data-testid="stMarkdown"]{ margin: 0 !important; }
         unsafe_allow_html=True,
     )
 
+
 def _tile(icon: str, title: str, desc: str, page_path: str) -> str:
     encoded = quote(page_path, safe="/_.-")
     return (
@@ -126,6 +127,7 @@ def _tile(icon: str, title: str, desc: str, page_path: str) -> str:
         f'</a>'
     )
 
+
 def main():
     _route_by_query()
 
@@ -139,15 +141,41 @@ def main():
     _css_and_js()
 
     tiles = [
-        _tile("📈", "企劃課", "", "pages/31_大樹企劃課首頁.py"),
-        _tile("📦", "出貨課", "撥貨差異｜出貨/包裝/異常（進入後以條列式顯示）", "pages/7_出貨課首頁.py"),
-        _tile("🚚", "進貨課", "驗收/上架/總揀/儲位/差異代庫存（進入後以條列式顯示）", "pages/8_進貨課首頁.py"),
-        _tile("📈", "大樹KPI", "KPI 模組入口｜匯總｜趨勢（進入後以條列式顯示）", "pages/9_大樹KPI首頁.py"),
-        _tile("📊", "大豐KPI", "KPI 模組入口｜進貨課整體｜出貨課整體（進入後以條列式顯示）", "pages/19_大豐KPI首頁.py"),
+        _tile(
+            "📈",
+            "企劃課",
+            "拉單明細｜企劃分析｜行政工具",
+            "pages/31_企劃課首頁.py",
+        ),
+        _tile(
+            "📦",
+            "出貨課",
+            "撥貨差異｜出貨/包裝/異常（進入後以條列式顯示）",
+            "pages/7_出貨課首頁.py",
+        ),
+        _tile(
+            "🚚",
+            "進貨課",
+            "驗收/上架/總揀/儲位/差異代庫存（進入後以條列式顯示）",
+            "pages/8_進貨課首頁.py",
+        ),
+        _tile(
+            "📈",
+            "大樹KPI",
+            "KPI 模組入口｜匯總｜趨勢（進入後以條列式顯示）",
+            "pages/9_大樹KPI首頁.py",
+        ),
+        _tile(
+            "📊",
+            "大豐KPI",
+            "KPI 模組入口｜進貨課整體｜出貨課整體（進入後以條列式顯示）",
+            "pages/19_大豐KPI首頁.py",
+        ),
     ]
 
     st.markdown('<div class="entry-grid">' + "".join(tiles) + "</div>", unsafe_allow_html=True)
     card_close()
+
 
 if __name__ == "__main__":
     main()
