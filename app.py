@@ -57,14 +57,14 @@ def sidebar_link(spec: PageSpec, label: str, css_class: str) -> str:
     text = escape(label)
     href = "/" + escape(spec.url_path.lstrip("/"))
     if css_class == "nav-section":
-        link_style = "font-size:22px!important;font-weight:950!important;margin:24px 0 12px 0;padding:5px 0;color:#0f172a;"
-        text_style = "font-size:22px!important;font-weight:950!important;"
+        link_style = "font-size:21px!important;font-weight:950!important;margin:23px 0 11px 0;padding:5px 0;color:#0f172a;"
+        text_style = "font-size:21px!important;font-weight:950!important;"
     elif css_class == "nav-child":
-        link_style = "font-size:18px!important;font-weight:850!important;margin:0 0 12px 28px;padding:6px 6px;color:#0f172a;"
-        text_style = "font-size:18px!important;font-weight:850!important;"
+        link_style = "font-size:17px!important;font-weight:850!important;margin:0 0 11px 28px;padding:5px 6px;color:#0f172a;"
+        text_style = "font-size:17px!important;font-weight:850!important;"
     else:
-        link_style = "font-size:19px!important;font-weight:850!important;margin:0 0 24px 0;padding:7px 6px;color:#0f172a;"
-        text_style = "font-size:19px!important;font-weight:850!important;"
+        link_style = "font-size:18px!important;font-weight:850!important;margin:0 0 23px 0;padding:6px 6px;color:#0f172a;"
+        text_style = "font-size:18px!important;font-weight:850!important;"
 
     return (
         f'<a class="nav-link {css_class}" style="{link_style}" href="{href}" target="_self">'
@@ -84,12 +84,12 @@ def render_sidebar() -> None:
         ".nav-link{display:flex;align-items:center;gap:10px;text-decoration:none!important;color:#0f172a!important;border-radius:7px;line-height:1.28!important;}",
         ".nav-link:hover{background:rgba(2,132,199,.08);}",
         ".nav-icon{display:inline-flex;width:18px;justify-content:center;flex:0 0 18px;}",
-        ".nav-root{font-size:19px!important;font-weight:850!important;margin:0 0 24px 0;padding:7px 6px;}",
-        ".nav-section{font-size:22px!important;font-weight:950!important;margin:24px 0 12px 0;padding:5px 0;color:#0f172a!important;}",
-        ".nav-child{font-size:18px!important;font-weight:850!important;margin:0 0 12px 28px;padding:6px 6px;}",
-        ".nav-child .nav-text{font-size:18px!important;font-weight:850!important;}",
-        ".nav-section .nav-text{font-size:22px!important;font-weight:950!important;}",
-        ".nav-root .nav-text{font-size:19px!important;font-weight:850!important;}",
+        ".nav-root{font-size:18px!important;font-weight:850!important;margin:0 0 23px 0;padding:6px 6px;}",
+        ".nav-section{font-size:21px!important;font-weight:950!important;margin:23px 0 11px 0;padding:5px 0;color:#0f172a!important;}",
+        ".nav-child{font-size:17px!important;font-weight:850!important;margin:0 0 11px 28px;padding:5px 6px;}",
+        ".nav-child .nav-text{font-size:17px!important;font-weight:850!important;}",
+        ".nav-section .nav-text{font-size:21px!important;font-weight:950!important;}",
+        ".nav-root .nav-text{font-size:18px!important;font-weight:850!important;}",
         "</style>",
     ]
 
