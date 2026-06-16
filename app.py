@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
 import streamlit as st
@@ -16,6 +17,13 @@ st.set_page_config(
 
 BROKEN_PAGES: list[tuple[str, str]] = []
 MISSING_PAGES: list[str] = []
+SECTION_HOME_URLS = {
+    "planning-home",
+    "outbound-home",
+    "inbound-home",
+    "gt-kpi-home",
+    "df-kpi-home",
+}
 
 
 def _syntax_ok(path: Path) -> bool:
@@ -60,12 +68,33 @@ def _show_preflight_warnings() -> None:
                 st.code(f"{path}\n{error}")
 
 
-navigation_sections = {}
-for section in PAGE_SECTIONS:
-    pages = [_page_from_spec(spec) for spec in section.pages]
-    navigation_sections[section.title] = [page for page in pages if page]
+def _section_home_links_script() -> str:
+    mappings = []
+    for section in PAGE_SECTIONS:
+        if not section.title or not section.pages:
+            continue
+        first_page = section.pages[0]
+        if first_page.url_path in SECTION_HOME_URLS:
+            mappings.append({"label": section.title, "key": first_page.url_path})
 
-_show_preflight_warnings()
+    hidden_selectors = "\n".join(
+        f'section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="{url_path}"])'
+        "{ display:none !important; }"
+        for url_path in sorted(SECTION_HOME_URLS)
+    )
 
-pg = st.navigation(navigation_sections, expanded=False)
-pg.run()
+    return f"""
+<style>
+{hidden_selectors}
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h2,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h3,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h4{{
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 6px 8px;
+  margin-left: -8px;
+}}
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h2:hover,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h3:hover,
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h4:hover{{
+  background: rgba(2,132,199,0.10);
