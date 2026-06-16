@@ -5,7 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from nav_config import APP_ICON, APP_TITLE, PAGE_SECTIONS, PageSpec, sidebar_navigation_css
+from nav_config import APP_ICON, APP_TITLE, PAGE_SECTIONS, PageSpec
 
 
 st.set_page_config(
@@ -13,8 +13,6 @@ st.set_page_config(
     page_icon=APP_ICON,
     layout="wide",
 )
-
-st.markdown(sidebar_navigation_css(), unsafe_allow_html=True)
 
 BROKEN_PAGES: list[tuple[str, str]] = []
 MISSING_PAGES: list[str] = []
