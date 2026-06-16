@@ -15,8 +15,6 @@ st.set_page_config(
     layout="wide",
 )
 
-BROKEN_PAGES: list[tuple[str, str]] = []
-MISSING_PAGES: list[str] = []
 SECTION_HOME_URLS = {
     "planning-home",
     "outbound-home",
@@ -24,6 +22,9 @@ SECTION_HOME_URLS = {
     "gt-kpi-home",
     "df-kpi-home",
 }
+
+BROKEN_PAGES: list[tuple[str, str]] = []
+MISSING_PAGES: list[str] = []
 
 
 def _syntax_ok(path: Path) -> bool:
@@ -51,24 +52,23 @@ def _page_from_spec(spec: PageSpec):
         kwargs["icon"] = spec.icon
     if spec.default:
         kwargs["default"] = True
+
     return st.Page(str(path), **kwargs)
 
 
-def _show_preflight_warnings() -> None:
-    if MISSING_PAGES:
-        with st.sidebar.expander("缺少頁面檔案", expanded=False):
-            st.caption("下列頁面設定找不到對應檔案，已暫時從導覽列排除。")
-            for path in MISSING_PAGES:
-                st.code(path)
+def _hide_section_home_items() -> None:
+    selectors = []
+    for url_path in sorted(SECTION_HOME_URLS):
+        selectors.append(
+            'section[data-testid="stSidebar"] '
+            f'li:has(a[data-testid="stSidebarNavLink"][href*="{url_path}"])'
+        )
 
-    if BROKEN_PAGES:
-        with st.sidebar.expander("頁面語法檢查失敗", expanded=True):
-            st.caption("下列頁面有 SyntaxError / IndentationError，已暫時從導覽列排除。")
-            for path, error in BROKEN_PAGES:
-                st.code(f"{path}\n{error}")
+    css = "\n".join(f"{selector}{{ display:none !important; }}" for selector in selectors)
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 
 
-def _section_home_links_script() -> str:
+def _section_home_heading_links() -> None:
     mappings = []
     for section in PAGE_SECTIONS:
         if not section.title or not section.pages:
@@ -77,24 +77,24 @@ def _section_home_links_script() -> str:
         if first_page.url_path in SECTION_HOME_URLS:
             mappings.append({"label": section.title, "key": first_page.url_path})
 
-    hidden_selectors = "\n".join(
-        f'section[data-testid="stSidebar"] li:has(a[data-testid="stSidebarNavLink"][href*="{url_path}"])'
-        "{ display:none !important; }"
-        for url_path in sorted(SECTION_HOME_URLS)
-    )
-
-    return f"""
+    template = """
 <style>
-{hidden_selectors}
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h2,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h3,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h4{{
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h4{
   cursor: pointer;
   border-radius: 10px;
   padding: 6px 8px;
   margin-left: -8px;
-}}
+}
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h2:hover,
 section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h3:hover,
-section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h4:hover{{
+section[data-testid="stSidebar"] [data-testid="stSidebarNav"] h4:hover{
   background: rgba(2,132,199,0.10);
+}
+</style>
+<script>
+(function () {
+  const SECTION_HOMES = __SECTION_HOMES__;
+
+  function bindSectionHomes(){
