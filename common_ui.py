@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
+from urllib.parse import quote, unquote
 from typing import List, Optional, Sequence, Dict, Any
 
 import pandas as pd
@@ -213,6 +214,137 @@ def card_open_plain():
 
 def card_close():
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+@dataclass(frozen=True)
+class HomeNavItem:
+    icon: str
+    title: str
+    description: str
+    page_path: str
+
+
+def route_home_nav(allowed_pages: Sequence[str]) -> None:
+    raw = st.query_params.get("page", "")
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+    if not raw:
+        return
+
+    target = unquote(str(raw))
+    st.query_params.clear()
+
+    if target not in set(allowed_pages):
+        return
+
+    try:
+        st.switch_page(target)
+    except Exception:
+        return
+
+
+def render_home_nav(items: Sequence[HomeNavItem], *, columns: int = 3) -> None:
+    st.markdown(
+        """
+<style>
+.home-nav-grid{
+  display:grid;
+  grid-template-columns: repeat(var(--home-nav-cols, 3), minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+@media (max-width: 1100px){ .home-nav-grid{ grid-template-columns: repeat(2, minmax(220px, 1fr)); } }
+@media (max-width: 720px){ .home-nav-grid{ grid-template-columns: 1fr; } }
+
+.home-nav-link{
+  display:block;
+  height:100%;
+  color: inherit !important;
+  text-decoration: none !important;
+}
+.home-nav-card{
+  position:relative;
+  min-height: 122px;
+  height:100%;
+  border: 1px solid rgba(15,23,42,0.10);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.92);
+  padding: 14px 14px 34px;
+  box-shadow: 0 14px 26px rgba(2,6,23,0.06);
+  transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease;
+}
+.home-nav-card:hover{
+  transform: translateY(-1px);
+  border-color: rgba(2,132,199,0.32);
+  box-shadow: 0 18px 34px rgba(2,6,23,0.10);
+}
+.home-nav-head{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.home-nav-icon{
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius: 12px;
+  border: 1px solid rgba(2,132,199,0.18);
+  background: rgba(2,132,199,0.10);
+  font-size: 18px;
+}
+.home-nav-title{
+  font-size: 16px;
+  font-weight: 950;
+  line-height: 1.25;
+  color: rgba(15,23,42,0.94);
+}
+.home-nav-desc{
+  margin-top: 8px;
+  color: rgba(15,23,42,0.66);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+.home-nav-cta{
+  position:absolute;
+  right: 14px;
+  bottom: 12px;
+  color: rgba(2,132,199,0.90);
+  font-size: 12px;
+  font-weight: 900;
+}
+div[data-testid="stMarkdown"]{ margin-bottom: 0 !important; }
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+    safe_cols = max(1, min(int(columns), 4))
+    cards = []
+    for item in items:
+        encoded = quote(item.page_path, safe="/_.-")
+        cards.append(
+            f'<a class="home-nav-link" href="?page={encoded}" target="_self">'
+            f'<div class="home-nav-card">'
+            f'<div class="home-nav-head">'
+            f'<div class="home-nav-icon">{item.icon}</div>'
+            f'<div class="home-nav-title">{item.title}</div>'
+            f'</div>'
+            f'<div class="home-nav-desc">{item.description}</div>'
+            f'<div class="home-nav-cta">進入 →</div>'
+            f'</div>'
+            f'</a>'
+        )
+
+    st.markdown(
+        f'<div class="home-nav-grid" style="--home-nav-cols:{safe_cols};">'
+        + "".join(cards)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # =========================================================
