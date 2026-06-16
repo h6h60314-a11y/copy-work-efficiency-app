@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import replace
+from html import escape
 from pathlib import Path
 
 import streamlit as st
@@ -31,6 +32,7 @@ def make_page(spec: PageSpec):
         return None
     if not syntax_ok(path):
         return None
+
     kwargs = {"title": spec.title, "url_path": spec.url_path}
     if spec.icon:
         kwargs["icon"] = spec.icon
@@ -50,13 +52,16 @@ def all_pages():
     return result
 
 
-def sidebar_link(spec: PageSpec, label: str, css_class: str) -> None:
-    st.sidebar.markdown(f'<div class="{css_class}">', unsafe_allow_html=True)
-    try:
-        st.sidebar.page_link(spec.path, label=label, icon=spec.icon or None)
-    except Exception:
-        st.sidebar.markdown(label)
-    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+def sidebar_link(spec: PageSpec, label: str, css_class: str) -> str:
+    icon = escape(spec.icon or "")
+    text = escape(label)
+    href = "/" + escape(spec.url_path.lstrip("/"))
+    return (
+        f'<a class="nav-link {css_class}" href="{href}" target="_self">'
+        f'<span class="nav-icon">{icon}</span>'
+        f'<span class="nav-text">{text}</span>'
+        f"</a>"
+    )
 
 
 def render_sidebar() -> None:
@@ -64,35 +69,32 @@ def render_sidebar() -> None:
         "<style>",
         "section[data-testid='stSidebar']{background:#0f2135!important;border-right:0!important;}",
         "section[data-testid='stSidebar'] *{font-family:'Noto Sans TC','Microsoft JhengHei',system-ui,sans-serif;}",
-        "section[data-testid='stSidebar'] [data-testid='stSidebarContent']{padding:18px 14px 24px 16px!important;}",
-        "section[data-testid='stSidebar'] a[data-testid='stPageLink']{text-decoration:none!important;color:#eef6ff!important;}",
-        "section[data-testid='stSidebar'] div[data-testid='stPageLink']{margin:0!important;padding:0!important;}",
-        "section[data-testid='stSidebar'] div[data-testid='stPageLink'] a{border-radius:7px!important;min-height:0!important;height:auto!important;padding:0!important;background:transparent!important;}",
-        "section[data-testid='stSidebar'] div[data-testid='stPageLink'] a:hover{background:rgba(255,255,255,.07)!important;}",
-        "section[data-testid='stSidebar'] div[data-testid='stPageLink'] a[aria-current='page']{background:rgba(255,255,255,.09)!important;}",
-        "section[data-testid='stSidebar'] div[data-testid='stPageLink'] span{color:#eef6ff!important;}",
-        ".nav-root{margin:0 0 20px 0;}",
-        ".nav-root div[data-testid='stPageLink'] a{font-weight:900!important;font-size:17px!important;padding:6px 8px!important;}",
-        ".nav-section{margin:22px 0 10px 0;}",
-        ".nav-section div[data-testid='stPageLink'] a{font-weight:950!important;font-size:18px!important;color:#d9ecff!important;padding:3px 0!important;background:transparent!important;}",
-        ".nav-section div[data-testid='stPageLink'] span{font-weight:950!important;font-size:18px!important;}",
-        ".nav-section div[data-testid='stPageLink'] a[aria-current='page']{background:transparent!important;}",
-        ".nav-child{margin-left:25px;margin-bottom:9px;}",
-        ".nav-child div[data-testid='stPageLink'] a{font-weight:850!important;font-size:15px!important;line-height:1.25!important;padding:5px 6px!important;}",
-        ".nav-child div[data-testid='stPageLink'] span{font-weight:850!important;font-size:15px!important;}",
+        "section[data-testid='stSidebar'] [data-testid='stSidebarContent']{padding:18px 18px 24px 18px!important;}",
+        "section[data-testid='stSidebar'] div[data-testid='stMarkdown']{margin:0!important;}",
+        ".nav-link{display:flex;align-items:center;gap:10px;text-decoration:none!important;color:#eef6ff!important;border-radius:7px;line-height:1.25;}",
+        ".nav-link:hover{background:rgba(255,255,255,.07);}",
+        ".nav-icon{display:inline-flex;width:18px;justify-content:center;flex:0 0 18px;}",
+        ".nav-root{font-size:16px;font-weight:850;margin:0 0 22px 0;padding:6px 6px;}",
+        ".nav-section{font-size:18px;font-weight:950;margin:22px 0 10px 0;padding:4px 0;color:#d9ecff!important;}",
+        ".nav-child{font-size:15px;font-weight:850;margin:0 0 10px 26px;padding:5px 6px;}",
+        ".nav-child .nav-text{font-size:15px;font-weight:850;}",
+        ".nav-section .nav-text{font-size:18px;font-weight:950;}",
+        ".nav-root .nav-text{font-size:16px;font-weight:850;}",
         "</style>",
     ]
-    st.sidebar.markdown("\n".join(css), unsafe_allow_html=True)
+
+    links = []
     for section in PAGE_SECTIONS:
         if not section.pages:
             continue
         if not section.title:
-            for spec in section.pages:
-                sidebar_link(spec, spec.title, "nav-root")
-        else:
-            sidebar_link(section.pages[0], section.title, "nav-section")
-            for spec in section.pages[1:]:
-                sidebar_link(spec, spec.title, "nav-child")
+            links.extend(sidebar_link(spec, spec.title, "nav-root") for spec in section.pages)
+            continue
+
+        links.append(sidebar_link(section.pages[0], section.title, "nav-section"))
+        links.extend(sidebar_link(spec, spec.title, "nav-child") for spec in section.pages[1:])
+
+    st.sidebar.markdown("\n".join(css + links), unsafe_allow_html=True)
 
 
 pg = st.navigation(all_pages(), position="hidden")
