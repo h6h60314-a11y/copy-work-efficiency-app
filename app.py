@@ -75,11 +75,11 @@ def render_sidebar() -> None:
         ".nav-link:hover{background:rgba(255,255,255,.07);}",
         ".nav-icon{display:inline-flex;width:18px;justify-content:center;flex:0 0 18px;}",
         ".nav-root{font-size:16px;font-weight:850;margin:0 0 22px 0;padding:6px 6px;}",
-        ".nav-section{font-size:18px;font-weight:950;margin:22px 0 10px 0;padding:4px 0;color:#d9ecff!important;}",
-        ".nav-child{font-size:15px;font-weight:850;margin:0 0 10px 26px;padding:5px 6px;}",
+        ".nav-section{font-size:18px;font-weight:950;margin:24px 0 10px 0;padding:4px 0;color:#d9ecff!important;}",
+        ".nav-child{font-size:15px;font-weight:850;margin:0 0 12px 26px;padding:5px 6px;}",
         ".nav-child .nav-text{font-size:15px;font-weight:850;}",
         ".nav-section .nav-text{font-size:18px;font-weight:950;}",
-        ".nav-root .nav-text{font-size:16px;font-weight:850;}",
+        ".nav-root .nav-text{font-size:24px;font-weight:850;}",
         "</style>",
     ]
 
