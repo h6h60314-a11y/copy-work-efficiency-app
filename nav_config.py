@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 
-APP_TITLE = "物流作業平台"
+APP_TITLE = "大豐物流作業平台"
 APP_ICON = "assets/gf_logo.png"
 
 HIDDEN_HOME_URLS = {
