@@ -105,8 +105,8 @@ def render_sidebar() -> None:
         '<div class="brand-block">'
         '<div class="brand-icon">🌳</div>'
         '<div>'
-        '<div class="brand-kicker">大樹醫藥體系</div>'
-        '<div class="brand-title">大豐物流</div>'
+        '<div class="brand-kicker">大樹醫藥股份有限公司</div>'
+        '<div class="brand-title">大豐物流部</div>'
         '<div class="brand-subtitle">作業平台</div>'
         "</div>"
         "</div>"
