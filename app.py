@@ -56,10 +56,20 @@ def sidebar_link(spec: PageSpec, label: str, css_class: str) -> str:
     icon = escape(spec.icon or "")
     text = escape(label)
     href = "/" + escape(spec.url_path.lstrip("/"))
+    if css_class == "nav-section":
+        link_style = "font-size:21px;font-weight:950;margin:24px 0 12px 0;padding:5px 0;color:#0f172a;"
+        text_style = "font-size:21px;font-weight:950;"
+    elif css_class == "nav-child":
+        link_style = "font-size:17px;font-weight:850;margin:0 0 12px 28px;padding:6px 6px;color:#0f172a;"
+        text_style = "font-size:17px;font-weight:850;"
+    else:
+        link_style = "font-size:18px;font-weight:850;margin:0 0 24px 0;padding:7px 6px;color:#0f172a;"
+        text_style = "font-size:18px;font-weight:850;"
+
     return (
-        f'<a class="nav-link {css_class}" href="{href}" target="_self">'
+        f'<a class="nav-link {css_class}" style="{link_style}" href="{href}" target="_self">'
         f'<span class="nav-icon">{icon}</span>'
-        f'<span class="nav-text">{text}</span>'
+        f'<span class="nav-text" style="{text_style}">{text}</span>'
         f"</a>"
     )
 
