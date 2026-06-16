@@ -84,6 +84,11 @@ def render_sidebar() -> None:
         "section[data-testid='stSidebar'] *{font-family:'Noto Sans TC','Microsoft JhengHei',system-ui,sans-serif;}",
         "section[data-testid='stSidebar'] [data-testid='stSidebarContent']{padding:18px 18px 24px 18px!important;}",
         "section[data-testid='stSidebar'] div[data-testid='stMarkdown']{margin:0!important;}",
+        ".brand-block{display:flex;align-items:center;gap:12px;margin:2px 0 22px 0;padding:8px 6px 10px 6px;border-bottom:1px solid rgba(15,23,42,.08);}",
+        ".brand-icon{font-size:34px;line-height:1;color:#3aa64a;flex:0 0 34px;}",
+        ".brand-kicker{font-size:12px;font-weight:850;line-height:1.1;color:#334155;letter-spacing:.2px;}",
+        ".brand-title{font-size:25px;font-weight:950;line-height:1.1;color:#0f172a;letter-spacing:.4px;margin-top:3px;}",
+        ".brand-subtitle{font-size:13px;font-weight:850;line-height:1.1;color:#334155;margin-top:4px;letter-spacing:.2px;}",
         ".nav-link{display:flex;align-items:center;gap:10px;text-decoration:none!important;color:#0f172a!important;border-radius:7px;line-height:1.28!important;}",
         ".nav-link:hover{background:rgba(2,132,199,.08);}",
         ".nav-icon{display:inline-flex;justify-content:center;align-items:center;line-height:1;}",
@@ -96,7 +101,16 @@ def render_sidebar() -> None:
         "</style>",
     ]
 
-    links = []
+    links = [
+        '<div class="brand-block">'
+        '<div class="brand-icon">🌳</div>'
+        '<div>'
+        '<div class="brand-kicker">大樹醫藥體系</div>'
+        '<div class="brand-title">大豐物流</div>'
+        '<div class="brand-subtitle">作業平台</div>'
+        "</div>"
+        "</div>"
+    ]
     for section in PAGE_SECTIONS:
         if not section.pages:
             continue
