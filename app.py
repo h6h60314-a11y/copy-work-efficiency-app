@@ -67,19 +67,19 @@ def sidebar_link(spec: PageSpec, label: str, css_class: str) -> str:
 def render_sidebar() -> None:
     css = [
         "<style>",
-        "section[data-testid='stSidebar']{background:#0f2135!important;border-right:0!important;}",
+        "section[data-testid='stSidebar']{background:#f8fafc!important;border-right:1px solid rgba(15,23,42,.10)!important;}",
         "section[data-testid='stSidebar'] *{font-family:'Noto Sans TC','Microsoft JhengHei',system-ui,sans-serif;}",
         "section[data-testid='stSidebar'] [data-testid='stSidebarContent']{padding:18px 18px 24px 18px!important;}",
         "section[data-testid='stSidebar'] div[data-testid='stMarkdown']{margin:0!important;}",
-        ".nav-link{display:flex;align-items:center;gap:10px;text-decoration:none!important;color:#eef6ff!important;border-radius:7px;line-height:1.25;}",
-        ".nav-link:hover{background:rgba(255,255,255,.07);}",
+        ".nav-link{display:flex;align-items:center;gap:10px;text-decoration:none!important;color:#0f172a!important;border-radius:7px;line-height:1.25;}",
+        ".nav-link:hover{background:rgba(2,132,199,.08);}",
         ".nav-icon{display:inline-flex;width:18px;justify-content:center;flex:0 0 18px;}",
-        ".nav-root{font-size:16px;font-weight:850;margin:0 0 22px 0;padding:6px 6px;}",
-        ".nav-section{font-size:18px;font-weight:950;margin:28px 0 10px 0;padding:4px 0;color:#d9ecff!important;}",
-        ".nav-child{font-size:15px;font-weight:850;margin:0 0 24px 26px;padding:5px 6px;}",
-        ".nav-child .nav-text{font-size:24px;font-weight:850;}",
-        ".nav-section .nav-text{font-size:18px;font-weight:950;}",
-        ".nav-root .nav-text{font-size:28px;font-weight:850;}",
+        ".nav-root{font-size:18px;font-weight:850;margin:0 0 24px 0;padding:7px 6px;}",
+        ".nav-section{font-size:21px;font-weight:950;margin:24px 0 12px 0;padding:5px 0;color:#0f172a!important;}",
+        ".nav-child{font-size:17px;font-weight:850;margin:0 0 12px 28px;padding:6px 6px;}",
+        ".nav-child .nav-text{font-size:17px;font-weight:850;}",
+        ".nav-section .nav-text{font-size:21px;font-weight:950;}",
+        ".nav-root .nav-text{font-size:18px;font-weight:850;}",
         "</style>",
     ]
 
