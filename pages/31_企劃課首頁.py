@@ -1,39 +1,35 @@
-# pages/31_企劃課首頁.py
 import streamlit as st
 
-from common_ui import inject_logistics_theme, set_page, card_open, card_close
+from common_ui import (
+    HomeNavItem,
+    card_close,
+    card_open,
+    inject_logistics_theme,
+    render_home_nav,
+    route_home_nav,
+    set_page,
+)
 
-st.set_page_config(page_title="企劃課", page_icon="🧩", layout="wide")
+st.set_page_config(page_title="企劃課", page_icon="🧭", layout="wide")
 inject_logistics_theme()
 
-
-def _item(icon: str, title: str, page_path: str, desc: str):
-    cols = st.columns([0.02, 0.98])
-
-    with cols[0]:
-        st.markdown("•")
-
-    with cols[1]:
-        st.page_link(
-            page_path,
-            label=f"{icon}  {title}",
-        )
-        st.markdown(f"　　{desc}")
+ITEMS = (
+    HomeNavItem(
+        "📋",
+        "拉單明細",
+        "整理拉單明細欄位與格式，產出可接續作業的 Excel 檔。",
+        "pages/32_拉單明細.py",
+    ),
+)
 
 
 def main():
-    set_page("企劃課", icon="🧩", subtitle="Planning｜企劃分析與行政作業入口")
+    route_home_nav([item.page_path for item in ITEMS])
 
-    card_open("🧩 企劃課模組")
+    set_page("企劃課", icon="🧭", subtitle="企劃資料整理與作業前置入口。")
 
-    _item(
-        "📄",
-        "拉單明細",
-        "pages/32_拉單明細.py",
-        "多檔拉單明細合併整理，保留指定欄位並產出單一 Excel 檔",
-    )
-
-
+    card_open("企劃課功能")
+    render_home_nav(ITEMS, columns=3)
     card_close()
 
 
