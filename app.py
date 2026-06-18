@@ -5,12 +5,23 @@ from dataclasses import replace
 from pathlib import Path
 
 import streamlit as st
+from PIL import Image
 
 from nav_config import APP_ICON, APP_TITLE, PAGE_SECTIONS, PageSpec
 from sidebar_ui import render_sidebar
 
 
-st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="wide")
+def load_page_icon():
+    icon_path = Path(APP_ICON)
+    if not icon_path.exists():
+        return APP_ICON
+
+    image = Image.open(icon_path)
+    image.load()
+    return image
+
+
+st.set_page_config(page_title=APP_TITLE, page_icon=load_page_icon(), layout="wide")
 
 BROKEN_PAGES: list[tuple[str, str]] = []
 MISSING_PAGES: list[str] = []
