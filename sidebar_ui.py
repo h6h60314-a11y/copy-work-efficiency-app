@@ -66,11 +66,19 @@ def render_sidebar(page_sections: Sequence[SectionSpec]) -> None:
     ]
 
     links = [
-        '<div class="brand-block"><div class="brand-icon">🌳</div><div>'
-        '<div class="brand-kicker">大樹醫藥體系</div>'
-        '<div class="brand-title">大豐物流</div>'
-        '<div class="brand-subtitle">作業平台</div>'
-        '<div class="brand-version">SIDEBAR FONT TEST v2</div>'
+        '<div style="display:flex;align-items:center;justify-content:center;gap:18px;'
+        'margin:-2px 0 24px 0;padding:10px 4px 14px 4px;">'
+        '<div style="font-size:64px;line-height:1;color:#1DA539;flex:0 0 64px;'
+        'filter:drop-shadow(0 2px 2px rgba(29,165,57,.18));">🌳</div>'
+        '<div>'
+        '<div style="font-size:20px!important;font-weight:900!important;line-height:1.1;'
+        'color:#334155;letter-spacing:.2px;text-align:left;">大樹醫藥體系</div>'
+        '<div style="font-size:46px!important;font-weight:950!important;line-height:1.02;'
+        'color:#0f172a;letter-spacing:.6px;margin-top:6px;text-align:left;">大豐物流</div>'
+        '<div style="font-size:22px!important;font-weight:900!important;line-height:1.1;'
+        'color:#334155;margin-top:7px;letter-spacing:.2px;text-align:left;">作業平台</div>'
+        '<div style="font-size:12px!important;font-weight:900!important;color:#1DA539;'
+        'margin-top:6px;letter-spacing:.4px;">SIDEBAR FONT TEST v3</div>'
         "</div></div>"
     ]
 
