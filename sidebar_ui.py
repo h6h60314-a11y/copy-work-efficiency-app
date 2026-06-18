@@ -138,15 +138,15 @@ def _link(spec: PageSpec, label: str, css_class: str) -> str:
     layout_styles = {
         "nav-root": (
             "display:flex!important;align-items:center!important;gap:10px!important;"
-            "margin:0 0 10px 0!important;padding:9px 14px!important;"
+            "margin:0 0 20px 0!important;padding:9px 14px!important;"
         ),
         "nav-section": (
             "display:flex!important;align-items:center!important;gap:10px!important;"
-            "margin:8px 0 2px 0!important;padding:3px 0!important;"
+            "margin:18px 0 9px 0!important;padding:5px 0!important;"
         ),
         "nav-child": (
             "display:flex!important;align-items:center!important;gap:10px!important;"
-            "margin:0 0 1px 30px!important;padding:3px 4px!important;"
+            "margin:0 0 9px 30px!important;padding:5px 4px!important;"
         ),
     }
     text_size = text_sizes.get(css_class, CHILD_TEXT_SIZE)
@@ -172,12 +172,12 @@ def render_sidebar(page_sections: Sequence[SectionSpec]) -> None:
         "section[data-testid='stSidebar'] [data-testid='stSidebarContent']{padding:4px 26px 30px 26px!important;}",
         "section[data-testid='stSidebar'] div[data-testid='stMarkdown']{margin:0!important;}",
         ".sidebar-scale-shell{zoom:var(--sidebar-scale);padding-top:14px;}",
-        ".brand-block{display:flex;align-items:center;gap:16px;margin:0 0 14px 0;padding:0;background:transparent;border:0;box-shadow:none;}",
+        ".brand-block{display:flex;align-items:center;gap:16px;margin:0 0 18px 0;padding:0;background:transparent;border:0;box-shadow:none;}",
         ".brand-logo{width:58px;height:58px;object-fit:contain;display:block;filter:drop-shadow(0 3px 4px rgba(29,165,57,.18));}",
-        ".brand-text{display:flex;flex-direction:column;gap:2px;color:#0f172a;white-space:nowrap;}",
-        ".brand-kicker{font-size:15px;font-weight:900;line-height:.98;color:#334155;}",
-        ".brand-title{font-size:25px;font-weight:950;line-height:.98;color:#0f172a;letter-spacing:.3px;}",
-        ".brand-subtitle{font-size:16px;font-weight:900;line-height:.98;color:#334155;}",
+        ".brand-text{display:flex;flex-direction:column;gap:4px;color:#0f172a;white-space:nowrap;}",
+        ".brand-kicker{font-size:15px;font-weight:900;line-height:1.02;color:#334155;}",
+        ".brand-title{font-size:25px;font-weight:950;line-height:1.02;color:#0f172a;letter-spacing:.3px;}",
+        ".brand-subtitle{font-size:16px;font-weight:900;line-height:1.02;color:#334155;}",
         ".nav-list{display:flex;flex-direction:column;gap:0;}",
         ".nav-link{display:flex;align-items:center;text-decoration:none!important;color:#0f172a!important;border-radius:8px;line-height:1.22!important;}",
         ".nav-link:hover{background:rgba(29,165,57,.08);}",
