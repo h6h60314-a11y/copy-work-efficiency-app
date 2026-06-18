@@ -37,7 +37,7 @@ def render_sidebar(page_sections: Sequence[SectionSpec]) -> None:
         ".brand-block{display:flex;align-items:center;gap:16px;margin:0 0 22px 0;padding:0;background:transparent;border:0;box-shadow:none;}",
         ".brand-icon{font-size:56px;line-height:1;color:var(--brand-green);filter:drop-shadow(0 3px 4px rgba(29,165,57,.18));}",
         ".brand-text{display:flex;flex-direction:column;gap:6px;color:#0f172a;white-space:nowrap;}",
-        ".brand-kicker{font-size:15px;font-weight:900;line-height:1.05;color:#334155;}",
+        ".brand-kicker{font-size:24px;font-weight:900;line-height:1.05;color:#334155;}",
         ".brand-title{font-size:25px;font-weight:950;line-height:1.05;color:#0f172a;letter-spacing:.3px;}",
         ".brand-subtitle{font-size:16px;font-weight:900;line-height:1.05;color:#334155;}",
         ".nav-list{display:flex;flex-direction:column;gap:0;}",
