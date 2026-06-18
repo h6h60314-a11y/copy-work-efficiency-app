@@ -66,20 +66,20 @@ def render_sidebar(page_sections: Sequence[SectionSpec]) -> None:
     ]
 
     links = [
-        '<div style="display:flex;align-items:center;justify-content:center;gap:18px;'
-        'margin:-2px 0 24px 0;padding:10px 4px 14px 4px;">'
-        '<div style="font-size:64px;line-height:1;color:#1DA539;flex:0 0 64px;'
-        'filter:drop-shadow(0 2px 2px rgba(29,165,57,.18));">🌳</div>'
-        '<div>'
-        '<div style="font-size:20px!important;font-weight:900!important;line-height:1.1;'
-        'color:#334155;letter-spacing:.2px;text-align:left;">大樹醫藥體系</div>'
-        '<div style="font-size:46px!important;font-weight:950!important;line-height:1.02;'
-        'color:#0f172a;letter-spacing:.6px;margin-top:6px;text-align:left;">大豐物流</div>'
-        '<div style="font-size:22px!important;font-weight:900!important;line-height:1.1;'
-        'color:#334155;margin-top:7px;letter-spacing:.2px;text-align:left;">作業平台</div>'
-        '<div style="font-size:12px!important;font-weight:900!important;color:#1DA539;'
-        'margin-top:6px;letter-spacing:.4px;">SIDEBAR FONT TEST v3</div>'
-        "</div></div>"
+        '<div style="margin:-4px 0 22px 0;padding:4px 0 10px 0;">'
+        '<svg width="285" height="118" viewBox="0 0 285 118" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="大樹醫藥體系 大豐物流 作業平台">'
+        '<g transform="translate(18 24)">'
+        '<circle cx="23" cy="17" r="13" fill="#1DA539"/>'
+        '<circle cx="12" cy="30" r="12" fill="#1DA539"/>'
+        '<circle cx="34" cy="31" r="12" fill="#1DA539"/>'
+        '<rect x="19" y="28" width="9" height="27" rx="3" fill="#1DA539"/>'
+        '</g>'
+        '<text x="76" y="30" font-family="Noto Sans TC, Microsoft JhengHei, Arial, sans-serif" font-size="15" font-weight="900" fill="#334155">大樹醫藥體系</text>'
+        '<text x="76" y="66" font-family="Noto Sans TC, Microsoft JhengHei, Arial, sans-serif" font-size="34" font-weight="900" fill="#0f172a">大豐物流</text>'
+        '<text x="76" y="94" font-family="Noto Sans TC, Microsoft JhengHei, Arial, sans-serif" font-size="17" font-weight="900" fill="#334155">作業平台</text>'
+        '<rect x="16" y="108" width="252" height="5" rx="2.5" fill="#1DA539"/>'
+        '</svg>'
+        "</div>"
     ]
 
     for section in page_sections:
