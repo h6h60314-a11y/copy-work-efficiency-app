@@ -9,7 +9,7 @@ from nav_config import PageSpec, SectionSpec
 
 
 BRAND_GREEN = "#1DA539"
-SIDEBAR_SCALE = 1.23
+SIDEBAR_SCALE = 1.22
 
 # Change these numbers when you want to adjust each sidebar text level.
 ROOT_TEXT_SIZE = 18
@@ -157,7 +157,7 @@ def render_sidebar(page_sections: Sequence[SectionSpec]) -> None:
         "section[data-testid='stSidebar'] [data-testid='stSidebarContent']{padding:4px 26px 30px 26px!important;}",
         "section[data-testid='stSidebar'] div[data-testid='stMarkdown']{margin:0!important;}",
         ".sidebar-scale-shell{zoom:var(--sidebar-scale);padding-top:14px;}",
-        ".brand-block{display:flex;align-items:center;gap:16px;margin:0 0 22px 0;padding:0;background:transparent;border:0;box-shadow:none;}",
+        ".brand-block{display:flex;align-items:center;gap:16px;margin:0 0 18px 0;padding:0;background:transparent;border:0;box-shadow:none;}",
         ".brand-logo{width:58px;height:58px;object-fit:contain;display:block;filter:drop-shadow(0 3px 4px rgba(29,165,57,.18));}",
         ".brand-text{display:flex;flex-direction:column;gap:6px;color:#0f172a;white-space:nowrap;}",
         ".brand-kicker{font-size:15px;font-weight:900;line-height:1.05;color:#334155;}",
@@ -166,10 +166,10 @@ def render_sidebar(page_sections: Sequence[SectionSpec]) -> None:
         ".nav-list{display:flex;flex-direction:column;gap:0;}",
         ".nav-link{display:flex;align-items:center;text-decoration:none!important;color:#0f172a!important;border-radius:8px;line-height:1.22!important;}",
         ".nav-link:hover{background:rgba(29,165,57,.08);}",
-        ".nav-root{gap:10px;margin:0 0 25px 0;padding:9px 14px;background:linear-gradient(180deg,#39B54A,#2F9E44)!important;color:#fff!important;box-shadow:0 8px 16px rgba(29,165,57,.22);}",
+        ".nav-root{gap:10px;margin:0 0 16px 0;padding:9px 14px;background:linear-gradient(180deg,#39B54A,#2F9E44)!important;color:#fff!important;box-shadow:0 8px 16px rgba(29,165,57,.22);}",
         ".nav-root .nav-text,.nav-root .nav-icon{color:#fff!important;}",
-        ".nav-section{gap:10px;margin:23px 0 13px 0;padding:5px 0;font-weight:950!important;}",
-        ".nav-child{gap:10px;margin:0 0 13px 30px;padding:5px 4px;font-weight:850!important;}",
+        ".nav-section{gap:10px;margin:14px 0 6px 0;padding:4px 0;font-weight:950!important;}",
+        ".nav-child{gap:10px;margin:0 0 5px 30px;padding:4px 4px;font-weight:850!important;}",
         ".nav-root .nav-text{font-weight:900!important;}",
         ".nav-section .nav-text{font-weight:950!important;}",
         ".nav-child .nav-text{font-weight:850!important;}",
