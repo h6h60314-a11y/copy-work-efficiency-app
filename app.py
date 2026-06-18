@@ -84,8 +84,8 @@ def render_sidebar() -> None:
         "section[data-testid='stSidebar'] *{font-family:'Noto Sans TC','Microsoft JhengHei',system-ui,sans-serif;}",
         "section[data-testid='stSidebar'] [data-testid='stSidebarContent']{padding:18px 18px 24px 18px!important;}",
         "section[data-testid='stSidebar'] div[data-testid='stMarkdown']{margin:0!important;}",
-        ".brand-block{display:flex;align-items:center;gap:14px;margin:0 0 24px 0;padding:14px 12px 15px 12px;border:1px solid rgba(34,197,94,.22);border-radius:14px;background:linear-gradient(135deg,rgba(240,253,244,.96),rgba(255,255,255,.94));box-shadow:0 10px 24px rgba(15,23,42,.07);}",
-        ".brand-icon{font-size:44px;line-height:1;color:#2f9e44;flex:0 0 44px;filter:drop-shadow(0 2px 2px rgba(22,101,52,.16));}",
+        ".brand-block{display:flex;align-items:center;gap:14px;margin:0 0 24px 0;padding:14px 12px 15px 12px;border:1px solid rgba(29,165,57,.18);border-radius:14px;background:linear-gradient(135deg,#F1FBF3,#FFFFFF);box-shadow:0 10px 24px rgba(29,165,57,.08);}",
+        ".brand-icon{font-size:44px;line-height:1;color:#3DBD57;flex:0 0 44px;filter:drop-shadow(0 2px 2px rgba(29,165,57,.18));}",
         ".brand-kicker{font-size:14px;font-weight:900;line-height:1.1;color:#334155;letter-spacing:.3px;}",
         ".brand-title{font-size:31px;font-weight:950;line-height:1.02;color:#0f172a;letter-spacing:.8px;margin-top:5px;}",
         ".brand-subtitle{font-size:16px;font-weight:900;line-height:1.1;color:#1f2937;margin-top:6px;letter-spacing:.4px;}",
@@ -98,32 +98,3 @@ def render_sidebar() -> None:
         ".nav-child .nav-text{font-size:16px!important;font-weight:850!important;}",
         ".nav-section .nav-text{font-size:20px!important;font-weight:950!important;}",
         ".nav-root .nav-text{font-size:17px!important;font-weight:850!important;}",
-        "</style>",
-    ]
-
-    links = [
-        '<div class="brand-block">'
-        '<div class="brand-icon">🌳</div>'
-        '<div>'
-        '<div class="brand-kicker">大樹醫藥股份有限公司</div>'
-        '<div class="brand-title">大豐物流部</div>'
-        '<div class="brand-subtitle">作業平台</div>'
-        "</div>"
-        "</div>"
-    ]
-    for section in PAGE_SECTIONS:
-        if not section.pages:
-            continue
-        if not section.title:
-            links.extend(sidebar_link(spec, spec.title, "nav-root") for spec in section.pages)
-            continue
-
-        links.append(sidebar_link(section.pages[0], section.title, "nav-section"))
-        links.extend(sidebar_link(spec, spec.title, "nav-child") for spec in section.pages[1:])
-
-    st.sidebar.markdown("\n".join(css + links), unsafe_allow_html=True)
-
-
-pg = st.navigation(all_pages(), position="hidden")
-render_sidebar()
-pg.run()
