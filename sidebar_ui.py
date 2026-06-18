@@ -67,17 +67,16 @@ def render_sidebar(page_sections: Sequence[SectionSpec]) -> None:
 
     links = [
         '<div style="margin:-4px 0 22px 0;padding:4px 0 10px 0;">'
-        '<svg width="285" height="118" viewBox="0 0 285 118" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="大樹醫藥體系 大豐物流 作業平台">'
-        '<g transform="translate(18 24)">'
+        '<svg width="300" height="124" viewBox="0 0 300 124" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="大樹醫藥體系 大豐物流 作業平台">'
+        '<g transform="translate(16 22) scale(1.12)">'
         '<circle cx="23" cy="17" r="13" fill="#1DA539"/>'
         '<circle cx="12" cy="30" r="12" fill="#1DA539"/>'
         '<circle cx="34" cy="31" r="12" fill="#1DA539"/>'
         '<rect x="19" y="28" width="9" height="27" rx="3" fill="#1DA539"/>'
         '</g>'
-        '<text x="76" y="30" font-family="Noto Sans TC, Microsoft JhengHei, Arial, sans-serif" font-size="15" font-weight="900" fill="#334155">大樹醫藥體系</text>'
-        '<text x="76" y="66" font-family="Noto Sans TC, Microsoft JhengHei, Arial, sans-serif" font-size="34" font-weight="900" fill="#0f172a">大豐物流</text>'
-        '<text x="76" y="94" font-family="Noto Sans TC, Microsoft JhengHei, Arial, sans-serif" font-size="17" font-weight="900" fill="#334155">作業平台</text>'
-        '<rect x="16" y="108" width="252" height="5" rx="2.5" fill="#1DA539"/>'
+        '<text x="82" y="31" font-family="Noto Sans TC, Microsoft JhengHei, Arial, sans-serif" font-size="18" font-weight="900" fill="#334155">大樹醫藥體系</text>'
+        '<text x="82" y="72" font-family="Noto Sans TC, Microsoft JhengHei, Arial, sans-serif" font-size="40" font-weight="900" fill="#0f172a">大豐物流</text>'
+        '<text x="82" y="104" font-family="Noto Sans TC, Microsoft JhengHei, Arial, sans-serif" font-size="21" font-weight="900" fill="#334155">作業平台</text>'
         '</svg>'
         "</div>"
     ]
