@@ -9,16 +9,16 @@ from nav_config import PageSpec, SectionSpec
 
 
 BRAND_GREEN = "#1DA539"
-SIDEBAR_SCALE = 1
+SIDEBAR_SCALE = 1.22
 
 # Change these numbers when you want to adjust each sidebar text level.
 ROOT_TEXT_SIZE = 18
-SECTION_TEXT_SIZE = 18
-CHILD_TEXT_SIZE = 16
+SECTION_TEXT_SIZE = 19
+CHILD_TEXT_SIZE = 18
 
-ROOT_ICON_SIZE = 22
-SECTION_ICON_SIZE = 21
-CHILD_ICON_SIZE = 19
+ROOT_ICON_SIZE = 23
+SECTION_ICON_SIZE = 24
+CHILD_ICON_SIZE = 23
 
 BRAND_KICKER = "\u5927\u6a39\u91ab\u85e5\u80a1\u4efd\u6709\u9650\u516c\u53f8"
 BRAND_TITLE = "\u5927\u8c50\u7269\u6d41\u90e8"
@@ -135,28 +135,13 @@ def _link(spec: PageSpec, label: str, css_class: str) -> str:
         "nav-section": SECTION_ICON_SIZE,
         "nav-child": CHILD_ICON_SIZE,
     }
-    layout_styles = {
-        "nav-root": (
-            "display:flex!important;align-items:center!important;gap:10px!important;"
-            "margin:0 0 24px 0!important;padding:9px 14px!important;"
-        ),
-        "nav-section": (
-            "display:flex!important;align-items:center!important;gap:10px!important;"
-            "margin:20px 0 8px 0!important;padding:4px 0!important;"
-        ),
-        "nav-child": (
-            "display:flex!important;align-items:center!important;gap:10px!important;"
-            "margin:0 0 9px 32px!important;padding:4px 4px!important;"
-        ),
-    }
     text_size = text_sizes.get(css_class, CHILD_TEXT_SIZE)
     icon_size = icon_sizes.get(css_class, CHILD_ICON_SIZE)
-    text_style = f"font-size:{text_size}px!important;font-weight:inherit!important;line-height:1.2!important;"
+    text_style = f"font-size:{text_size}px!important;font-weight:inherit!important;"
     icon_style = f"font-size:{icon_size}px!important;width:{icon_size + 4}px!important;"
-    layout_style = layout_styles.get(css_class, layout_styles["nav-child"])
 
     return (
-        f'<a class="nav-link {css_class}" style="{layout_style}" href="{href}" target="_self">'
+        f'<a class="nav-link {css_class}" href="{href}" target="_self">'
         f'<span class="nav-icon" style="{icon_style}">{icon}</span>'
         f'<span class="nav-text" style="{text_style}">{text}</span>'
         "</a>"
@@ -169,22 +154,22 @@ def render_sidebar(page_sections: Sequence[SectionSpec]) -> None:
         f":root{{--brand-green:{BRAND_GREEN};--sidebar-scale:{SIDEBAR_SCALE};}}",
         "section[data-testid='stSidebar']{background:#f8fafc!important;border-right:1px solid rgba(15,23,42,.10)!important;}",
         "section[data-testid='stSidebar'] *{font-family:'Noto Sans TC','Microsoft JhengHei',Arial,sans-serif!important;}",
-        "section[data-testid='stSidebar'] [data-testid='stSidebarContent']{padding:10px 26px 30px 26px!important;}",
+        "section[data-testid='stSidebar'] [data-testid='stSidebarContent']{padding:4px 26px 30px 26px!important;}",
         "section[data-testid='stSidebar'] div[data-testid='stMarkdown']{margin:0!important;}",
         ".sidebar-scale-shell{zoom:var(--sidebar-scale);padding-top:14px;}",
         ".brand-block{display:flex;align-items:center;gap:16px;margin:0 0 22px 0;padding:0;background:transparent;border:0;box-shadow:none;}",
-        ".brand-logo{width:66px;height:66px;object-fit:contain;display:block;filter:drop-shadow(0 3px 4px rgba(29,165,57,.18));}",
-        ".brand-text{display:flex;flex-direction:column;gap:4px;color:#0f172a;white-space:nowrap;}",
-        ".brand-kicker{font-size:16px;font-weight:900;line-height:1.06;color:#334155;}",
-        ".brand-title{font-size:26px;font-weight:950;line-height:1.06;color:#0f172a;letter-spacing:.3px;}",
-        ".brand-subtitle{font-size:17px;font-weight:900;line-height:1.06;color:#334155;}",
+        ".brand-logo{width:58px;height:58px;object-fit:contain;display:block;filter:drop-shadow(0 3px 4px rgba(29,165,57,.18));}",
+        ".brand-text{display:flex;flex-direction:column;gap:6px;color:#0f172a;white-space:nowrap;}",
+        ".brand-kicker{font-size:15px;font-weight:900;line-height:1.05;color:#334155;}",
+        ".brand-title{font-size:25px;font-weight:950;line-height:1.05;color:#0f172a;letter-spacing:.3px;}",
+        ".brand-subtitle{font-size:16px;font-weight:900;line-height:1.05;color:#334155;}",
         ".nav-list{display:flex;flex-direction:column;gap:0;}",
         ".nav-link{display:flex;align-items:center;text-decoration:none!important;color:#0f172a!important;border-radius:8px;line-height:1.22!important;}",
         ".nav-link:hover{background:rgba(29,165,57,.08);}",
-        ".nav-root{background:linear-gradient(180deg,#39B54A,#2F9E44)!important;color:#fff!important;box-shadow:0 8px 16px rgba(29,165,57,.22);}",
+        ".nav-root{gap:10px;margin:0 0 25px 0;padding:9px 14px;background:linear-gradient(180deg,#39B54A,#2F9E44)!important;color:#fff!important;box-shadow:0 8px 16px rgba(29,165,57,.22);}",
         ".nav-root .nav-text,.nav-root .nav-icon{color:#fff!important;}",
-        ".nav-section{font-weight:950!important;}",
-        ".nav-child{font-weight:850!important;}",
+        ".nav-section{gap:10px;margin:23px 0 13px 0;padding:5px 0;font-weight:950!important;}",
+        ".nav-child{gap:10px;margin:0 0 13px 30px;padding:5px 4px;font-weight:850!important;}",
         ".nav-root .nav-text{font-weight:900!important;}",
         ".nav-section .nav-text{font-weight:950!important;}",
         ".nav-child .nav-text{font-weight:850!important;}",
