@@ -9,7 +9,21 @@ from nav_config import PageSpec, SectionSpec
 
 
 BRAND_GREEN = "#1DA539"
-SIDEBAR_SCALE = 0.9
+SIDEBAR_SCALE = 1.22
+
+# Change these numbers when you want to adjust each sidebar text level.
+ROOT_TEXT_SIZE = 18
+SECTION_TEXT_SIZE = 19
+CHILD_TEXT_SIZE = 18
+
+ROOT_ICON_SIZE = 23
+SECTION_ICON_SIZE = 24
+CHILD_ICON_SIZE = 23
+
+BRAND_KICKER = "\u5927\u6a39\u91ab\u85e5\u80a1\u4efd\u6709\u9650\u516c\u53f8"
+BRAND_TITLE = "\u5927\u8c50\u7269\u6d41\u90e8"
+BRAND_SUBTITLE = "\u4f5c\u696d\u5e73\u53f0"
+BRAND_ICON = "\U0001f333"
 
 
 def _link(spec: PageSpec, label: str, css_class: str) -> str:
@@ -17,10 +31,25 @@ def _link(spec: PageSpec, label: str, css_class: str) -> str:
     text = escape(label)
     href = "/" + escape(spec.url_path.lstrip("/"))
 
+    text_sizes = {
+        "nav-root": ROOT_TEXT_SIZE,
+        "nav-section": SECTION_TEXT_SIZE,
+        "nav-child": CHILD_TEXT_SIZE,
+    }
+    icon_sizes = {
+        "nav-root": ROOT_ICON_SIZE,
+        "nav-section": SECTION_ICON_SIZE,
+        "nav-child": CHILD_ICON_SIZE,
+    }
+    text_size = text_sizes.get(css_class, CHILD_TEXT_SIZE)
+    icon_size = icon_sizes.get(css_class, CHILD_ICON_SIZE)
+    text_style = f"font-size:{text_size}px!important;font-weight:inherit!important;"
+    icon_style = f"font-size:{icon_size}px!important;width:{icon_size + 4}px!important;"
+
     return (
         f'<a class="nav-link {css_class}" href="{href}" target="_self">'
-        f'<span class="nav-icon">{icon}</span>'
-        f'<span class="nav-text">{text}</span>'
+        f'<span class="nav-icon" style="{icon_style}">{icon}</span>'
+        f'<span class="nav-text" style="{text_style}">{text}</span>'
         "</a>"
     )
 
@@ -37,7 +66,7 @@ def render_sidebar(page_sections: Sequence[SectionSpec]) -> None:
         ".brand-block{display:flex;align-items:center;gap:16px;margin:0 0 22px 0;padding:0;background:transparent;border:0;box-shadow:none;}",
         ".brand-icon{font-size:56px;line-height:1;color:var(--brand-green);filter:drop-shadow(0 3px 4px rgba(29,165,57,.18));}",
         ".brand-text{display:flex;flex-direction:column;gap:6px;color:#0f172a;white-space:nowrap;}",
-        ".brand-kicker{font-size:24px;font-weight:900;line-height:1.05;color:#334155;}",
+        ".brand-kicker{font-size:15px;font-weight:900;line-height:1.05;color:#334155;}",
         ".brand-title{font-size:25px;font-weight:950;line-height:1.05;color:#0f172a;letter-spacing:.3px;}",
         ".brand-subtitle{font-size:16px;font-weight:900;line-height:1.05;color:#334155;}",
         ".nav-list{display:flex;flex-direction:column;gap:0;}",
@@ -47,24 +76,21 @@ def render_sidebar(page_sections: Sequence[SectionSpec]) -> None:
         ".nav-root .nav-text,.nav-root .nav-icon{color:#fff!important;}",
         ".nav-section{gap:10px;margin:23px 0 13px 0;padding:5px 0;font-weight:950!important;}",
         ".nav-child{gap:10px;margin:0 0 13px 30px;padding:5px 4px;font-weight:850!important;}",
-        ".nav-root .nav-text{font-size:18px!important;font-weight:900!important;}",
-        ".nav-section .nav-text{font-size:19px!important;font-weight:950!important;}",
-        ".nav-child .nav-text{font-size:16px!important;font-weight:850!important;}",
-        ".nav-root .nav-icon{font-size:23px!important;width:27px;}",
-        ".nav-section .nav-icon{font-size:24px!important;width:28px;}",
-        ".nav-child .nav-icon{font-size:21px!important;width:25px;}",
+        ".nav-root .nav-text{font-weight:900!important;}",
+        ".nav-section .nav-text{font-weight:950!important;}",
+        ".nav-child .nav-text{font-weight:850!important;}",
         ".nav-icon{display:inline-flex;justify-content:center;align-items:center;line-height:1;flex:0 0 auto;}",
         "</style>",
     ]
 
     links = [
         '<div class="sidebar-scale-shell">',
-        '<div class="brand-block" aria-label="大樹醫藥體系 大豐物流 作業平台">',
-        '<div class="brand-icon">♣</div>',
+        f'<div class="brand-block" aria-label="{escape(BRAND_KICKER)} {escape(BRAND_TITLE)} {escape(BRAND_SUBTITLE)}">',
+        f'<div class="brand-icon">{escape(BRAND_ICON)}</div>',
         '<div class="brand-text">',
-        '<div class="brand-kicker">大樹醫藥體系</div>',
-        '<div class="brand-title">大豐物流</div>',
-        '<div class="brand-subtitle">作業平台</div>',
+        f'<div class="brand-kicker">{escape(BRAND_KICKER)}</div>',
+        f'<div class="brand-title">{escape(BRAND_TITLE)}</div>',
+        f'<div class="brand-subtitle">{escape(BRAND_SUBTITLE)}</div>',
         "</div>",
         "</div>",
         '<div class="nav-list">',
