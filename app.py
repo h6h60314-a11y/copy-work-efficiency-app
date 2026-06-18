@@ -98,3 +98,32 @@ def render_sidebar() -> None:
         ".nav-child .nav-text{font-size:16px!important;font-weight:850!important;}",
         ".nav-section .nav-text{font-size:20px!important;font-weight:950!important;}",
         ".nav-root .nav-text{font-size:17px!important;font-weight:850!important;}",
+        "</style>",
+    ]
+
+    links = [
+        '<div class="brand-block">'
+        '<div class="brand-icon">🌳</div>'
+        '<div>'
+        '<div class="brand-kicker">大樹醫藥體系</div>'
+        '<div class="brand-title">大豐物流</div>'
+        '<div class="brand-subtitle">作業平台</div>'
+        "</div>"
+        "</div>"
+    ]
+    for section in PAGE_SECTIONS:
+        if not section.pages:
+            continue
+        if not section.title:
+            links.extend(sidebar_link(spec, spec.title, "nav-root") for spec in section.pages)
+            continue
+
+        links.append(sidebar_link(section.pages[0], section.title, "nav-section"))
+        links.extend(sidebar_link(spec, spec.title, "nav-child") for spec in section.pages[1:])
+
+    st.sidebar.markdown("\n".join(css + links), unsafe_allow_html=True)
+
+
+pg = st.navigation(all_pages(), position="hidden")
+render_sidebar()
+pg.run()
