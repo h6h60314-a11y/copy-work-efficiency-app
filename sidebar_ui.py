@@ -9,7 +9,7 @@ from nav_config import PageSpec, SectionSpec
 
 
 BRAND_GREEN = "#1DA539"
-SIDEBAR_SCALE = 0.8
+SIDEBAR_SCALE = 0.9
 
 
 def _link(spec: PageSpec, label: str, css_class: str) -> str:
