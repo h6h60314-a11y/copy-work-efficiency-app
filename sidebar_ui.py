@@ -9,7 +9,7 @@ from nav_config import PageSpec, SectionSpec
 
 
 BRAND_GREEN = "#1DA539"
-SIDEBAR_SCALE = 1.22
+SIDEBAR_SCALE = 1.5
 
 # Change these numbers when you want to adjust each sidebar text level.
 ROOT_TEXT_SIZE = 18
