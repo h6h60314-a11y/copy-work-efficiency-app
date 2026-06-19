@@ -50,6 +50,7 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
         (
             PageSpec("pages/7_出貨課首頁.py", "出貨課首頁", "outbound-home", "🚚"),
             PageSpec("pages/6_撥貨差異.py", "撥貨差異", "outbound-transfer-diff", "🚚"),
+            PageSpec("pages/33_播貨短少差異明細.py","播貨短少差異明細","shortage-pick-diff","📍",),
             PageSpec("pages/23_採品門市差異量.py", "採品門市差異量", "outbound-vendor-store-diff-23", "📦"),
             PageSpec("pages/24_出貨作業線產能.py", "出貨作業線產能", "outbound-line-productivity-24", "🚚"),
             PageSpec("pages/29_各時段作業效率.py", "各時段作業效率", "outbound-hourly-efficiency-29", "⏱️"),
