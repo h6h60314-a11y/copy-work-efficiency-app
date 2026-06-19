@@ -13,11 +13,6 @@ from common_ui import (
 st.set_page_config(page_title="出貨課", page_icon="🚚", layout="wide")
 inject_logistics_theme()
 
-
-# ✅ 版本確認用：如果畫面沒有看到這行，代表你目前執行的不是這份檔案
-VERSION = "出貨課首頁版本：2026-06-19_播貨短少入口"
-
-
 ITEMS = (
     HomeNavItem(
         "🚚",
@@ -67,31 +62,8 @@ def main():
         subtitle="出貨差異、產能與效率分析入口。",
     )
 
-    # ✅ 如果你畫面沒有看到這行，代表目前不是跑這份檔案
-    st.caption(VERSION)
-
     card_open("出貨課功能")
     render_home_nav(ITEMS, columns=3)
-    card_close()
-
-    # ✅ 備用入口 1：Streamlit 原生 page_link
-    card_open("播貨短少差異明細")
-    st.markdown(
-        """
-        用於上傳短少明細、庫存明細、儲位明細，系統會自動產出揀差異明細。
-        """
-    )
-
-    st.page_link(
-        "pages/33_播貨短少差異明細.py",
-        label="進入播貨短少差異明細",
-        icon="📍",
-    )
-
-    # ✅ 備用入口 2：按鈕導頁
-    if st.button("📍 開啟播貨短少差異明細", use_container_width=True):
-        st.switch_page("pages/33_播貨短少差異明細.py")
-
     card_close()
 
 
