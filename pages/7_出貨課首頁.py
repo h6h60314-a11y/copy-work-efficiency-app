@@ -56,7 +56,11 @@ ITEMS = (
 def main():
     route_home_nav([item.page_path for item in ITEMS])
 
-    set_page("出貨課", icon="🚚", subtitle="出貨差異、產能與效率分析入口。")
+    set_page(
+        "出貨課",
+        icon="🚚",
+        subtitle="出貨差異、產能與效率分析入口。",
+    )
 
     card_open("出貨課功能")
     render_home_nav(ITEMS, columns=3)
