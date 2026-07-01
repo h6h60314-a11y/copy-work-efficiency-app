@@ -59,35 +59,19 @@ NAME_MAP = {
     "11399": "陳哲沅",
 }
 
-BREAK_RULES = [
-    (dt.time(20, 45, 0), dt.time(22, 30, 0), 0,  "首≥20:45 且 末≤22:30 → 0 分鐘"),
-    (dt.time(18, 30, 0), dt.time(20, 30, 0), 0,  "首≥18:30 且 末≤20:30 → 0 分鐘"),
-    (dt.time(15, 30, 0), dt.time(18,  0, 0), 0,  "首≥15:30 且 末≤18:00 → 0 分鐘"),
-    (dt.time(13, 30, 0), dt.time(15, 35, 0), 0,  "首≥13:30 且 末≤15:35 → 0 分鐘"),
-    (dt.time(20, 45, 0), dt.time(23,  0, 0), 0,  "首≥20:45 且 末≤23:00 → 0 分鐘"),
-    (dt.time(20,  0, 0), dt.time(22,  0, 0), 15, "首≥20:00 且 末≤22:00 → 15 分鐘"),
-    (dt.time(18, 30, 0), dt.time(22,  0, 0), 15, "首≥18:30 且 末≤22:00 → 15 分鐘"),
-    (dt.time(19,  0, 0), dt.time(22, 30, 0), 15, "首≥19:00 且 末≤22:30 → 15 分鐘"),
-    (dt.time(13, 30, 0), dt.time(18,  0, 0), 15, "首≥13:30 且 末≤18:00 → 15 分鐘"),
-    (dt.time(16,  0, 0), dt.time(20, 40, 0), 30, "首≥16:00 且 末≤20:40 → 30 分鐘"),
-    (dt.time(15, 30, 0), dt.time(20, 30, 0), 30, "首≥15:30 且 末≤20:30 → 30 分鐘"),
-    (dt.time(17,  0, 0), dt.time(22, 30, 0), 45, "首≥17:00 且 末≤22:30 → 45 分鐘"),
-    (dt.time(15, 45, 0), dt.time(22, 30, 0), 45, "首≥15:45 且 末≤22:30 → 45 分鐘"),
-    (dt.time(13, 30, 0), dt.time(20, 29, 0), 45, "首≥13:30 且 末≤20:29 → 45 分鐘"),
-    (dt.time(13, 30, 0), dt.time(23,  0, 0), 60, "首≥13:30 且 末≤23:00 → 60 分鐘"),
-    (dt.time(11,  0, 0), dt.time(17,  0, 0), 75, "首≥11:00 且 末≤17:00 → 75 分鐘"),
-    (dt.time( 8,  0, 0), dt.time(17,  0, 0), 90, "首≥08:00 且 末≤17:00 → 90 分鐘"),
-    (dt.time(10, 50, 0), dt.time(23,  0, 0), 120,"首≥10:50 且 末≤23:00 → 120 分鐘"),
-    (dt.time( 8,  0, 0), dt.time(23,  0, 0), 135,"首≥08:00 且 末≤23:00 → 135 分鐘"),
+FIXED_REST_INTERVALS = [
+    (dt.time(10, 0, 0), dt.time(10, 15, 0), 15, "10:00-10:15"),
+    (dt.time(12, 30, 0), dt.time(13, 30, 0), 60, "12:30-13:30"),
+    (dt.time(13, 30, 0), dt.time(13, 45, 0), 15, "13:30-13:45"),
+    (dt.time(18, 0, 0), dt.time(18, 30, 0), 30, "18:00-18:30"),
 ]
 
 # ✅ 預設排除空窗時段（可被 sidebar 覆蓋）
 EXCLUDE_IDLE_RANGES_DEFAULT = [
-    (dt.time(10,  0, 0), dt.time(10, 15, 0)),
+    (dt.time(10, 0, 0), dt.time(10, 15, 0)),
     (dt.time(12, 30, 0), dt.time(13, 30, 0)),
-    (dt.time(15, 30, 0), dt.time(15, 45, 0)),
-    (dt.time(18,  0, 0), dt.time(18, 30, 0)),
-    (dt.time(20, 30, 0), dt.time(20, 45, 0)),
+    (dt.time(13, 30, 0), dt.time(13, 45, 0)),
+    (dt.time(18, 0, 0), dt.time(18, 30, 0)),
 ]
 
 # =========================================================
@@ -330,14 +314,21 @@ def load_slot_master_bytes(upload_name: str, content: bytes) -> pd.DataFrame:
 # 計算：休息 / 空窗 / clamp + 棚別比對筆數
 # =========================================================
 def break_minutes_for_span(first_dt: pd.Timestamp, last_dt: pd.Timestamp) -> Tuple[int, str]:
-    if pd.isna(first_dt) or pd.isna(last_dt):
+    """相容舊函式名稱：整天版改用固定休息重疊扣除。"""
+    if pd.isna(first_dt) or pd.isna(last_dt) or last_dt <= first_dt:
         return 0, "無時間資料"
-    stt, edt = first_dt.time(), last_dt.time()
-    for st_ge, ed_le, mins, tag in BREAK_RULES:
-        if (stt >= st_ge) and (edt <= ed_le):
-            return int(mins), str(tag)
-    return 0, "未命中規則"
-
+    total = 0
+    labels = []
+    for s_t, e_t, _, label in FIXED_REST_INTERVALS:
+        s = pd.Timestamp.combine(first_dt.date(), s_t)
+        e = pd.Timestamp.combine(first_dt.date(), e_t)
+        ss = max(first_dt, s)
+        ee = min(last_dt, e)
+        if ee > ss:
+            mins = int(round((ee - ss).total_seconds() / 60.0))
+            total += mins
+            labels.append(f"{label}：{mins}分鐘")
+    return int(total), "；".join(labels) if labels else "未扣休息"
 
 def _subtract_exclusions(s_dt: pd.Timestamp, e_dt: pd.Timestamp, exclude_ranges):
     if s_dt >= e_dt or not exclude_ranges:
@@ -418,7 +409,43 @@ def _eff(n: int, m_minutes: int) -> float:
     return round((n / m_minutes * 60.0), 2) if m_minutes and m_minutes > 0 else 0.0
 
 
-def compute_am_pm_for_group(
+def _fixed_rest_ranges_for_day(day: dt.date) -> List[Tuple[pd.Timestamp, pd.Timestamp, int, str]]:
+    out: List[Tuple[pd.Timestamp, pd.Timestamp, int, str]] = []
+    for s_t, e_t, mins, label in FIXED_REST_INTERVALS:
+        s = pd.Timestamp.combine(day, s_t)
+        e = pd.Timestamp.combine(day, e_t)
+        if e > s:
+            out.append((s, e, int(mins), str(label)))
+    return out
+
+
+def _overlap_minutes(a_start: pd.Timestamp, a_end: pd.Timestamp, b_start: pd.Timestamp, b_end: pd.Timestamp) -> int:
+    if pd.isna(a_start) or pd.isna(a_end):
+        return 0
+    s = max(a_start, b_start)
+    e = min(a_end, b_end)
+    if e <= s:
+        return 0
+    return int(round((e - s).total_seconds() / 60.0))
+
+
+def fixed_rest_minutes_for_span(first_dt: pd.Timestamp, last_dt: pd.Timestamp) -> Tuple[int, str]:
+    """整天版：只扣與工作區間有重疊的固定休息時間。"""
+    if pd.isna(first_dt) or pd.isna(last_dt) or last_dt <= first_dt:
+        return 0, "無時間資料"
+
+    total = 0
+    hit_labels: List[str] = []
+    for s, e, _, label in _fixed_rest_ranges_for_day(first_dt.date()):
+        mins = _overlap_minutes(first_dt, last_dt, s, e)
+        if mins > 0:
+            total += mins
+            hit_labels.append(f"{label}：{mins}分鐘")
+
+    return int(total), "；".join(hit_labels) if hit_labels else "未扣休息"
+
+
+def compute_all_day_for_group(
     g: pd.DataFrame,
     idle_threshold_min: int,
     exclude_idle_ranges: List[Tuple[dt.time, dt.time]],
@@ -427,102 +454,59 @@ def compute_am_pm_for_group(
     times = _coerce_dt_series(g["__dt__"])
     if times.empty:
         return pd.Series({
-            "第一筆時間": pd.NaT, "最後一筆時間": pd.NaT, "當日筆數": 0,
-            "休息分鐘_整體": 0, "命中規則": "無時間資料",
-            "當日工時_分鐘_扣休": 0, "效率_件每小時": 0.0,
-
-            "上午_第一筆": pd.NaT, "上午_最後一筆": pd.NaT, "上午_筆數": 0,
-            "上午_工時_分鐘": 0, "上午_效率_件每小時": 0.0,
-            "上午_空窗分鐘": 0, "上午_空窗時段": "",
-
-            "下午_第一筆": pd.NaT, "下午_最後一筆": pd.NaT, "下午_筆數": 0,
-            "下午_休息分鐘": 0, "下午_命中規則": "無時間資料",
-            "下午_工時_分鐘_扣休": 0, "下午_效率_件每小時": 0.0,
-            "下午_空窗分鐘_扣休": 0, "下午_空窗時段": "",
-
-            "比對棚別筆數": 0, "比對棚別率": 0.0,
+            "第一筆時間": pd.NaT,
+            "最後一筆時間": pd.NaT,
+            "當日筆數": 0,
+            "休息分鐘_整體": 0,
+            "命中規則": "無時間資料",
+            "當日工時_分鐘_扣休": 0,
+            "效率_件每小時": 0.0,
+            "空窗分鐘_扣休": 0,
+            "空窗時段": "",
+            "比對棚別筆數": 0,
+            "比對棚別率": 0.0,
         })
 
     shelf_match = g.get("__shelf_match__", pd.Series([False] * len(g), index=g.index))
     shelf_match = shelf_match.fillna(False).astype(bool)
     match_whole = int(shelf_match.sum())
 
+    whole_first, whole_last, day_cnt = _span_metrics(times)
+
     clamp_dt_whole: Optional[pd.Timestamp] = None
     if isinstance(start_time, dt.time):
         clamp_dt_whole = pd.Timestamp.combine(times.min().date(), start_time)
 
-    # 上午
-    t_am = times[times.dt.time.between(AM_START, AM_END)]
-    am_first, am_last, am_cnt = _span_metrics(t_am)
-    clamp_dt_am = None
-    if clamp_dt_whole is not None and pd.notna(am_first) and pd.notna(am_last):
-        if AM_START <= clamp_dt_whole.time() <= AM_END:
-            clamp_dt_am = clamp_dt_whole
-
-    am_first_adj = _clamp_first(am_first, am_last, clamp_dt_am)
-    am_mins = int(round(((am_last - am_first_adj).total_seconds() / 60.0))) if am_cnt > 0 else 0
-    am_mins = max(am_mins, 0)
-    am_eff = _eff(am_cnt, am_mins)
-    am_idle_min, am_idle_ranges = _compute_idle(
-        t_am,
-        min_minutes=int(idle_threshold_min),
-        exclude_ranges=exclude_idle_ranges,
-        clamp_dt=am_first_adj if (am_cnt > 0 and pd.notna(am_first_adj)) else None,
-    )
-
-    # 下午
-    t_pm = times[times.dt.time.between(PM_START, PM_END)]
-    pm_first, pm_last, pm_cnt = _span_metrics(t_pm)
-    clamp_dt_pm = None
-    if clamp_dt_whole is not None and pd.notna(pm_first) and pd.notna(pm_last):
-        if PM_START <= clamp_dt_whole.time() <= PM_END:
-            clamp_dt_pm = clamp_dt_whole
-
-    pm_first_adj = _clamp_first(pm_first, pm_last, clamp_dt_pm)
-
-    if pm_cnt > 0 and pd.notna(pm_first_adj) and pd.notna(pm_last):
-        pm_break, pm_rule = break_minutes_for_span(pm_first_adj, pm_last)
-        raw_pm_mins = (pm_last - pm_first_adj).total_seconds() / 60.0
-        pm_mins = max(int(round(raw_pm_mins - pm_break)), 0)
-    else:
-        pm_break, pm_rule, pm_mins = 0, "無時間資料", 0
-
-    pm_eff = _eff(pm_cnt, pm_mins)
-    pm_idle_min, pm_idle_ranges = _compute_idle(
-        t_pm,
-        min_minutes=int(idle_threshold_min),
-        exclude_ranges=exclude_idle_ranges,
-        clamp_dt=pm_first_adj if (pm_cnt > 0 and pd.notna(pm_first_adj)) else None,
-    )
-
-    # 整體
-    whole_first, whole_last, day_cnt = _span_metrics(times)
+    # 沿用原本「clamp 第一筆」概念：若第一筆早於設定起始時間，且起始時間仍在工作區間內，就從設定起始時間開始算。
     whole_first_adj = _clamp_first(whole_first, whole_last, clamp_dt_whole)
 
     if day_cnt > 0 and pd.notna(whole_first_adj) and pd.notna(whole_last):
-        whole_break, br_tag_whole = break_minutes_for_span(whole_first_adj, whole_last)
+        rest_minutes, rest_tag = fixed_rest_minutes_for_span(whole_first_adj, whole_last)
         raw_whole_mins = (whole_last - whole_first_adj).total_seconds() / 60.0
-        whole_mins = max(int(round(raw_whole_mins - whole_break)), 0)
+        whole_mins = max(int(round(raw_whole_mins - rest_minutes)), 0)
     else:
-        whole_break, br_tag_whole, whole_mins = 0, "無時間資料", 0
+        rest_minutes, rest_tag, whole_mins = 0, "無時間資料", 0
 
-    whole_eff = _eff(day_cnt, whole_mins)
+    idle_min, idle_ranges = _compute_idle(
+        times,
+        min_minutes=int(idle_threshold_min),
+        exclude_ranges=exclude_idle_ranges,
+        clamp_dt=whole_first_adj if (day_cnt > 0 and pd.notna(whole_first_adj)) else None,
+    )
+
+    whole_eff = _eff(int(day_cnt), int(whole_mins))
     match_rate_whole = (match_whole / int(day_cnt)) if int(day_cnt) > 0 else 0.0
 
     return pd.Series({
-        "第一筆時間": whole_first_adj, "最後一筆時間": whole_last, "當日筆數": int(day_cnt),
-        "休息分鐘_整體": int(whole_break), "命中規則": br_tag_whole,
-        "當日工時_分鐘_扣休": int(whole_mins), "效率_件每小時": whole_eff,
-
-        "上午_第一筆": am_first_adj, "上午_最後一筆": am_last, "上午_筆數": int(am_cnt),
-        "上午_工時_分鐘": int(am_mins), "上午_效率_件每小時": am_eff,
-        "上午_空窗分鐘": int(am_idle_min), "上午_空窗時段": am_idle_ranges,
-
-        "下午_第一筆": pm_first_adj, "下午_最後一筆": pm_last, "下午_筆數": int(pm_cnt),
-        "下午_休息分鐘": int(pm_break), "下午_命中規則": pm_rule,
-        "下午_工時_分鐘_扣休": int(pm_mins), "下午_效率_件每小時": pm_eff,
-        "下午_空窗分鐘_扣休": int(pm_idle_min), "下午_空窗時段": pm_idle_ranges,
-
+        "第一筆時間": whole_first_adj,
+        "最後一筆時間": whole_last,
+        "當日筆數": int(day_cnt),
+        "休息分鐘_整體": int(rest_minutes),
+        "命中規則": rest_tag,
+        "當日工時_分鐘_扣休": int(whole_mins),
+        "效率_件每小時": whole_eff,
+        "空窗分鐘_扣休": int(idle_min),
+        "空窗時段": idle_ranges,
         "比對棚別筆數": int(match_whole),
         "比對棚別率": float(match_rate_whole),
     })
@@ -595,91 +579,61 @@ def _fmt_ts_time(x: Any) -> str:
         return ""
 
 
-def _build_shift_total_df(daily: pd.DataFrame, user_col: str, shift: str) -> pd.DataFrame:
-    """
-    shift='AM' or 'PM'
-    欄位：
-    代碼、姓名、筆數、工作區間、總分鐘、效率(件/時)、休息分鐘、空窗分鐘、空窗時段
-    """
+def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
+    """總表用：每人每日整天一列。"""
+    columns = ["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"]
     if daily is None or daily.empty:
-        return pd.DataFrame(columns=["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"])
+        return pd.DataFrame(columns=columns)
 
     d = daily.copy()
-
-    if shift.upper() == "AM":
-        cnt_col = "上午_筆數"
-        first_col, last_col = "上午_第一筆", "上午_最後一筆"
-        mins_col = "上午_工時_分鐘"
-        eff_col = "上午_效率_件每小時"
-        rest_col = None
-        idle_min_col = "上午_空窗分鐘"
-        idle_rng_col = "上午_空窗時段"
-    else:
-        cnt_col = "下午_筆數"
-        first_col, last_col = "下午_第一筆", "下午_最後一筆"
-        mins_col = "下午_工時_分鐘_扣休"
-        eff_col = "下午_效率_件每小時"
-        rest_col = "下午_休息分鐘"
-        idle_min_col = "下午_空窗分鐘_扣休"
-        idle_rng_col = "下午_空窗時段"
-
-    d[cnt_col] = pd.to_numeric(d.get(cnt_col, 0), errors="coerce").fillna(0).astype(int)
-    d = d[d[cnt_col] > 0].copy()
-
+    d["當日筆數"] = pd.to_numeric(d.get("當日筆數", 0), errors="coerce").fillna(0).astype(int)
+    d = d[d["當日筆數"] > 0].copy()
     if d.empty:
-        return pd.DataFrame(columns=["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"])
+        return pd.DataFrame(columns=columns)
 
     name_series = d["對應姓名"].astype(str).fillna("").str.strip()
     code_series = d[user_col].astype(str).fillna("").str.strip()
     d["_姓名顯示"] = name_series.where(name_series.ne(""), code_series)
 
-    d["工作區間"] = d.apply(lambda r: f"{_fmt_ts_time(r.get(first_col))} ~ {_fmt_ts_time(r.get(last_col))}".strip(), axis=1)
+    d["工作區間"] = d.apply(
+        lambda r: f"{_fmt_ts_time(r.get('第一筆時間'))} ~ {_fmt_ts_time(r.get('最後一筆時間'))}".strip(),
+        axis=1,
+    )
 
     out = pd.DataFrame({
         "代碼": code_series,
         "姓名": d["_姓名顯示"],
-        "筆數": d[cnt_col].astype(int),
+        "筆數": d["當日筆數"].astype(int),
         "工作區間": d["工作區間"],
-        "總分鐘": pd.to_numeric(d.get(mins_col, 0), errors="coerce").fillna(0).astype(int),
-        "效率(件/時)": pd.to_numeric(d.get(eff_col, 0), errors="coerce").fillna(0.0).round(2),
-        "休息分鐘": (pd.to_numeric(d.get(rest_col, 0), errors="coerce").fillna(0).astype(int) if rest_col else 0),
-        "空窗分鐘": pd.to_numeric(d.get(idle_min_col, 0), errors="coerce").fillna(0).astype(int),
-        "空窗時段": d.get(idle_rng_col, "").astype(str).fillna(""),
+        "總分鐘": pd.to_numeric(d.get("當日工時_分鐘_扣休", 0), errors="coerce").fillna(0).astype(int),
+        "效率(件/時)": pd.to_numeric(d.get("效率_件每小時", 0), errors="coerce").fillna(0.0).round(2),
+        "休息分鐘": pd.to_numeric(d.get("休息分鐘_整體", 0), errors="coerce").fillna(0).astype(int),
+        "空窗分鐘": pd.to_numeric(d.get("空窗分鐘_扣休", 0), errors="coerce").fillna(0).astype(int),
+        "空窗時段": d.get("空窗時段", "").astype(str).fillna(""),
     })
 
     out = out.sort_values(["效率(件/時)", "代碼"], ascending=[False, True]).reset_index(drop=True)
     return out
 
 
-def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
+def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str, target_eff: float = 20.0):
     """
-    在同一張「總表」工作表，依日期輸出：
-    [YYYY-MM-DD 上架績效] / 上午表 / 下午表
-
-    ✅ 你指定的新規則（整列套色）：
-      效率 < 20  → 整列底色 #FFC7CE、整列文字 #9C0006
-      效率 >= 20 → 整列底色 #C6EFCE、整列文字 #006100
+    在同一張「總表」工作表，依日期輸出整天版績效。
+    效率 < target_eff  → 整列紅底紅字
+    效率 >= target_eff → 整列綠底綠字
     """
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
-
-    EFF_THRESHOLD = 20.0
 
     thin = Side(style="thin", color="9CA3AF")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     fill_title = PatternFill("solid", fgColor="FFFFFF")
-    fill_header = PatternFill("solid", fgColor="E5E7EB")   # 灰
-    fill_am = PatternFill("solid", fgColor="D1FAE5")       # 上午淡綠
-    fill_pm = PatternFill("solid", fgColor="FDE2E2")       # 下午淡粉
-
-    # ✅ 低效：紅底紅字（效率 < 20）
-    eff_low_fill = PatternFill("solid", fgColor="FFC7CE")  # #FFC7CE
-    eff_low_font = Font(color="9C0006")                    # #9C0006
-
-    # ✅ 高效：綠底綠字（效率 >= 20）
-    eff_high_fill = PatternFill("solid", fgColor="C6EFCE") # #C6EFCE
-    eff_high_font = Font(color="006100")                   # #006100
+    fill_header = PatternFill("solid", fgColor="E5E7EB")
+    eff_low_fill = PatternFill("solid", fgColor="FFC7CE")
+    eff_low_font = Font(color="9C0006")
+    eff_high_fill = PatternFill("solid", fgColor="C6EFCE")
+    eff_high_font = Font(color="006100")
 
     font_title = Font(bold=True, size=14)
     font_section = Font(bold=True, size=12)
@@ -689,8 +643,6 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
 
     headers = ["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"]
     ncol = len(headers)
-
-    # 欄寬
     col_widths = [12, 10, 6, 22, 8, 10, 8, 8, 60]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -716,20 +668,15 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
     for d0 in dates:
         day_df = daily[daily["日期"] == d0].copy()
 
-        # Title
-        title = f"{d0} 上架績效"
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
-        c = ws.cell(row=r, column=1, value=title)
+        c = ws.cell(row=r, column=1, value=f"{d0} 上架績效（整天版）")
         c.fill = fill_title
         c.font = font_title
         c.alignment = align_center
         r += 1
 
-        # ======================
-        # AM
-        # ======================
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
-        c = ws.cell(row=r, column=1, value="上午")
+        c = ws.cell(row=r, column=1, value="整天合併計算")
         c.font = font_section
         c.alignment = align_center
         r += 1
@@ -742,89 +689,27 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
             cell.border = border
         r += 1
 
-        am_tbl = _build_shift_total_df(day_df, user_col=user_col, shift="AM")
-        if am_tbl.empty:
+        tbl = _build_all_day_total_df(day_df, user_col=user_col)
+        if tbl.empty:
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
-            c = ws.cell(row=r, column=1, value="（上午無資料）")
+            c = ws.cell(row=r, column=1, value="（無資料）")
             c.alignment = align_center
             r += 1
         else:
-            for _, row in am_tbl.iterrows():
+            for _, row in tbl.iterrows():
                 eff_val = _try_float(row.get("效率(件/時)", ""))
-
-                # 預設：上午底色；若有效率值→整列依效率規則套色
-                row_fill = fill_am
-                row_font = None
-                if eff_val is not None:
-                    if eff_val < EFF_THRESHOLD:
-                        row_fill = eff_low_fill
-                        row_font = eff_low_font
-                    else:
-                        row_fill = eff_high_fill
-                        row_font = eff_high_font
-
+                row_fill = eff_high_fill if (eff_val is not None and eff_val >= float(target_eff)) else eff_low_fill
+                row_font = eff_high_font if (eff_val is not None and eff_val >= float(target_eff)) else eff_low_font
                 for j, h in enumerate(headers, start=1):
                     v = row.get(h, "")
                     cell = ws.cell(row=r, column=j, value=v)
                     cell.fill = row_fill
-                    if row_font is not None:
-                        cell.font = row_font
+                    cell.font = row_font
                     cell.alignment = (align_left if h == "空窗時段" else align_center)
                     cell.border = border
-
                 r += 1
 
-        r += 1  # blank
-
-        # ======================
-        # PM
-        # ======================
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
-        c = ws.cell(row=r, column=1, value="下午")
-        c.font = font_section
-        c.alignment = align_center
-        r += 1
-
-        for j, h in enumerate(headers, start=1):
-            cell = ws.cell(row=r, column=j, value=h)
-            cell.fill = fill_header
-            cell.font = font_header
-            cell.alignment = align_center
-            cell.border = border
-        r += 1
-
-        pm_tbl = _build_shift_total_df(day_df, user_col=user_col, shift="PM")
-        if pm_tbl.empty:
-            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
-            c = ws.cell(row=r, column=1, value="（下午無資料）")
-            c.alignment = align_center
-            r += 1
-        else:
-            for _, row in pm_tbl.iterrows():
-                eff_val = _try_float(row.get("效率(件/時)", ""))
-
-                row_fill = fill_pm
-                row_font = None
-                if eff_val is not None:
-                    if eff_val < EFF_THRESHOLD:
-                        row_fill = eff_low_fill
-                        row_font = eff_low_font
-                    else:
-                        row_fill = eff_high_fill
-                        row_font = eff_high_font
-
-                for j, h in enumerate(headers, start=1):
-                    v = row.get(h, "")
-                    cell = ws.cell(row=r, column=j, value=v)
-                    cell.fill = row_fill
-                    if row_font is not None:
-                        cell.font = row_font
-                    cell.alignment = (align_left if h == "空窗時段" else align_center)
-                    cell.border = border
-
-                r += 1
-
-        r += 2  # blank between dates
+        r += 2
 
     ws.freeze_panes = "A4"
 
@@ -842,24 +727,17 @@ def build_excel_bytes(
         sum_cols = [
             user_col, "對應姓名", "総日數",
             "總筆數", "總工時_分鐘_扣休", "效率_件每小時",
-            "上午筆數", "上午工時_分鐘", "上午效率_件每小時",
-            "下午筆數", "下午工時_分鐘_扣休", "下午效率_件每小時",
             "比對棚別筆數", "比對棚別率",
         ]
         summary_out[sum_cols].to_excel(writer, index=False, sheet_name="彙總")
         autosize_columns(writer.sheets["彙總"], summary_out[sum_cols])
-        # 這裡沿用舊邏輯：>=target 綠、<target 紅（不影響你要的總表）
         shade_rows_by_efficiency(writer.sheets["彙總"], "效率_件每小時", target_eff=target_eff)
 
         det_cols = [
             user_col, "對應姓名", "日期",
             "第一筆時間", "最後一筆時間", "當日筆數",
-            "休息分鐘_整體", "當日工時_分鐘_扣休", "效率_件每小時",
-            "上午_第一筆", "上午_最後一筆", "上午_筆數", "上午_工時_分鐘", "上午_效率_件每小時",
-            "上午_空窗分鐘", "上午_空窗時段",
-            "下午_第一筆", "下午_最後一筆", "下午_筆數", "下午_休息分鐘",
-            "下午_工時_分鐘_扣休", "下午_效率_件每小時",
-            "下午_空窗分鐘_扣休", "下午_空窗時段",
+            "休息分鐘_整體", "命中規則", "當日工時_分鐘_扣休", "效率_件每小時",
+            "空窗分鐘_扣休", "空窗時段",
             "比對棚別筆數", "比對棚別率",
         ]
         daily.sort_values([user_col, "日期", "第一筆時間"])[det_cols].to_excel(writer, index=False, sheet_name="明細")
@@ -875,22 +753,21 @@ def build_excel_bytes(
             autosize_columns(writer.sheets["棚別_人員_樞紐"], shelf_person_pivot)
 
         rules_rows = []
-        for i, (st_ge, ed_le, mins, tag) in enumerate(BREAK_RULES, start=1):
+        for i, (s_t, e_t, mins, label) in enumerate(FIXED_REST_INTERVALS, start=1):
             rules_rows.append({
-                "優先序": i,
-                "首時間條件(>=)": st_ge.strftime("%H:%M:%S"),
-                "末時間條件(<=)": ed_le.strftime("%H:%M:%S"),
+                "順序": i,
+                "休息開始": s_t.strftime("%H:%M:%S"),
+                "休息結束": e_t.strftime("%H:%M:%S"),
                 "休息分鐘": int(mins),
-                "規則說明": str(tag),
+                "說明": label,
             })
         rules_df = pd.DataFrame(rules_rows)
-        rules_df.to_excel(writer, index=False, sheet_name="休息規則")
-        autosize_columns(writer.sheets["休息規則"], rules_df)
+        rules_df.to_excel(writer, index=False, sheet_name="固定休息時間")
+        autosize_columns(writer.sheets["固定休息時間"], rules_df)
 
-        # ✅ 新增：總表（你要的整列套色在這張）
         ws_total = writer.book.create_sheet("總表")
         writer.sheets["總表"] = ws_total
-        _write_total_sheet(ws_total, daily=daily, user_col=user_col)
+        _write_total_sheet(ws_total, daily=daily, user_col=user_col, target_eff=float(target_eff))
 
     return out.getvalue()
 
@@ -901,9 +778,9 @@ def build_excel_bytes(
 def main():
     inject_logistics_theme()
     set_page(
-        "上架產能分析（Putaway KPI）",
+        "上架產能分析（整天版）",
         icon="📦",
-        subtitle="主畫面顯示：儲位類型樞紐表 + 棚別樞紐表；Excel 匯出含：彙總/明細/總表"
+        subtitle="整天合併計算｜不分上午/下午｜Excel 匯出含：彙總/明細/總表"
     )
 
     if "putaway_last" not in st.session_state:
@@ -932,7 +809,8 @@ def main():
             st.caption(f"✅ clamp 起始時間：{global_start_time.strftime('%H:%M:%S')}")
 
         preview = "、".join([f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in exclude_idle_ranges]) if exclude_idle_ranges else "（無）"
-        st.caption(f"✅ 已讀取排除空窗時段：{preview}")
+        st.caption("✅ 固定休息時間：10:00~10:15、12:30~13:30、13:30~13:45、18:00~18:30")
+        st.caption(f"✅ 空窗計算排除時段：{preview}")
         st.caption("⚠️ 若你改了條件/棚別主檔，需再按一次「🚀 產出 KPI」才會重新計算。")
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
@@ -1055,7 +933,7 @@ def main():
             # ✅ 日彙總
             daily = (
                 dt_data.groupby([user_col, "對應姓名", "日期"], dropna=False)
-                .apply(lambda g: compute_am_pm_for_group(
+                .apply(lambda g: compute_all_day_for_group(
                     g,
                     idle_threshold_min=int(idle_threshold),
                     exclude_idle_ranges=exclude_idle_ranges,
@@ -1064,27 +942,23 @@ def main():
                 .reset_index()
             )
 
-            # ✅ 個人總彙總
+            # ✅ 個人總彙總（整天版）
             summary = (
                 daily.groupby([user_col, "對應姓名"], dropna=False, as_index=False)
                 .agg(
                     総日數=("日期", "nunique"),
                     總筆數=("當日筆數", "sum"),
                     總工時_分鐘_扣休=("當日工時_分鐘_扣休", "sum"),
-                    上午筆數=("上午_筆數", "sum"),
-                    上午工時_分鐘=("上午_工時_分鐘", "sum"),
-                    下午筆數=("下午_筆數", "sum"),
-                    下午工時_分鐘_扣休=("下午_工時_分鐘_扣休", "sum"),
                     比對棚別筆數=("比對棚別筆數", "sum"),
                 )
             )
 
-            summary["上午效率_件每小時"] = summary.apply(lambda r: _eff(int(r["上午筆數"]), int(r["上午工時_分鐘"])), axis=1)
-            summary["下午效率_件每小時"] = summary.apply(lambda r: _eff(int(r["下午筆數"]), int(r["下午工時_分鐘_扣休"])), axis=1)
-            summary["總工時_分鐘_扣休"] = summary["上午工時_分鐘"].fillna(0).astype(int) + summary["下午工時_分鐘_扣休"].fillna(0).astype(int)
-            summary["效率_件每小時"] = summary.apply(lambda r: _eff(int(r["總筆數"]), int(r["總工時_分鐘_扣休"])), axis=1)
+            summary["效率_件每小時"] = summary.apply(
+                lambda r: _eff(int(r["總筆數"]), int(r["總工時_分鐘_扣休"])),
+                axis=1,
+            )
 
-            for c in ["總筆數", "總工時_分鐘_扣休", "上午筆數", "上午工時_分鐘", "下午筆數", "下午工時_分鐘_扣休", "比對棚別筆數"]:
+            for c in ["總筆數", "總工時_分鐘_扣休", "比對棚別筆數"]:
                 summary[c] = summary[c].fillna(0).astype(int)
 
             summary["比對棚別率"] = summary.apply(
@@ -1106,13 +980,7 @@ def main():
                 "総日數": int(summary["総日數"].sum()),
                 "總筆數": int(summary["總筆數"].sum()),
                 "總工時_分鐘_扣休": int(summary["總工時_分鐘_扣休"].sum()),
-                "上午筆數": int(summary["上午筆數"].sum()),
-                "上午工時_分鐘": int(summary["上午工時_分鐘"].sum()),
-                "下午筆數": int(summary["下午筆數"].sum()),
-                "下午工時_分鐘_扣休": int(summary["下午工時_分鐘_扣休"].sum()),
                 "效率_件每小時": _eff(int(summary["總筆數"].sum()), int(summary["總工時_分鐘_扣休"].sum())),
-                "上午效率_件每小時": _eff(int(summary["上午筆數"].sum()), int(summary["上午工時_分鐘"].sum())),
-                "下午效率_件每小時": _eff(int(summary["下午筆數"].sum()), int(summary["下午工時_分鐘_扣休"].sum())),
                 "比對棚別筆數": int(total_match),
                 "比對棚別率": float(match_rate_all),
             }
@@ -1181,7 +1049,7 @@ def main():
                 stype_person_pivot=stype_person_pivot,
                 target_eff=float(target_eff),
             )
-            xlsx_name = f"{uploaded.name.rsplit('.', 1)[0]}_上架績效.xlsx"
+            xlsx_name = f"{uploaded.name.rsplit('.', 1)[0]}_上架績效_整天版.xlsx"
 
             st.session_state.putaway_last = {
                 "params": current_params,
@@ -1250,43 +1118,25 @@ def main():
         st.dataframe(shelf_person_pivot, use_container_width=True, hide_index=True)
     card_close()
 
-    # AM/PM 圖表（不是表格）
-    col_l, col_r = st.columns(2)
-
-    with col_l:
-        card_open(f"🌓 AM（上午）效率排行（Top {top_n_show}）")
-        am_rank = summary[[user_col, "對應姓名", "上午筆數", "上午工時_分鐘", "上午效率_件每小時"]].copy()
-        am_rank = am_rank.rename(columns={"上午效率_件每小時": "效率", "上午筆數": "筆數", "上午工時_分鐘": "工時"})
-        am_rank["姓名"] = am_rank["對應姓名"].where(am_rank["對應姓名"].astype(str).str.len() > 0, am_rank[user_col].astype(str))
-        bar_topN(
-            am_rank[["姓名", "效率", "筆數", "工時"]],
-            x_col="姓名",
-            y_col="效率",
-            hover_cols=["筆數", "工時"],
-            top_n=top_n_show,
-            target=float(target_eff_show),
-        )
-        card_close()
-
-    with col_r:
-        card_open(f"🌙 PM（下午）效率排行（Top {top_n_show}）")
-        pm_rank = summary[[user_col, "對應姓名", "下午筆數", "下午工時_分鐘_扣休", "下午效率_件每小時"]].copy()
-        pm_rank = pm_rank.rename(columns={"下午效率_件每小時": "效率", "下午筆數": "筆數", "下午工時_分鐘_扣休": "工時"})
-        pm_rank["姓名"] = pm_rank["對應姓名"].where(pm_rank["對應姓名"].astype(str).str.len() > 0, pm_rank[user_col].astype(str))
-        bar_topN(
-            pm_rank[["姓名", "效率", "筆數", "工時"]],
-            x_col="姓名",
-            y_col="效率",
-            hover_cols=["筆數", "工時"],
-            top_n=top_n_show,
-            target=float(target_eff_show),
-        )
-        card_close()
+    # ✅ 整天版效率排行（圖表，不顯示 AM/PM）
+    card_open(f"📈 整天效率排行（Top {top_n_show}）")
+    day_rank = summary[[user_col, "對應姓名", "總筆數", "總工時_分鐘_扣休", "效率_件每小時"]].copy()
+    day_rank = day_rank.rename(columns={"效率_件每小時": "效率", "總筆數": "筆數", "總工時_分鐘_扣休": "工時"})
+    day_rank["姓名"] = day_rank["對應姓名"].where(day_rank["對應姓名"].astype(str).str.len() > 0, day_rank[user_col].astype(str))
+    bar_topN(
+        day_rank[["姓名", "效率", "筆數", "工時"]],
+        x_col="姓名",
+        y_col="效率",
+        hover_cols=["筆數", "工時"],
+        top_n=top_n_show,
+        target=float(target_eff_show),
+    )
+    card_close()
 
     download_excel_card(
         xlsx_bytes,
         xlsx_name,
-        label="⬇️ 匯出 KPI 報表（Excel：含『總表』）",
+        label="⬇️ 匯出 KPI 報表（Excel：整天版，含『總表』）",
     )
 
 
