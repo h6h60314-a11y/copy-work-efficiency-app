@@ -27,7 +27,10 @@ TO_EXCLUDE_PATTERN = re.compile("|".join(re.escape(k) for k in TO_EXCLUDE_KEYWOR
 INPUT_USER_CANDIDATES = ["記錄輸入人", "記錄輸入者", "建立人", "輸入人"]
 REV_DT_CANDIDATES = ["修訂日期", "修訂時間", "修訂日", "異動時間", "修改時間"]
 
-TARGET_EFF_DEFAULT = 20
+TARGET_EFF_DEFAULTS = {
+    "低空": 13,
+    "高空": 8,
+}
 IDLE_MIN_THRESHOLD_DEFAULT = 10
 
 AM_START, AM_END = dt.time(7, 0, 0), dt.time(12, 30, 0)
@@ -35,10 +38,12 @@ PM_START, PM_END = dt.time(13, 30, 0), dt.time(23, 59, 59)
 
 # ✅ 儲位類型（區碼3 → 類型）
 STORAGE_TYPE_ZONES = {
-    "輕型料架": ["001", "002", "003", "017", "016"],
-    "落地儲": ["014", "018", "019", "020", "010", "081", "401", "402", "403", "015"],
-    "重型低空": ["011", "012", "013", "031", "032", "033", "034", "035", "036", "037", "038"],
-    "高空儲": [
+    "低空": [
+        "001", "002", "003", "017", "016",
+        "014", "018", "019", "020", "010", "081", "401", "402", "403", "015",
+        "011", "012", "013", "031", "032", "033", "034", "035", "036", "037", "038",
+    ],
+    "高空": [
         "021", "022", "023",
         "041", "042", "043",
         "051", "052", "053", "054", "055", "056", "057",
@@ -563,6 +568,38 @@ def shade_rows_by_efficiency(ws, header_name="效率_件每小時", green="C6EFC
             ws.cell(row=r, column=cc).fill = fill
 
 
+def shade_rows_by_row_target(
+    ws,
+    efficiency_header="效率_件每小時",
+    target_header="達標門檻",
+    green="C6EFCE",
+    red="FFC7CE",
+):
+    """依每列自己的達標門檻設定整列底色。"""
+    from openpyxl.styles import PatternFill
+
+    header_to_col = {
+        str(ws.cell(row=1, column=c).value).strip(): c
+        for c in range(1, ws.max_column + 1)
+    }
+    eff_col = header_to_col.get(efficiency_header)
+    target_col = header_to_col.get(target_header)
+    if eff_col is None or target_col is None:
+        return
+
+    green_fill = PatternFill(start_color=green, end_color=green, fill_type="solid")
+    red_fill = PatternFill(start_color=red, end_color=red, fill_type="solid")
+    for r in range(2, ws.max_row + 1):
+        try:
+            efficiency = float(ws.cell(row=r, column=eff_col).value)
+            target = float(ws.cell(row=r, column=target_col).value)
+        except (TypeError, ValueError):
+            continue
+        fill = green_fill if efficiency >= target else red_fill
+        for c in range(1, ws.max_column + 1):
+            ws.cell(row=r, column=c).fill = fill
+
+
 def _fmt_ts_time(x: Any) -> str:
     if x is None or (isinstance(x, float) and pd.isna(x)):
         return ""
@@ -580,8 +617,8 @@ def _fmt_ts_time(x: Any) -> str:
 
 
 def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
-    """總表用：每人每日整天一列。"""
-    columns = ["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"]
+    """總表用：每人、每日、低空/高空各一列。"""
+    columns = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "空窗分鐘", "空窗時段"]
     if daily is None or daily.empty:
         return pd.DataFrame(columns=columns)
 
@@ -603,10 +640,13 @@ def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
     out = pd.DataFrame({
         "代碼": code_series,
         "姓名": d["_姓名顯示"],
+        "儲位類型": d.get("儲位類型", "未分類"),
         "筆數": d["當日筆數"].astype(int),
         "工作區間": d["工作區間"],
         "總分鐘": pd.to_numeric(d.get("當日工時_分鐘_扣休", 0), errors="coerce").fillna(0).astype(int),
         "效率(件/時)": pd.to_numeric(d.get("效率_件每小時", 0), errors="coerce").fillna(0.0).round(2),
+        "達標門檻": pd.to_numeric(d.get("達標門檻", 0), errors="coerce").fillna(0).astype(int),
+        "是否達標": d.get("是否達標", "不適用"),
         "休息分鐘": pd.to_numeric(d.get("休息分鐘_整體", 0), errors="coerce").fillna(0).astype(int),
         "空窗分鐘": pd.to_numeric(d.get("空窗分鐘_扣休", 0), errors="coerce").fillna(0).astype(int),
         "空窗時段": d.get("空窗時段", "").astype(str).fillna(""),
@@ -616,11 +656,10 @@ def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
     return out
 
 
-def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str, target_eff: float = 20.0):
+def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
     """
     在同一張「總表」工作表，依日期輸出整天版績效。
-    效率 < target_eff  → 整列紅底紅字
-    效率 >= target_eff → 整列綠底綠字
+    依低空/高空各自的「達標門檻」判斷整列顏色。
     """
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -641,9 +680,9 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str, target_eff: float
     align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-    headers = ["代碼", "姓名", "筆數", "工作區間", "總分鐘", "效率(件/時)", "休息分鐘", "空窗分鐘", "空窗時段"]
+    headers = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "空窗分鐘", "空窗時段"]
     ncol = len(headers)
-    col_widths = [12, 10, 6, 22, 8, 10, 8, 8, 60]
+    col_widths = [12, 10, 10, 6, 22, 8, 10, 10, 10, 8, 8, 60]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -698,8 +737,10 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str, target_eff: float
         else:
             for _, row in tbl.iterrows():
                 eff_val = _try_float(row.get("效率(件/時)", ""))
-                row_fill = eff_high_fill if (eff_val is not None and eff_val >= float(target_eff)) else eff_low_fill
-                row_font = eff_high_font if (eff_val is not None and eff_val >= float(target_eff)) else eff_low_font
+                target_val = _try_float(row.get("達標門檻", ""))
+                is_met = eff_val is not None and target_val is not None and target_val > 0 and eff_val >= target_val
+                row_fill = eff_high_fill if is_met else eff_low_fill
+                row_font = eff_high_font if is_met else eff_low_font
                 for j, h in enumerate(headers, start=1):
                     v = row.get(h, "")
                     cell = ws.cell(row=r, column=j, value=v)
@@ -720,29 +761,30 @@ def build_excel_bytes(
     daily: pd.DataFrame,
     shelf_person_pivot: pd.DataFrame,
     stype_person_pivot: pd.DataFrame,
-    target_eff: float,
 ) -> bytes:
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl", datetime_format="yyyy-mm-dd hh:mm:ss", date_format="yyyy-mm-dd") as writer:
         sum_cols = [
-            user_col, "對應姓名", "総日數",
+            user_col, "對應姓名", "儲位類型", "総日數",
             "總筆數", "總工時_分鐘_扣休", "效率_件每小時",
+            "達標門檻", "是否達標",
             "比對棚別筆數", "比對棚別率",
         ]
         summary_out[sum_cols].to_excel(writer, index=False, sheet_name="彙總")
         autosize_columns(writer.sheets["彙總"], summary_out[sum_cols])
-        shade_rows_by_efficiency(writer.sheets["彙總"], "效率_件每小時", target_eff=target_eff)
+        shade_rows_by_row_target(writer.sheets["彙總"])
 
         det_cols = [
-            user_col, "對應姓名", "日期",
+            user_col, "對應姓名", "儲位類型", "日期",
             "第一筆時間", "最後一筆時間", "當日筆數",
             "休息分鐘_整體", "命中規則", "當日工時_分鐘_扣休", "效率_件每小時",
+            "達標門檻", "是否達標",
             "空窗分鐘_扣休", "空窗時段",
             "比對棚別筆數", "比對棚別率",
         ]
         daily.sort_values([user_col, "日期", "第一筆時間"])[det_cols].to_excel(writer, index=False, sheet_name="明細")
         autosize_columns(writer.sheets["明細"], daily[det_cols])
-        shade_rows_by_efficiency(writer.sheets["明細"], "效率_件每小時", target_eff=target_eff)
+        shade_rows_by_row_target(writer.sheets["明細"])
 
         if stype_person_pivot is not None and not stype_person_pivot.empty:
             stype_person_pivot.to_excel(writer, index=False, sheet_name="儲位類型_人員_樞紐")
@@ -767,7 +809,7 @@ def build_excel_bytes(
 
         ws_total = writer.book.create_sheet("總表")
         writer.sheets["總表"] = ws_total
-        _write_total_sheet(ws_total, daily=daily, user_col=user_col, target_eff=float(target_eff))
+        _write_total_sheet(ws_total, daily=daily, user_col=user_col)
 
     return out.getvalue()
 
@@ -798,7 +840,19 @@ def main():
 
     with st.sidebar:
         st.markdown("---")
-        target_eff = st.number_input("達標門檻（效率 ≥）", min_value=1, max_value=999, value=int(TARGET_EFF_DEFAULT), step=1)
+        low_target_eff = st.number_input(
+            "低空達標門檻（件/小時）",
+            min_value=1, max_value=999,
+            value=int(TARGET_EFF_DEFAULTS["低空"]),
+            step=1,
+        )
+        high_target_eff = st.number_input(
+            "高空達標門檻（件/小時）",
+            min_value=1, max_value=999,
+            value=int(TARGET_EFF_DEFAULTS["高空"]),
+            step=1,
+        )
+        target_eff_map = {"低空": float(low_target_eff), "高空": float(high_target_eff)}
         idle_threshold = st.number_input("空窗門檻（分鐘 ≥ 才算）", min_value=1, max_value=240, value=int(IDLE_MIN_THRESHOLD_DEFAULT), step=1)
 
         start_time_raw = st.text_input("起始時間（clamp 第一筆；HH:MM:SS）", value="08:05:00", key="putaway_global_start_time")
@@ -845,7 +899,8 @@ def main():
         slot_hash = f"{slot_master_file.name}:{len(slot_master_file.getvalue())}"
 
     current_params = {
-        "target_eff": int(target_eff),
+        "low_target_eff": int(low_target_eff),
+        "high_target_eff": int(high_target_eff),
         "idle_threshold": int(idle_threshold),
         "exclude_idle_ranges": [(a.strftime("%H:%M:%S"), b.strftime("%H:%M:%S")) for a, b in exclude_idle_ranges],
         "top_n": int(top_n),
@@ -930,9 +985,14 @@ def main():
 
             dt_data["日期"] = dt_data["__dt__"].dt.date
 
-            # ✅ 日彙總
+            # ✅ 日彙總：同一人同一天的低空、高空分開計算
+            dt_data["儲位類型"] = dt_data["儲位類型"].astype(str).str.strip()
+            dt_data["儲位類型"] = dt_data["儲位類型"].where(
+                dt_data["儲位類型"].isin(TARGET_EFF_DEFAULTS),
+                "未分類",
+            )
             daily = (
-                dt_data.groupby([user_col, "對應姓名", "日期"], dropna=False)
+                dt_data.groupby([user_col, "對應姓名", "儲位類型", "日期"], dropna=False)
                 .apply(lambda g: compute_all_day_for_group(
                     g,
                     idle_threshold_min=int(idle_threshold),
@@ -941,10 +1001,17 @@ def main():
                 ))
                 .reset_index()
             )
+            daily["達標門檻"] = daily["儲位類型"].map(target_eff_map)
+            daily["是否達標"] = daily.apply(
+                lambda r: (
+                    "達標" if float(r["效率_件每小時"]) >= float(r["達標門檻"]) else "未達標"
+                ) if pd.notna(r["達標門檻"]) else "不適用",
+                axis=1,
+            )
 
-            # ✅ 個人總彙總（整天版）
+            # ✅ 個人總彙總：每人、每種儲位類型各一列
             summary = (
-                daily.groupby([user_col, "對應姓名"], dropna=False, as_index=False)
+                daily.groupby([user_col, "對應姓名", "儲位類型"], dropna=False, as_index=False)
                 .agg(
                     総日數=("日期", "nunique"),
                     總筆數=("當日筆數", "sum"),
@@ -957,6 +1024,13 @@ def main():
                 lambda r: _eff(int(r["總筆數"]), int(r["總工時_分鐘_扣休"])),
                 axis=1,
             )
+            summary["達標門檻"] = summary["儲位類型"].map(target_eff_map)
+            summary["是否達標"] = summary.apply(
+                lambda r: (
+                    "達標" if float(r["效率_件每小時"]) >= float(r["達標門檻"]) else "未達標"
+                ) if pd.notna(r["達標門檻"]) else "不適用",
+                axis=1,
+            )
 
             for c in ["總筆數", "總工時_分鐘_扣休", "比對棚別筆數"]:
                 summary[c] = summary[c].fillna(0).astype(int)
@@ -966,9 +1040,14 @@ def main():
                 axis=1,
             )
 
-            total_people = int(summary[user_col].nunique())
-            met_people = int((summary["效率_件每小時"] >= float(target_eff)).sum())
-            rate = (met_people / total_people) if total_people > 0 else 0.0
+            classified_summary = summary[summary["儲位類型"].isin(["低空", "高空"])].copy()
+            total_groups = int(len(classified_summary))
+            met_groups = int(classified_summary["是否達標"].eq("達標").sum())
+            rate = (met_groups / total_groups) if total_groups > 0 else 0.0
+            low_groups = classified_summary[classified_summary["儲位類型"].eq("低空")]
+            high_groups = classified_summary[classified_summary["儲位類型"].eq("高空")]
+            low_met = int(low_groups["是否達標"].eq("達標").sum())
+            high_met = int(high_groups["是否達標"].eq("達標").sum())
 
             total_match = int(summary["比對棚別筆數"].sum())
             total_cnt = int(summary["總筆數"].sum())
@@ -977,10 +1056,13 @@ def main():
             total_row = {
                 user_col: "整體合計",
                 "對應姓名": "",
+                "儲位類型": "全部",
                 "総日數": int(summary["総日數"].sum()),
                 "總筆數": int(summary["總筆數"].sum()),
                 "總工時_分鐘_扣休": int(summary["總工時_分鐘_扣休"].sum()),
                 "效率_件每小時": _eff(int(summary["總筆數"].sum()), int(summary["總工時_分鐘_扣休"].sum())),
+                "達標門檻": None,
+                "是否達標": "不適用",
                 "比對棚別筆數": int(total_match),
                 "比對棚別率": float(match_rate_all),
             }
@@ -1034,7 +1116,7 @@ def main():
                     )
                     .reset_index()
                 )
-                prefer = ["輕型料架", "重型低空", "落地儲", "高空儲", "未分類"]
+                prefer = ["低空", "高空", "未分類"]
                 cols = [c for c in stype_person_pivot.columns if c not in (user_col, "對應姓名")]
                 ordered = [c for c in prefer if c in cols] + [c for c in cols if c not in prefer]
                 stype_person_pivot = stype_person_pivot[[user_col, "對應姓名"] + ordered]
@@ -1047,7 +1129,6 @@ def main():
                 daily=daily,
                 shelf_person_pivot=shelf_person_pivot,
                 stype_person_pivot=stype_person_pivot,
-                target_eff=float(target_eff),
             )
             xlsx_name = f"{uploaded.name.rsplit('.', 1)[0]}_上架績效_整天版.xlsx"
 
@@ -1055,10 +1136,15 @@ def main():
                 "params": current_params,
                 "user_col": user_col,
                 "summary": summary,
-                "target_eff": float(target_eff),
+                "low_target_eff": float(low_target_eff),
+                "high_target_eff": float(high_target_eff),
                 "top_n": int(top_n),
-                "total_people": int(total_people),
-                "met_people": int(met_people),
+                "total_groups": int(total_groups),
+                "met_groups": int(met_groups),
+                "low_groups": int(len(low_groups)),
+                "low_met": int(low_met),
+                "high_groups": int(len(high_groups)),
+                "high_met": int(high_met),
                 "rate": float(rate),
                 "xlsx_bytes": xlsx_bytes,
                 "xlsx_name": xlsx_name,
@@ -1078,10 +1164,15 @@ def main():
 
     user_col = last["user_col"]
     summary = last["summary"]
-    target_eff_show = float(last["target_eff"])
+    low_target_eff_show = float(last["low_target_eff"])
+    high_target_eff_show = float(last["high_target_eff"])
     top_n_show = int(controls.get("top_n", last.get("top_n", 30)))
-    total_people = int(last["total_people"])
-    met_people = int(last["met_people"])
+    total_groups = int(last["total_groups"])
+    met_groups = int(last["met_groups"])
+    low_groups = int(last["low_groups"])
+    low_met = int(last["low_met"])
+    high_groups = int(last["high_groups"])
+    high_met = int(last["high_met"])
     rate = float(last["rate"])
     xlsx_bytes = last["xlsx_bytes"]
     xlsx_name = last["xlsx_name"]
@@ -1094,10 +1185,12 @@ def main():
     # KPI（不是表格）
     card_open("📌 總覽 KPI")
     render_kpis([
-        KPI("總人數", f"{total_people:,}"),
-        KPI("達標人數", f"{met_people:,}"),
-        KPI("達標率", f"{rate:.1%}"),
-        KPI("達標門檻", f"效率 ≥ {int(target_eff_show)}"),
+        KPI("低空達標", f"{low_met:,}/{low_groups:,}"),
+        KPI("低空門檻", f"{int(low_target_eff_show)} 件/小時"),
+        KPI("高空達標", f"{high_met:,}/{high_groups:,}"),
+        KPI("高空門檻", f"{int(high_target_eff_show)} 件/小時"),
+        KPI("合計達標組數", f"{met_groups:,}/{total_groups:,}"),
+        KPI("合計達標率", f"{rate:.1%}"),
         KPI("棚別比對筆數", f"{total_match:,}"),
         KPI("棚別比對率", f"{match_rate_all:.1%}"),
     ])
@@ -1119,18 +1212,24 @@ def main():
     card_close()
 
     # ✅ 整天版效率排行（圖表，不顯示 AM/PM）
-    card_open(f"📈 整天效率排行（Top {top_n_show}）")
-    day_rank = summary[[user_col, "對應姓名", "總筆數", "總工時_分鐘_扣休", "效率_件每小時"]].copy()
+    card_open(f"📈 低空／高空效率排行（Top {top_n_show}）")
+    day_rank = summary[[user_col, "對應姓名", "儲位類型", "總筆數", "總工時_分鐘_扣休", "效率_件每小時"]].copy()
     day_rank = day_rank.rename(columns={"效率_件每小時": "效率", "總筆數": "筆數", "總工時_分鐘_扣休": "工時"})
     day_rank["姓名"] = day_rank["對應姓名"].where(day_rank["對應姓名"].astype(str).str.len() > 0, day_rank[user_col].astype(str))
-    bar_topN(
-        day_rank[["姓名", "效率", "筆數", "工時"]],
-        x_col="姓名",
-        y_col="效率",
-        hover_cols=["筆數", "工時"],
-        top_n=top_n_show,
-        target=float(target_eff_show),
-    )
+    for storage_type, target in (("低空", low_target_eff_show), ("高空", high_target_eff_show)):
+        st.subheader(f"{storage_type}（達標 ≥ {int(target)} 件/小時）")
+        rank_part = day_rank[day_rank["儲位類型"].eq(storage_type)].copy()
+        if rank_part.empty:
+            st.info(f"沒有{storage_type}資料")
+        else:
+            bar_topN(
+                rank_part[["姓名", "效率", "筆數", "工時"]],
+                x_col="姓名",
+                y_col="效率",
+                hover_cols=["筆數", "工時"],
+                top_n=top_n_show,
+                target=float(target),
+            )
     card_close()
 
     download_excel_card(
