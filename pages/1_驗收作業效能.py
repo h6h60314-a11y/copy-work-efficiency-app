@@ -190,7 +190,7 @@ def main():
         return
 
     df = result.get("ampm_df", pd.DataFrame())
-    target = float(result.get("target_eff", 20.0))
+    target = float(result.get("target_eff", 29.0))
 
     if df is None or df.empty:
         st.warning("已計算完成，但沒有產出可顯示的資料（ampm_df 為空）")
