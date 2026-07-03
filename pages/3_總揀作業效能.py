@@ -18,8 +18,9 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 FIXED_REST_INTERVALS = [
     ("10:00:00", "10:15:00"),  # 15分鐘
     ("12:30:00", "13:30:00"),  # 60分鐘
-    ("13:30:00", "13:45:00"),  # 15分鐘
+    ("15:30:00", "15:45:00"),  # 15分鐘
     ("18:00:00", "18:30:00"),  # 30分鐘
+    ("20:30:00", "20:45:00"),  # 15分鐘
 ]
 
 IDLE_THRESHOLD = timedelta(minutes=10)
