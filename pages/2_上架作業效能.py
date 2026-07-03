@@ -78,7 +78,6 @@ FIXED_REST_INTERVALS = [
 EXCLUDE_IDLE_RANGES_DEFAULT = [
     (dt.time(10, 0, 0), dt.time(10, 15, 0)),
     (dt.time(12, 30, 0), dt.time(13, 30, 0)),
-    (dt.time(13, 30, 0), dt.time(13, 45, 0)),
     (dt.time(15, 30, 0), dt.time(15, 45, 0)),
     (dt.time(18, 0, 0), dt.time(18, 30, 0)),
     (dt.time(20, 30, 0), dt.time(20, 45, 0)),
