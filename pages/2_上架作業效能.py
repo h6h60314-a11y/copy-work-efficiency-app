@@ -67,7 +67,6 @@ NAME_MAP = {
 FIXED_REST_INTERVALS = [
     (dt.time(10, 0, 0), dt.time(10, 15, 0), 15, "10:00-10:15"),
     (dt.time(12, 30, 0), dt.time(13, 30, 0), 60, "12:30-13:30"),
-    (dt.time(13, 30, 0), dt.time(13, 45, 0), 15, "13:30-13:45"),
     (dt.time(15, 30, 0), dt.time(15, 45, 0), 15, "15:30-15:45"),
     (dt.time(18, 0, 0), dt.time(18, 30, 0), 30, "18:00-18:30"),
     (dt.time(20, 30, 0), dt.time(20, 45, 0), 15, "20:30-20:45"),
@@ -75,6 +74,7 @@ FIXED_REST_INTERVALS = [
 ]
 
 # ✅ 預設排除空窗時段（可被 sidebar 覆蓋）
+# 這裡要與 FIXED_REST_INTERVALS 保持一致，避免工時有扣休息、空窗卻沒有排除休息。
 EXCLUDE_IDLE_RANGES_DEFAULT = [
     (dt.time(10, 0, 0), dt.time(10, 15, 0)),
     (dt.time(12, 30, 0), dt.time(13, 30, 0)),
@@ -88,21 +88,53 @@ EXCLUDE_IDLE_RANGES_DEFAULT = [
 # 通用 helpers
 # =========================================================
 def _parse_time_any(x: Any) -> Optional[dt.time]:
+    """把各種常見輸入轉成 time。
+
+    支援：
+    - 08:05 / 08:05:00
+    - 805 / 0805 / 080500
+    - pandas Timestamp / datetime / time
+    """
     if x is None:
         return None
+
+    if isinstance(x, pd.Timestamp):
+        if pd.isna(x):
+            return None
+        return x.time().replace(microsecond=0)
+
+    if isinstance(x, dt.datetime):
+        return x.time().replace(microsecond=0)
+
     if isinstance(x, dt.time):
-        return x
+        return x.replace(microsecond=0)
+
     s = str(x).strip()
     if not s:
         return None
+
+    # 統一全形冒號
+    s = s.replace("：", ":")
+
+    # 支援 805 -> 08:05、0805 -> 08:05、080500 -> 08:05:00
+    if re.fullmatch(r"\d{3}", s):
+        s = f"0{s[0]}:{s[1:]}"
+    elif re.fullmatch(r"\d{4}", s):
+        s = f"{s[:2]}:{s[2:]}"
+    elif re.fullmatch(r"\d{6}", s):
+        s = f"{s[:2]}:{s[2:4]}:{s[4:]}"
+
     m = re.match(r"^(\d{1,2}):(\d{2})(?::(\d{2}))?$", s)
     if not m:
         return None
+
     hh = int(m.group(1))
     mm = int(m.group(2))
     ss = int(m.group(3) or 0)
+
     if not (0 <= hh <= 23 and 0 <= mm <= 59 and 0 <= ss <= 59):
         return None
+
     return dt.time(hh, mm, ss)
 
 
@@ -171,6 +203,18 @@ def render_putaway_people_settings_panel():
 # sidebar_controls 排除區間解析
 # =========================================================
 def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
+    """解析 sidebar 手動輸入的空窗排除時段。
+
+    支援格式：
+    - 10:00-10:15
+    - 10:00~10:15
+    - 10:00～10:15
+    - 10:00 至 10:15 / 10:00 到 10:15
+    - 1000-1015 / 080500-081000
+
+    支援分隔：逗號、分號、頓號、換行。
+    若解析不到任何有效區間，回傳預設休息排除區間。
+    """
     if val is None:
         return EXCLUDE_IDLE_RANGES_DEFAULT
 
@@ -184,16 +228,45 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
         raw = val.strip()
         if not raw:
             return EXCLUDE_IDLE_RANGES_DEFAULT
-        parts = re.split(r"[，,;；\n]+", raw)
-        items = []
+
+        # 統一各種符號，降低手動輸入造成的錯亂
+        raw = raw.replace("：", ":")
+        raw = raw.replace("－", "-").replace("—", "-").replace("–", "-")
+        raw = raw.replace("～", "~")
+        raw = raw.replace("至", "-").replace("到", "-")
+        raw = raw.replace("，", ",").replace("；", ";").replace("、", ",")
+        raw = raw.replace("\r", "\n")
+
+        parts = re.split(r"[,;\n]+", raw)
+        out: List[Tuple[dt.time, dt.time]] = []
+
         for p in parts:
             p = p.strip()
             if not p:
                 continue
-            m = re.match(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-~～]\s*(\d{1,2}:\d{2}(?::\d{2})?)$", p)
-            if m:
-                items.append((m.group(1), m.group(2)))
-        return _parse_exclude_windows(items) if items else EXCLUDE_IDLE_RANGES_DEFAULT
+
+            # 時間可為 10:00、10:00:00、1000、100000
+            m = re.match(
+                r"^(\d{1,2}:?\d{2}(?::?\d{2})?)\s*[-~]\s*(\d{1,2}:?\d{2}(?::?\d{2})?)$",
+                p,
+            )
+            if not m:
+                continue
+
+            s = _parse_time_any(m.group(1))
+            e = _parse_time_any(m.group(2))
+
+            if not s or not e:
+                continue
+
+            s_dt = dt.datetime.combine(dt.date.today(), s)
+            e_dt = dt.datetime.combine(dt.date.today(), e)
+
+            # 不接受跨日排除區間，避免 23:30-00:30 造成空窗切段錯亂
+            if s_dt < e_dt:
+                out.append((s, e))
+
+        return out if out else EXCLUDE_IDLE_RANGES_DEFAULT
 
     if not isinstance(val, (list, tuple)):
         return EXCLUDE_IDLE_RANGES_DEFAULT
@@ -209,11 +282,16 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
         else:
             s, e = None, None
 
-        if s and e and (dt.datetime.combine(dt.date.today(), s) < dt.datetime.combine(dt.date.today(), e)):
+        if not s or not e:
+            continue
+
+        s_dt = dt.datetime.combine(dt.date.today(), s)
+        e_dt = dt.datetime.combine(dt.date.today(), e)
+
+        if s_dt < e_dt:
             out.append((s, e))
 
     return out if out else EXCLUDE_IDLE_RANGES_DEFAULT
-
 
 def _extract_exclude_value_from_controls(controls: Dict[str, Any]) -> Any:
     if not isinstance(controls, dict) or not controls:
@@ -341,12 +419,29 @@ def break_minutes_for_span(first_dt: pd.Timestamp, last_dt: pd.Timestamp) -> Tup
     return int(total), "；".join(labels) if labels else "未扣休息"
 
 def _subtract_exclusions(s_dt: pd.Timestamp, e_dt: pd.Timestamp, exclude_ranges):
+    """從一段空窗中扣掉排除時段。
+
+    原本只用 s_dt.date() 套排除時段，若資料跨日或時間被切段，容易造成顯示錯亂。
+    這版會把起訖日期內每天的排除時段都展開後再扣除。
+    """
     if s_dt >= e_dt or not exclude_ranges:
         return [(s_dt, e_dt)]
+
     segments = [(s_dt, e_dt)]
-    for ex_s_t, ex_e_t in exclude_ranges:
-        ex_s = pd.Timestamp.combine(s_dt.date(), ex_s_t)
-        ex_e = pd.Timestamp.combine(s_dt.date(), ex_e_t)
+
+    current_day = s_dt.date()
+    end_day = e_dt.date()
+    all_exclusions = []
+
+    while current_day <= end_day:
+        for ex_s_t, ex_e_t in exclude_ranges:
+            ex_s = pd.Timestamp.combine(current_day, ex_s_t)
+            ex_e = pd.Timestamp.combine(current_day, ex_e_t)
+            if ex_e > ex_s:
+                all_exclusions.append((ex_s, ex_e))
+        current_day = current_day + dt.timedelta(days=1)
+
+    for ex_s, ex_e in all_exclusions:
         new_segments = []
         for a, b in segments:
             if b <= ex_s or a >= ex_e:
@@ -357,8 +452,8 @@ def _subtract_exclusions(s_dt: pd.Timestamp, e_dt: pd.Timestamp, exclude_ranges)
                 if b > ex_e:
                     new_segments.append((ex_e, b))
         segments = [(x, y) for (x, y) in new_segments if x < y]
-    return segments
 
+    return segments
 
 def _coerce_dt_series(series_dt: pd.Series) -> pd.Series:
     if series_dt is None:
@@ -402,7 +497,10 @@ def _compute_idle(
             gap_min = int(round((b - a).total_seconds() / 60.0))
             if gap_min >= int(min_minutes):
                 total_min += gap_min
-                ranges_txt.append(f"{a.time()} ~ {b.time()}")
+                if a.date() == b.date():
+                    ranges_txt.append(f"{a.strftime('%H:%M:%S')} ~ {b.strftime('%H:%M:%S')}")
+                else:
+                    ranges_txt.append(f"{a.strftime('%Y-%m-%d %H:%M:%S')} ~ {b.strftime('%Y-%m-%d %H:%M:%S')}")
         prev = cur
 
     return int(total_min), "；".join(ranges_txt)
@@ -870,6 +968,7 @@ def main():
         preview = "、".join([f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in exclude_idle_ranges]) if exclude_idle_ranges else "（無）"
         st.caption("✅ 固定休息時間：10:00~10:15、12:30~13:30、13:30~13:45、15:30~15:45、18:00~18:30、20:30~20:45、22:30~22:45")
         st.caption(f"✅ 空窗計算排除時段：{preview}")
+        st.caption("手動空窗格式支援：10:00-10:15、10:00~10:15、10:00至10:15、1000-1015；可用換行/逗號/頓號分隔。")
         st.caption("⚠️ 若你改了條件/棚別主檔，需再按一次「🚀 產出 KPI」才會重新計算。")
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
