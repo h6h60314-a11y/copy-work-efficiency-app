@@ -6,17 +6,93 @@ from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
 import streamlit as st
 
-from common_ui import (
-    inject_logistics_theme,
-    set_page,
-    KPI,
-    render_kpis,
-    bar_topN,
-    card_open,
-    card_close,
-    download_excel_card,
-    sidebar_controls,
-)
+try:
+    from common_ui import (
+        inject_logistics_theme,
+        set_page,
+        KPI,
+        render_kpis,
+        bar_topN,
+        card_open,
+        card_close,
+        download_excel_card,
+        sidebar_controls,
+    )
+except ModuleNotFoundError:
+    class KPI:
+        def __init__(self, label: str, value: str):
+            self.label = label
+            self.value = value
+
+    def inject_logistics_theme():
+        # Fallback mode: set_page_config must be the first Streamlit command.
+        # Styles are injected inside set_page() after page config is set.
+        return
+
+    def _inject_fallback_theme():
+        st.markdown(
+            """
+            <style>
+            .block-container { padding-top: 1.5rem; }
+            div[data-testid="stMetric"] {
+                background: #ffffff;
+                border: 1px solid #e5e7eb;
+                border-radius: 8px;
+                padding: 12px 14px;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    def set_page(title: str, icon: str = "📦", subtitle: str = ""):
+        st.set_page_config(page_title=title, page_icon=icon, layout="wide")
+        _inject_fallback_theme()
+        st.title(f"{icon} {title}")
+        if subtitle:
+            st.caption(subtitle)
+
+    def render_kpis(items: List[KPI]):
+        cols = st.columns(max(1, min(len(items), 4)))
+        for idx, item in enumerate(items):
+            with cols[idx % len(cols)]:
+                st.metric(item.label, item.value)
+
+    def bar_topN(df: pd.DataFrame, x_col: str, y_col: str, hover_cols=None, top_n: int = 30, target: float = 0):
+        if df is None or df.empty:
+            st.info("沒有資料可顯示。")
+            return
+        show = df.sort_values(y_col, ascending=False).head(int(top_n)).copy()
+        st.bar_chart(show.set_index(x_col)[y_col])
+        if target:
+            st.caption(f"達標門檻：{target:g}")
+
+    def card_open(title: str):
+        st.subheader(title)
+
+    def card_close():
+        st.markdown("")
+
+    def download_excel_card(data: bytes, file_name: str, label: str):
+        st.download_button(
+            label=label,
+            data=data,
+            file_name=file_name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def sidebar_controls(default_top_n: int = 30, enable_exclude_windows: bool = False, state_key_prefix: str = ""):
+        with st.sidebar:
+            top_n = st.number_input("圖表 Top N", min_value=1, max_value=200, value=int(default_top_n), step=1)
+            controls = {"top_n": int(top_n)}
+            if enable_exclude_windows:
+                controls["exclude_windows"] = st.text_area(
+                    "空窗排除時段",
+                    value="",
+                    key=f"{state_key_prefix}_exclude_windows",
+                    help="空白時使用預設休息時間；可輸入 10:00-10:15，多段用逗號或換行分隔。",
+                )
+            return controls
 
 # =========================================================
 # 參數
@@ -966,7 +1042,7 @@ def main():
             st.caption(f"✅ clamp 起始時間：{global_start_time.strftime('%H:%M:%S')}")
 
         preview = "、".join([f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in exclude_idle_ranges]) if exclude_idle_ranges else "（無）"
-        st.caption("✅ 固定休息時間：10:00~10:15、12:30~13:30、13:30~13:45、15:30~15:45、18:00~18:30、20:30~20:45、22:30~22:45")
+        st.caption("✅ 固定休息時間：10:00~10:15、12:30~13:30、15:30~15:45、18:00~18:30、20:30~20:45、22:30~22:45")
         st.caption(f"✅ 空窗計算排除時段：{preview}")
         st.caption("手動空窗格式支援：10:00-10:15、10:00~10:15、10:00至10:15、1000-1015；可用換行/逗號/頓號分隔。")
         st.caption("⚠️ 若你改了條件/棚別主檔，需再按一次「🚀 產出 KPI」才會重新計算。")
