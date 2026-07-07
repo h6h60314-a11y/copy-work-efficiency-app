@@ -1,4 +1,4 @@
-import io
+﻿import io
 import re
 import datetime as dt
 from typing import Dict, List, Tuple, Optional, Any
@@ -149,7 +149,7 @@ FIXED_REST_INTERVALS = [
     (dt.time(22, 30, 0), dt.time(22, 45, 0), 15, "22:30-22:45"),
 ]
 
-# ✅ 預設排除空窗時段（可被 sidebar 覆蓋）
+# ✅ 預設排除空窗時段（sidebar 輸入會加到這些區間，不會覆蓋）
 # 這裡要與 FIXED_REST_INTERVALS 保持一致，避免工時有扣休息、空窗卻沒有排除休息。
 EXCLUDE_IDLE_RANGES_DEFAULT = [
     (dt.time(10, 0, 0), dt.time(10, 15, 0)),
@@ -159,6 +159,21 @@ EXCLUDE_IDLE_RANGES_DEFAULT = [
     (dt.time(20, 30, 0), dt.time(20, 45, 0)),
     (dt.time(22, 30, 0), dt.time(22, 45, 0)),
 ]
+
+
+def _dedupe_time_ranges(ranges: List[Tuple[dt.time, dt.time]]) -> List[Tuple[dt.time, dt.time]]:
+    out: List[Tuple[dt.time, dt.time]] = []
+    seen = set()
+    for s, e in ranges:
+        key = (s, e)
+        if key not in seen:
+            out.append((s, e))
+            seen.add(key)
+    return out
+
+
+def _merge_with_default_exclude_windows(extra_ranges: List[Tuple[dt.time, dt.time]]) -> List[Tuple[dt.time, dt.time]]:
+    return _dedupe_time_ranges(EXCLUDE_IDLE_RANGES_DEFAULT + (extra_ranges or []))
 
 # =========================================================
 # 通用 helpers
@@ -342,7 +357,7 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
             if s_dt < e_dt:
                 out.append((s, e))
 
-        return out if out else EXCLUDE_IDLE_RANGES_DEFAULT
+        return _merge_with_default_exclude_windows(out) if out else EXCLUDE_IDLE_RANGES_DEFAULT
 
     if not isinstance(val, (list, tuple)):
         return EXCLUDE_IDLE_RANGES_DEFAULT
@@ -367,7 +382,7 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
         if s_dt < e_dt:
             out.append((s, e))
 
-    return out if out else EXCLUDE_IDLE_RANGES_DEFAULT
+    return _merge_with_default_exclude_windows(out) if out else EXCLUDE_IDLE_RANGES_DEFAULT
 
 def _extract_exclude_value_from_controls(controls: Dict[str, Any]) -> Any:
     if not isinstance(controls, dict) or not controls:
