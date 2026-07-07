@@ -105,7 +105,7 @@ REV_DT_CANDIDATES = ["修訂日期", "修訂時間", "修訂日", "異動時間"
 
 TARGET_EFF_DEFAULTS = {
     "低空": 13,
-    "高空": 8,
+    "高空": 9,
 }
 IDLE_MIN_THRESHOLD_DEFAULT = 10
 
@@ -608,6 +608,120 @@ def _eff(n: int, m_minutes: int) -> float:
     return round((n / m_minutes * 60.0), 2) if m_minutes and m_minutes > 0 else 0.0
 
 
+
+def _combined_storage_label(values: pd.Series) -> str:
+    vals = [str(v).strip() for v in values.dropna().tolist() if str(v).strip()]
+    preferred = [v for v in ("低空", "高空") if v in vals]
+    others = sorted({v for v in vals if v not in ("低空", "高空")})
+    ordered = preferred + others
+    return "+".join(ordered) if ordered else "未分類"
+
+
+def _weighted_target_eff(minutes: float, required_pieces: float) -> Optional[float]:
+    if pd.isna(minutes) or float(minutes) <= 0:
+        return None
+    return round(float(required_pieces) / float(minutes) * 60.0, 2)
+
+
+def _build_combined_person_summary(daily: pd.DataFrame, user_col: str, target_eff_map: Dict[str, float]) -> pd.DataFrame:
+    if daily is None or daily.empty:
+        return pd.DataFrame(columns=[
+            user_col, "對應姓名", "儲位類型", "総日數", "總筆數", "總工時_分鐘_扣休",
+            "效率_件每小時", "達標門檻", "是否達標", "比對棚別筆數", "比對棚別率",
+        ])
+
+    d = daily.copy()
+    for c in ["當日筆數", "當日工時_分鐘_扣休", "比對棚別筆數"]:
+        d[c] = pd.to_numeric(d.get(c, 0), errors="coerce").fillna(0)
+    d["_target_eff"] = pd.to_numeric(d["儲位類型"].map(target_eff_map), errors="coerce")
+    d["_required_pieces"] = d.apply(
+        lambda r: (float(r["當日工時_分鐘_扣休"]) / 60.0 * float(r["_target_eff"]))
+        if pd.notna(r["_target_eff"]) else 0.0,
+        axis=1,
+    )
+
+    grouped = (
+        d.groupby([user_col, "對應姓名"], dropna=False, as_index=False)
+        .agg(
+            儲位類型=("儲位類型", _combined_storage_label),
+            総日數=("日期", "nunique"),
+            總筆數=("當日筆數", "sum"),
+            總工時_分鐘_扣休=("當日工時_分鐘_扣休", "sum"),
+            比對棚別筆數=("比對棚別筆數", "sum"),
+            _required_pieces=("_required_pieces", "sum"),
+        )
+    )
+
+    for c in ["總筆數", "總工時_分鐘_扣休", "比對棚別筆數"]:
+        grouped[c] = grouped[c].fillna(0).astype(int)
+    grouped["效率_件每小時"] = grouped.apply(
+        lambda r: _eff(int(r["總筆數"]), int(r["總工時_分鐘_扣休"])),
+        axis=1,
+    )
+    grouped["達標門檻"] = grouped.apply(
+        lambda r: _weighted_target_eff(float(r["總工時_分鐘_扣休"]), float(r["_required_pieces"])),
+        axis=1,
+    )
+    grouped["是否達標"] = grouped.apply(
+        lambda r: "達標" if float(r["總筆數"]) >= float(r["_required_pieces"]) else "未達標",
+        axis=1,
+    )
+    grouped["比對棚別率"] = grouped.apply(
+        lambda r: (int(r["比對棚別筆數"]) / int(r["總筆數"])) if int(r["總筆數"]) > 0 else 0.0,
+        axis=1,
+    )
+    return grouped.drop(columns=["_required_pieces"])
+
+
+def _build_combined_daily(daily: pd.DataFrame, user_col: str, target_eff_map: Dict[str, float]) -> pd.DataFrame:
+    if daily is None or daily.empty:
+        return daily
+
+    d = daily.copy()
+    for c in ["當日筆數", "休息分鐘_整體", "當日工時_分鐘_扣休", "空窗分鐘_扣休", "比對棚別筆數"]:
+        d[c] = pd.to_numeric(d.get(c, 0), errors="coerce").fillna(0)
+    d["_target_eff"] = pd.to_numeric(d["儲位類型"].map(target_eff_map), errors="coerce")
+    d["_required_pieces"] = d.apply(
+        lambda r: (float(r["當日工時_分鐘_扣休"]) / 60.0 * float(r["_target_eff"]))
+        if pd.notna(r["_target_eff"]) else 0.0,
+        axis=1,
+    )
+
+    out = (
+        d.groupby([user_col, "對應姓名", "日期"], dropna=False, as_index=False)
+        .agg(
+            儲位類型=("儲位類型", _combined_storage_label),
+            第一筆時間=("第一筆時間", "min"),
+            最後一筆時間=("最後一筆時間", "max"),
+            當日筆數=("當日筆數", "sum"),
+            休息分鐘_整體=("休息分鐘_整體", "sum"),
+            當日工時_分鐘_扣休=("當日工時_分鐘_扣休", "sum"),
+            空窗分鐘_扣休=("空窗分鐘_扣休", "sum"),
+            空窗時段=("空窗時段", lambda s: "；".join([str(x) for x in s.dropna().astype(str) if str(x).strip()])),
+            比對棚別筆數=("比對棚別筆數", "sum"),
+            _required_pieces=("_required_pieces", "sum"),
+        )
+    )
+    out["命中規則"] = "依低空/高空分別扣休後合併"
+    for c in ["當日筆數", "休息分鐘_整體", "當日工時_分鐘_扣休", "空窗分鐘_扣休", "比對棚別筆數"]:
+        out[c] = out[c].fillna(0).astype(int)
+    out["效率_件每小時"] = out.apply(
+        lambda r: _eff(int(r["當日筆數"]), int(r["當日工時_分鐘_扣休"])),
+        axis=1,
+    )
+    out["達標門檻"] = out.apply(
+        lambda r: _weighted_target_eff(float(r["當日工時_分鐘_扣休"]), float(r["_required_pieces"])),
+        axis=1,
+    )
+    out["是否達標"] = out.apply(
+        lambda r: "達標" if float(r["當日筆數"]) >= float(r["_required_pieces"]) else "未達標",
+        axis=1,
+    )
+    out["比對棚別率"] = out.apply(
+        lambda r: (int(r["比對棚別筆數"]) / int(r["當日筆數"])) if int(r["當日筆數"]) > 0 else 0.0,
+        axis=1,
+    )
+    return out.drop(columns=["_required_pieces"])
 def _fixed_rest_ranges_for_day(day: dt.date) -> List[Tuple[pd.Timestamp, pd.Timestamp, int, str]]:
     out: List[Tuple[pd.Timestamp, pd.Timestamp, int, str]] = []
     for s_t, e_t, mins, label in FIXED_REST_INTERVALS:
@@ -811,7 +925,7 @@ def _fmt_ts_time(x: Any) -> str:
 
 
 def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
-    """總表用：每人、每日、低空/高空各一列。"""
+    """總表用：每人、每日合併成一列。"""
     columns = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "空窗分鐘", "空窗時段"]
     if daily is None or daily.empty:
         return pd.DataFrame(columns=columns)
@@ -839,7 +953,7 @@ def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
         "工作區間": d["工作區間"],
         "總分鐘": pd.to_numeric(d.get("當日工時_分鐘_扣休", 0), errors="coerce").fillna(0).astype(int),
         "效率(件/時)": pd.to_numeric(d.get("效率_件每小時", 0), errors="coerce").fillna(0.0).round(2),
-        "達標門檻": pd.to_numeric(d.get("達標門檻", 0), errors="coerce").fillna(0).astype(int),
+        "達標門檻": pd.to_numeric(d.get("達標門檻", 0), errors="coerce").fillna(0).round(2),
         "是否達標": d.get("是否達標", "不適用"),
         "休息分鐘": pd.to_numeric(d.get("休息分鐘_整體", 0), errors="coerce").fillna(0).astype(int),
         "空窗分鐘": pd.to_numeric(d.get("空窗分鐘_扣休", 0), errors="coerce").fillna(0).astype(int),
@@ -1204,8 +1318,8 @@ def main():
                 axis=1,
             )
 
-            # ✅ 個人總彙總：每人、每種儲位類型各一列
-            summary = (
+            # ✅ 個人總彙總：先保留每人、每種儲位類型各一列，供低空/高空排行使用
+            summary_by_type = (
                 daily.groupby([user_col, "對應姓名", "儲位類型"], dropna=False, as_index=False)
                 .agg(
                     総日數=("日期", "nunique"),
@@ -1215,12 +1329,12 @@ def main():
                 )
             )
 
-            summary["效率_件每小時"] = summary.apply(
+            summary_by_type["效率_件每小時"] = summary_by_type.apply(
                 lambda r: _eff(int(r["總筆數"]), int(r["總工時_分鐘_扣休"])),
                 axis=1,
             )
-            summary["達標門檻"] = summary["儲位類型"].map(target_eff_map)
-            summary["是否達標"] = summary.apply(
+            summary_by_type["達標門檻"] = summary_by_type["儲位類型"].map(target_eff_map)
+            summary_by_type["是否達標"] = summary_by_type.apply(
                 lambda r: (
                     "達標" if float(r["效率_件每小時"]) >= float(r["達標門檻"]) else "未達標"
                 ) if pd.notna(r["達標門檻"]) else "不適用",
@@ -1228,19 +1342,22 @@ def main():
             )
 
             for c in ["總筆數", "總工時_分鐘_扣休", "比對棚別筆數"]:
-                summary[c] = summary[c].fillna(0).astype(int)
+                summary_by_type[c] = summary_by_type[c].fillna(0).astype(int)
 
-            summary["比對棚別率"] = summary.apply(
+            summary_by_type["比對棚別率"] = summary_by_type.apply(
                 lambda r: (int(r["比對棚別筆數"]) / int(r["總筆數"])) if int(r["總筆數"]) > 0 else 0.0,
                 axis=1,
             )
 
-            classified_summary = summary[summary["儲位類型"].isin(["低空", "高空"])].copy()
+            summary = _build_combined_person_summary(daily, user_col, target_eff_map)
+            daily_total = _build_combined_daily(daily, user_col, target_eff_map)
+
+            classified_summary = summary[summary["儲位類型"].astype(str).str.contains("低空|高空", regex=True, na=False)].copy()
             total_groups = int(len(classified_summary))
             met_groups = int(classified_summary["是否達標"].eq("達標").sum())
             rate = (met_groups / total_groups) if total_groups > 0 else 0.0
-            low_groups = classified_summary[classified_summary["儲位類型"].eq("低空")]
-            high_groups = classified_summary[classified_summary["儲位類型"].eq("高空")]
+            low_groups = summary_by_type[summary_by_type["儲位類型"].eq("低空")]
+            high_groups = summary_by_type[summary_by_type["儲位類型"].eq("高空")]
             low_met = int(low_groups["是否達標"].eq("達標").sum())
             high_met = int(high_groups["是否達標"].eq("達標").sum())
 
@@ -1321,7 +1438,7 @@ def main():
             xlsx_bytes = build_excel_bytes(
                 user_col=user_col,
                 summary_out=summary_out,
-                daily=daily,
+                daily=daily_total,
                 shelf_person_pivot=shelf_person_pivot,
                 stype_person_pivot=stype_person_pivot,
             )
@@ -1330,7 +1447,7 @@ def main():
             st.session_state.putaway_last = {
                 "params": current_params,
                 "user_col": user_col,
-                "summary": summary,
+                "summary": summary_by_type,
                 "low_target_eff": float(low_target_eff),
                 "high_target_eff": float(high_target_eff),
                 "top_n": int(top_n),
