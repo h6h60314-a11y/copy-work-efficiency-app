@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from io import BytesIO
+
 import streamlit as st
 import pandas as pd
+
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill, Font
 
 from common_ui import (
     set_page,               # set_page 內會 inject_logistics_theme()
@@ -94,11 +99,11 @@ def _split_am_pm(
     """
     依「時段」欄位分割上午與下午資料。
 
-    支援原始時段值：
+    支援：
     - 上午
     - 下午
-
-    轉換後班別：
+    - AM
+    - PM
     - AM 班
     - PM 班
     """
@@ -195,6 +200,295 @@ def _safe_rate_ge(
     )
 
 
+def _copy_font_with_color(
+    original_font: Font,
+    color: str,
+) -> Font:
+    """
+    保留原本字型設定，只修改字體顏色。
+    """
+    return Font(
+        name=original_font.name,
+        size=original_font.size,
+        bold=original_font.bold,
+        italic=original_font.italic,
+        vertAlign=original_font.vertAlign,
+        underline=original_font.underline,
+        strike=original_font.strike,
+        color=color,
+        charset=original_font.charset,
+        family=original_font.family,
+        scheme=original_font.scheme,
+        outline=original_font.outline,
+        shadow=original_font.shadow,
+        condense=original_font.condense,
+        extend=original_font.extend,
+    )
+
+
+def _extract_numeric_value(value) -> float | None:
+    """
+    將 Excel 儲存格內容轉成數值。
+
+    支援：
+    - 29
+    - 29.5
+    - "29"
+    - "29.5"
+    - "29 筆/時"
+    - "29%"
+    - 含逗號的數字
+
+    無法轉換則回傳 None。
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, bool):
+        return None
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    value_text = str(value).strip()
+
+    if not value_text:
+        return None
+
+    value_text = (
+        value_text
+        .replace(",", "")
+        .replace("%", "")
+        .replace("筆／小時", "")
+        .replace("筆/小時", "")
+        .replace("筆／時", "")
+        .replace("筆/時", "")
+        .replace("筆", "")
+        .strip()
+    )
+
+    try:
+        return float(value_text)
+
+    except (TypeError, ValueError):
+        return None
+
+
+def _find_efficiency_column(
+    worksheet,
+) -> tuple[int | None, int | None]:
+    """
+    搜尋工作表中的效率欄位。
+
+    回傳：
+    - 標題所在列
+    - 效率欄位編號
+
+    會優先尋找完全等於「效率」的欄名，
+    再尋找包含「效率」的欄名。
+    """
+    if worksheet.max_row <= 0 or worksheet.max_column <= 0:
+        return None, None
+
+    # 報表上方可能有標題，因此搜尋前 30 列
+    search_end_row = min(
+        worksheet.max_row,
+        30,
+    )
+
+    # 第一階段：優先找完全等於「效率」
+    for row_idx in range(1, search_end_row + 1):
+        for col_idx in range(1, worksheet.max_column + 1):
+            cell_value = worksheet.cell(
+                row=row_idx,
+                column=col_idx,
+            ).value
+
+            header_text = (
+                str(cell_value).strip()
+                if cell_value is not None
+                else ""
+            )
+
+            if header_text == "效率":
+                return row_idx, col_idx
+
+    # 第二階段：尋找包含「效率」的欄名
+    # 排除「平均效率」等可能屬於統計摘要的欄位時，
+    # 仍以第一個找到的欄位為準
+    for row_idx in range(1, search_end_row + 1):
+        for col_idx in range(1, worksheet.max_column + 1):
+            cell_value = worksheet.cell(
+                row=row_idx,
+                column=col_idx,
+            ).value
+
+            header_text = (
+                str(cell_value).strip()
+                if cell_value is not None
+                else ""
+            )
+
+            if "效率" in header_text:
+                return row_idx, col_idx
+
+    return None, None
+
+
+def _is_existing_fail_fill(cell) -> bool:
+    """
+    判斷儲存格是否為常見的紅色未達標格式。
+    """
+    if cell.fill is None:
+        return False
+
+    fg_color = cell.fill.fgColor
+
+    if fg_color is None:
+        return False
+
+    color_value = None
+
+    if fg_color.type == "rgb":
+        color_value = fg_color.rgb
+
+    elif fg_color.type == "indexed":
+        color_value = str(fg_color.indexed)
+
+    if not color_value:
+        return False
+
+    color_value = str(color_value).upper()
+
+    return color_value in {
+        "FFC7CE",
+        "00FFC7CE",
+        "FFFFC7CE",
+        "FF0000",
+        "00FF0000",
+        "FFFF0000",
+        "9C0006",
+        "009C0006",
+        "FF9C0006",
+    }
+
+
+def _clear_old_fail_format(cell):
+    """
+    清除舊的紅色未達標格式。
+
+    只在判斷該格屬於既有紅色格式時清除，
+    避免破壞其他正常底色。
+    """
+    if not _is_existing_fail_fill(cell):
+        return
+
+    cell.fill = PatternFill(
+        fill_type=None,
+    )
+
+    cell.font = _copy_font_with_color(
+        cell.font,
+        "000000",
+    )
+
+
+def _apply_excel_target_format(
+    xlsx_bytes: bytes,
+    *,
+    target: float = 29.0,
+) -> bytes:
+    """
+    將匯出的 Excel 報表重新套用效率門檻格式。
+
+    規則：
+    - 自動搜尋每個工作表中的「效率」欄位
+    - 效率 < 29：整列淡紅底、深紅字
+    - 效率 >= 29：清除可能存在的舊紅色未達標格式
+    - 空白或非數值資料不處理
+    - 不修改標題列
+    """
+    if not xlsx_bytes:
+        return xlsx_bytes
+
+    input_buffer = BytesIO(xlsx_bytes)
+
+    try:
+        workbook = load_workbook(input_buffer)
+
+    except Exception:
+        # 無法讀取時，維持原檔案內容
+        return xlsx_bytes
+
+    # 未達標格式：Excel 常見淡紅底、深紅字
+    fail_fill = PatternFill(
+        fill_type="solid",
+        fgColor="FFC7CE",
+    )
+
+    fail_font_color = "9C0006"
+
+    for worksheet in workbook.worksheets:
+        header_row, efficiency_col = _find_efficiency_column(
+            worksheet
+        )
+
+        if header_row is None or efficiency_col is None:
+            continue
+
+        # 從效率欄標題下一列開始
+        for row_idx in range(
+            header_row + 1,
+            worksheet.max_row + 1,
+        ):
+            efficiency_cell = worksheet.cell(
+                row=row_idx,
+                column=efficiency_col,
+            )
+
+            efficiency_value = _extract_numeric_value(
+                efficiency_cell.value
+            )
+
+            # 空白、文字或無法辨識的內容不處理
+            if efficiency_value is None:
+                continue
+
+            is_failed = (
+                efficiency_value < float(target)
+            )
+
+            for col_idx in range(
+                1,
+                worksheet.max_column + 1,
+            ):
+                cell = worksheet.cell(
+                    row=row_idx,
+                    column=col_idx,
+                )
+
+                if is_failed:
+                    # 低於 29：整列紅色
+                    cell.fill = fail_fill
+                    cell.font = _copy_font_with_color(
+                        cell.font,
+                        fail_font_color,
+                    )
+
+                else:
+                    # 等於或高於 29：
+                    # 清除可能由舊門檻產生的紅色格式
+                    _clear_old_fail_format(cell)
+
+    output_buffer = BytesIO()
+
+    workbook.save(output_buffer)
+
+    output_buffer.seek(0)
+
+    return output_buffer.getvalue()
+
+
 def _render_shift_block(
     title: str,
     sdf: pd.DataFrame,
@@ -252,7 +546,10 @@ def _render_shift_block(
     # ======================
     card_open(
         f"{title}｜KPI 明細",
-        right_badge=f"紅色＜{target:.0f}｜綠色≥{target:.0f}",
+        right_badge=(
+            f"紅色＜{target:.0f}｜"
+            f"達標≥{target:.0f}"
+        ),
     )
 
     show_kpi_table(
@@ -294,7 +591,10 @@ def _render_shift_block(
         hover_cols=hover_cols,
         top_n=int(top_n),
         target=float(target),
-        title=f"低於 {target:.0f} 筆／小時自動標紅；虛線為達標門檻",
+        title=(
+            f"低於 {target:.0f} 筆／小時自動標紅；"
+            "虛線為達標門檻"
+        ),
     )
 
     card_close()
@@ -311,7 +611,8 @@ def main():
         icon="✅",
         subtitle=(
             "驗收作業｜人時效率｜AM / PM 班別｜"
-            f"統一門檻 {QC_TARGET_EFFICIENCY:.0f} 筆／小時"
+            f"統一門檻 "
+            f"{QC_TARGET_EFFICIENCY:.0f} 筆／小時"
         ),
     )
 
@@ -339,14 +640,19 @@ def main():
     )
 
     # ======================
-    # 顯示固定門檻
+    # Sidebar 固定門檻顯示
     # ======================
     with st.sidebar:
         st.divider()
+
         st.metric(
             "驗收效率門檻",
             f"{QC_TARGET_EFFICIENCY:.0f} 筆／小時",
             help="上午與下午均使用相同門檻。",
+        )
+
+        st.caption(
+            "匯出 Excel 時，效率低於 29 的資料會整列顯示紅色。"
         )
 
     # ======================
@@ -398,17 +704,28 @@ def main():
                 )
 
             else:
-                # 強制統一前端顯示與後續使用門檻為 29
+                # 強制統一上午與下午門檻為 29
                 result["target_eff"] = QC_TARGET_EFFICIENCY
                 result["target_eff_am"] = QC_TARGET_EFFICIENCY
                 result["target_eff_pm"] = QC_TARGET_EFFICIENCY
+
+                # 匯出 Excel 重新套用門檻格式
+                # 效率低於 29，整列顯示紅色
+                if result.get("xlsx_bytes"):
+                    result["xlsx_bytes"] = (
+                        _apply_excel_target_format(
+                            result["xlsx_bytes"],
+                            target=QC_TARGET_EFFICIENCY,
+                        )
+                    )
 
                 st.session_state.qc_last_result = result
                 st.session_state.qc_last_filename = uploaded.name
 
                 st.success(
-                    f"計算完成：上午與下午門檻均為 "
-                    f"{QC_TARGET_EFFICIENCY:.0f} 筆／小時。"
+                    "計算完成：上午與下午門檻均為 "
+                    f"{QC_TARGET_EFFICIENCY:.0f} 筆／小時；"
+                    "匯出報表低於 29 會顯示紅色。"
                 )
 
         except Exception as exc:
@@ -438,8 +755,7 @@ def main():
         pd.DataFrame(),
     )
 
-    # 不採用 qc_core 回傳的舊門檻
-    # 上午與下午一律固定使用 29
+    # 上午、下午一律固定使用 29
     am_target = QC_TARGET_EFFICIENCY
     pm_target = QC_TARGET_EFFICIENCY
 
@@ -476,7 +792,10 @@ def main():
                 "xlsx_name",
                 "驗收作業KPI.xlsx",
             ),
-            label="⬇️ 匯出 KPI 報表（Excel）",
+            label=(
+                "⬇️ 匯出 KPI 報表（Excel）"
+                "｜低於 29 顯示紅色"
+            ),
         )
 
     # ======================
