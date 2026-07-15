@@ -127,6 +127,253 @@ def _adapt_exclude_windows_to_skip_rules(exclude_windows):
     return skip_rules
 
 
+def _rule_applies_to_row(rule_user: str, row: pd.Series) -> bool:
+    """
+    空白 user 視為全部人適用；有填 user 時，需符合代碼或姓名欄位。
+    """
+    rule_user = (rule_user or "").strip()
+
+    if not rule_user:
+        return True
+
+    for col in ("記錄輸入人", "資料輸入人", "輸入人", "姓名"):
+        if col in row.index and str(row.get(col, "")).strip() == rule_user:
+            return True
+
+    return False
+
+
+def _overlap_minutes_for_rules(
+    first_dt,
+    last_dt,
+    row: pd.Series,
+    skip_rules,
+) -> float:
+    """
+    只扣工作區間與休息/排除區間實際重疊的分鐘數。
+
+    例如 11:31-12:15 不會碰到 10:00-10:15，也還沒到 12:30，
+    因此回傳 0。
+    """
+    first_ts = pd.to_datetime(first_dt, errors="coerce")
+    last_ts = pd.to_datetime(last_dt, errors="coerce")
+
+    if pd.isna(first_ts) or pd.isna(last_ts) or last_ts <= first_ts:
+        return 0.0
+
+    total = 0.0
+
+    for rule in skip_rules or []:
+        if not isinstance(rule, dict):
+            continue
+
+        if not _rule_applies_to_row(rule.get("user", ""), row):
+            continue
+
+        start_time = rule.get("t_start")
+        end_time = rule.get("t_end")
+
+        if start_time is None or end_time is None or start_time >= end_time:
+            continue
+
+        rest_start = pd.Timestamp.combine(first_ts.date(), start_time)
+        rest_end = pd.Timestamp.combine(first_ts.date(), end_time)
+        overlap_start = max(first_ts, rest_start)
+        overlap_end = min(last_ts, rest_end)
+
+        if overlap_end > overlap_start:
+            total += (overlap_end - overlap_start).total_seconds() / 60.0
+
+    return total
+
+
+def _recalculate_rest_by_actual_overlap(
+    df: pd.DataFrame,
+    skip_rules,
+) -> pd.DataFrame:
+    """
+    依每列實際工作區間重新計算：
+    休息分鐘、總分鐘、總工時、效率。
+    """
+    required_cols = {
+        "第一筆修訂日期",
+        "最後一筆修訂日期",
+        "休息分鐘",
+        "總分鐘",
+        "總工時",
+        "效率",
+    }
+
+    if df is None or df.empty or not required_cols.issubset(df.columns):
+        return df
+
+    out = df.copy()
+
+    for idx, row in out.iterrows():
+        first_ts = pd.to_datetime(
+            row.get("第一筆修訂日期"),
+            errors="coerce",
+        )
+        last_ts = pd.to_datetime(
+            row.get("最後一筆修訂日期"),
+            errors="coerce",
+        )
+
+        if pd.isna(first_ts) or pd.isna(last_ts) or last_ts <= first_ts:
+            continue
+
+        rest_minutes = _overlap_minutes_for_rules(
+            first_ts,
+            last_ts,
+            row,
+            skip_rules,
+        )
+
+        raw_minutes = (last_ts - first_ts).total_seconds() / 60.0
+        total_minutes = max(raw_minutes - rest_minutes, 0.0)
+        total_hours = total_minutes / 60.0
+
+        pieces = pd.to_numeric(
+            row.get("筆數"),
+            errors="coerce",
+        )
+
+        out.at[idx, "休息分鐘"] = int(round(rest_minutes))
+        out.at[idx, "總分鐘"] = round(total_minutes, 2)
+        out.at[idx, "總工時"] = round(total_hours, 2)
+
+        if pd.notna(pieces) and total_minutes > 0:
+            out.at[idx, "效率"] = round(float(pieces) / total_minutes * 60.0, 2)
+        else:
+            out.at[idx, "效率"] = 0.0
+
+    return out
+
+
+def _recalculate_result_rest_by_actual_overlap(
+    result: dict,
+    skip_rules,
+) -> dict:
+    """
+    修正 run_qc_efficiency 回傳的各個 DataFrame，避免固定休息被整班硬扣。
+    """
+    if not isinstance(result, dict):
+        return result
+
+    for key, value in list(result.items()):
+        if isinstance(value, pd.DataFrame):
+            result[key] = _recalculate_rest_by_actual_overlap(
+                value,
+                skip_rules,
+            )
+
+    return result
+
+
+def _apply_actual_overlap_rest_to_excel(
+    xlsx_bytes: bytes,
+    skip_rules,
+) -> bytes:
+    """
+    同步修正匯出 Excel 內的休息分鐘、總分鐘、總工時、效率。
+    """
+    if not xlsx_bytes:
+        return xlsx_bytes
+
+    input_buffer = BytesIO(xlsx_bytes)
+
+    try:
+        workbook = load_workbook(input_buffer)
+    except Exception:
+        return xlsx_bytes
+
+    required_headers = {
+        "第一筆修訂日期",
+        "最後一筆修訂日期",
+        "休息分鐘",
+        "總分鐘",
+        "總工時",
+        "效率",
+    }
+
+    for worksheet in workbook.worksheets:
+        header_row = None
+        header_to_col = {}
+
+        for row_idx in range(1, min(worksheet.max_row, 30) + 1):
+            current = {}
+            for col_idx in range(1, worksheet.max_column + 1):
+                header = worksheet.cell(row=row_idx, column=col_idx).value
+                header = str(header).strip() if header is not None else ""
+                if header:
+                    current[header] = col_idx
+
+            if required_headers.issubset(current):
+                header_row = row_idx
+                header_to_col = current
+                break
+
+        if header_row is None:
+            continue
+
+        for row_idx in range(header_row + 1, worksheet.max_row + 1):
+            row_data = {
+                header: worksheet.cell(
+                    row=row_idx,
+                    column=col_idx,
+                ).value
+                for header, col_idx in header_to_col.items()
+            }
+
+            row = pd.Series(row_data)
+            first_dt = row.get("第一筆修訂日期")
+            last_dt = row.get("最後一筆修訂日期")
+            first_ts = pd.to_datetime(first_dt, errors="coerce")
+            last_ts = pd.to_datetime(last_dt, errors="coerce")
+
+            if pd.isna(first_ts) or pd.isna(last_ts) or last_ts <= first_ts:
+                continue
+
+            rest_minutes = _overlap_minutes_for_rules(
+                first_ts,
+                last_ts,
+                row,
+                skip_rules,
+            )
+            raw_minutes = (last_ts - first_ts).total_seconds() / 60.0
+            total_minutes = max(raw_minutes - rest_minutes, 0.0)
+            total_hours = total_minutes / 60.0
+            pieces = pd.to_numeric(row.get("筆數"), errors="coerce")
+            efficiency = (
+                round(float(pieces) / total_minutes * 60.0, 2)
+                if pd.notna(pieces) and total_minutes > 0
+                else 0.0
+            )
+
+            worksheet.cell(
+                row=row_idx,
+                column=header_to_col["休息分鐘"],
+            ).value = int(round(rest_minutes))
+            worksheet.cell(
+                row=row_idx,
+                column=header_to_col["總分鐘"],
+            ).value = round(total_minutes, 2)
+            worksheet.cell(
+                row=row_idx,
+                column=header_to_col["總工時"],
+            ).value = round(total_hours, 2)
+            worksheet.cell(
+                row=row_idx,
+                column=header_to_col["效率"],
+            ).value = efficiency
+
+    output_buffer = BytesIO()
+    workbook.save(output_buffer)
+    output_buffer.seek(0)
+
+    return output_buffer.getvalue()
+
+
 def _ensure_session_defaults():
     """
     建立 session_state 預設值。
@@ -761,12 +1008,21 @@ def main():
                 result["target_eff_am"] = QC_TARGET_EFFICIENCY
                 result["target_eff_pm"] = QC_TARGET_EFFICIENCY
 
+                # 依實際工作區間重算扣休，避免未跨休息時段也被固定扣 15 分鐘。
+                result = _recalculate_result_rest_by_actual_overlap(
+                    result,
+                    skip_rules,
+                )
+
                 # 匯出 Excel 重新套用門檻格式
                 # 效率低於 29，整列顯示紅色
                 if result.get("xlsx_bytes"):
                     result["xlsx_bytes"] = (
                         _apply_excel_target_format(
-                            result["xlsx_bytes"],
+                            _apply_actual_overlap_rest_to_excel(
+                                result["xlsx_bytes"],
+                                skip_rules,
+                            ),
                             target=QC_TARGET_EFFICIENCY,
                         )
                     )
