@@ -31,9 +31,57 @@ from qc_core import run_qc_efficiency
 QC_TARGET_EFFICIENCY = 29.0
 
 
+# 固定休息時段：只在實際工作開始～結束時間有重疊時扣除。
+# 例如 09:30-11:00 只扣 10:00-10:15；09:00-09:56 不扣。
+FIXED_REST_WINDOWS = [
+    {"start": "10:00", "end": "10:15", "data_entry": ""},
+    {"start": "12:30", "end": "13:30", "data_entry": ""},
+    {"start": "13:30", "end": "13:45", "data_entry": ""},
+    {"start": "15:30", "end": "15:45", "data_entry": ""},
+    {"start": "18:00", "end": "18:30", "data_entry": ""},
+    {"start": "20:30", "end": "20:45", "data_entry": ""},
+    {"start": "22:30", "end": "22:45", "data_entry": ""},
+]
+
+
 # =========================================================
 # Helpers
 # =========================================================
+def _merge_fixed_rest_windows(exclude_windows):
+    """
+    將固定休息時段與側邊欄額外排除時段合併。
+
+    固定休息放在前面，側邊欄新增的時段仍會保留；完全相同的
+    start/end/data_entry 會去重，避免重複傳入造成重複扣除。
+    """
+    merged = []
+    seen = set()
+
+    for w in [*FIXED_REST_WINDOWS, *(exclude_windows or [])]:
+        if not isinstance(w, dict):
+            continue
+
+        item = {
+            "start": (w.get("start") or "").strip(),
+            "end": (w.get("end") or "").strip(),
+            "data_entry": (w.get("data_entry") or "").strip(),
+        }
+
+        key = (
+            item["start"],
+            item["end"],
+            item["data_entry"],
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        merged.append(item)
+
+    return merged
+
+
 def _adapt_exclude_windows_to_skip_rules(exclude_windows):
     """
     將 common_ui.sidebar_controls() 的 exclude_windows 格式：
@@ -632,11 +680,15 @@ def main():
         )
     )
 
-    skip_rules = _adapt_exclude_windows_to_skip_rules(
+    exclude_windows = _merge_fixed_rest_windows(
         controls.get(
             "exclude_windows",
             [],
         )
+    )
+
+    skip_rules = _adapt_exclude_windows_to_skip_rules(
+        exclude_windows
     )
 
     # ======================
