@@ -43,6 +43,7 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
         (
             PageSpec("pages/31_企劃課首頁.py", "企劃課首頁", "planning-home", "🧭"),
             PageSpec("pages/32_拉單明細.py", "拉單明細", "planning-pull-detail-32", "📋"),
+            PageSpec("pages/34_月出貨量與產力.py","月出貨量與產力","planning-monthly-shipping-productivity-34","📊"),
         ),
     ),
     SectionSpec(
