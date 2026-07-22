@@ -49,22 +49,34 @@ FIXED_REST_WINDOWS = [
 # =========================================================
 def _merge_fixed_rest_windows(exclude_windows):
     """
-    將固定休息時段與側邊欄額外排除時段合併。
+    將固定休息時段與側邊欄額外排除時段合併，並標記扣除來源。
 
-    固定休息放在前面，側邊欄新增的時段仍會保留；完全相同的
-    start/end/data_entry 會去重，避免重複傳入造成重複扣除。
+    category 只用來拆欄顯示；總扣除分鐘仍等於三欄加總。
+    側邊欄排除時段若有填 data_entry，歸類為「登入空窗」；
+    未填 data_entry 則歸類為「空窗」。
     """
     merged = []
     seen = set()
 
-    for w in [*FIXED_REST_WINDOWS, *(exclude_windows or [])]:
+    windows = [
+        *[{**w, "category": "休息"} for w in FIXED_REST_WINDOWS],
+        *[{**w, "category": "空窗"} for w in (exclude_windows or [])],
+    ]
+
+    for w in windows:
         if not isinstance(w, dict):
             continue
+
+        data_entry = (w.get("data_entry") or "").strip()
+        category = (w.get("category") or "空窗").strip()
+        if category == "空窗" and data_entry:
+            category = "登入空窗"
 
         item = {
             "start": (w.get("start") or "").strip(),
             "end": (w.get("end") or "").strip(),
-            "data_entry": (w.get("data_entry") or "").strip(),
+            "data_entry": data_entry,
+            "category": category,
         }
 
         key = (
@@ -87,8 +99,8 @@ def _adapt_exclude_windows_to_skip_rules(exclude_windows):
     將 common_ui.sidebar_controls() 的 exclude_windows 格式：
       [{"start":"HH:MM","end":"HH:MM","data_entry":""}, ...]
 
-    轉回 qc_core.run_qc_efficiency 需要的 skip_rules 格式：
-      [{"user":"", "t_start": datetime.time, "t_end": datetime.time}, ...]
+    轉回 qc_core.run_qc_efficiency 需要的 skip_rules 格式，並保留 category
+    供畫面與 Excel 分欄顯示。
     """
     skip_rules = []
 
@@ -96,6 +108,7 @@ def _adapt_exclude_windows_to_skip_rules(exclude_windows):
         start_str = (w.get("start") or "").strip()
         end_str = (w.get("end") or "").strip()
         user_str = (w.get("data_entry") or "").strip()
+        category = (w.get("category") or "空窗").strip()
 
         try:
             # 明確指定 HH:MM，避免被解析成日期
@@ -121,6 +134,7 @@ def _adapt_exclude_windows_to_skip_rules(exclude_windows):
                 "user": user_str,
                 "t_start": start_time,
                 "t_end": end_time,
+                "category": category,
             }
         )
 
@@ -148,12 +162,12 @@ def _overlap_minutes_for_rules(
     last_dt,
     row: pd.Series,
     skip_rules,
+    category: str | None = None,
 ) -> float:
     """
     只扣工作區間與休息/排除區間實際重疊的分鐘數。
 
-    例如 11:31-12:15 不會碰到 10:00-10:15，也還沒到 12:30，
-    因此回傳 0。
+    category 為 None 時回傳全部扣除分鐘；指定 category 時只回傳該來源。
     """
     first_ts = pd.to_datetime(first_dt, errors="coerce")
     last_ts = pd.to_datetime(last_dt, errors="coerce")
@@ -165,6 +179,9 @@ def _overlap_minutes_for_rules(
 
     for rule in skip_rules or []:
         if not isinstance(rule, dict):
+            continue
+
+        if category and rule.get("category") != category:
             continue
 
         if not _rule_applies_to_row(rule.get("user", ""), row):
@@ -193,7 +210,7 @@ def _recalculate_rest_by_actual_overlap(
 ) -> pd.DataFrame:
     """
     依每列實際工作區間重新計算：
-    休息分鐘、總分鐘、總工時、效率。
+    休息分鐘、登入空窗、空窗、總分鐘、總工時、效率。
     """
     required_cols = {
         "第一筆修訂日期",
@@ -227,10 +244,26 @@ def _recalculate_rest_by_actual_overlap(
             last_ts,
             row,
             skip_rules,
+            "休息",
+        )
+        login_idle_minutes = _overlap_minutes_for_rules(
+            first_ts,
+            last_ts,
+            row,
+            skip_rules,
+            "登入空窗",
+        )
+        idle_minutes = _overlap_minutes_for_rules(
+            first_ts,
+            last_ts,
+            row,
+            skip_rules,
+            "空窗",
         )
 
+        excluded_minutes = rest_minutes + login_idle_minutes + idle_minutes
         raw_minutes = (last_ts - first_ts).total_seconds() / 60.0
-        total_minutes = max(raw_minutes - rest_minutes, 0.0)
+        total_minutes = max(raw_minutes - excluded_minutes, 0.0)
         total_hours = total_minutes / 60.0
 
         pieces = pd.to_numeric(
@@ -239,6 +272,8 @@ def _recalculate_rest_by_actual_overlap(
         )
 
         out.at[idx, "休息分鐘"] = int(round(rest_minutes))
+        out.at[idx, "登入空窗"] = int(round(login_idle_minutes))
+        out.at[idx, "空窗"] = int(round(idle_minutes))
         out.at[idx, "總分鐘"] = round(total_minutes, 2)
         out.at[idx, "總工時"] = round(total_hours, 2)
 
@@ -275,7 +310,7 @@ def _apply_actual_overlap_rest_to_excel(
     skip_rules,
 ) -> bytes:
     """
-    同步修正匯出 Excel 內的休息分鐘、總分鐘、總工時、效率。
+    同步修正匯出 Excel 內的休息分鐘、登入空窗、空窗、總分鐘、總工時、效率。
     """
     if not xlsx_bytes:
         return xlsx_bytes
@@ -311,6 +346,15 @@ def _apply_actual_overlap_rest_to_excel(
             if required_headers.issubset(current):
                 header_row = row_idx
                 header_to_col = current
+                for new_header in ("空窗", "登入空窗"):
+                    if new_header not in header_to_col:
+                        insert_at = header_to_col["休息分鐘"] + 1
+                        worksheet.insert_cols(insert_at)
+                        worksheet.cell(row=row_idx, column=insert_at).value = new_header
+                        for name, col in list(header_to_col.items()):
+                            if col >= insert_at:
+                                header_to_col[name] = col + 1
+                        header_to_col[new_header] = insert_at
                 break
 
         if header_row is None:
@@ -339,9 +383,25 @@ def _apply_actual_overlap_rest_to_excel(
                 last_ts,
                 row,
                 skip_rules,
+                "休息",
             )
+            login_idle_minutes = _overlap_minutes_for_rules(
+                first_ts,
+                last_ts,
+                row,
+                skip_rules,
+                "登入空窗",
+            )
+            idle_minutes = _overlap_minutes_for_rules(
+                first_ts,
+                last_ts,
+                row,
+                skip_rules,
+                "空窗",
+            )
+            excluded_minutes = rest_minutes + login_idle_minutes + idle_minutes
             raw_minutes = (last_ts - first_ts).total_seconds() / 60.0
-            total_minutes = max(raw_minutes - rest_minutes, 0.0)
+            total_minutes = max(raw_minutes - excluded_minutes, 0.0)
             total_hours = total_minutes / 60.0
             pieces = pd.to_numeric(row.get("筆數"), errors="coerce")
             efficiency = (
@@ -354,6 +414,14 @@ def _apply_actual_overlap_rest_to_excel(
                 row=row_idx,
                 column=header_to_col["休息分鐘"],
             ).value = int(round(rest_minutes))
+            worksheet.cell(
+                row=row_idx,
+                column=header_to_col["登入空窗"],
+            ).value = int(round(login_idle_minutes))
+            worksheet.cell(
+                row=row_idx,
+                column=header_to_col["空窗"],
+            ).value = int(round(idle_minutes))
             worksheet.cell(
                 row=row_idx,
                 column=header_to_col["總分鐘"],
@@ -874,7 +942,9 @@ def _render_shift_block(
         for col in [
             "筆數",
             "總工時",
-            "空窗分鐘",
+            "休息分鐘",
+            "登入空窗",
+            "空窗",
         ]
         if col in sdf.columns
     ]
