@@ -51,7 +51,7 @@ def _merge_fixed_rest_windows(exclude_windows):
     """
     將固定休息時段與側邊欄額外排除時段合併，並標記扣除來源。
 
-    category 只用來拆欄顯示；總扣除分鐘仍等於三欄加總。
+    category 用來拆分計算來源；一般「空窗」只參與扣除，不顯示成欄位。
     側邊欄排除時段若有填 data_entry，歸類為「登入空窗」；
     未填 data_entry 則歸類為「空窗」。
     """
@@ -210,7 +210,8 @@ def _recalculate_rest_by_actual_overlap(
 ) -> pd.DataFrame:
     """
     依每列實際工作區間重新計算：
-    休息分鐘、登入空窗、空窗、總分鐘、總工時、效率。
+    休息分鐘、登入空窗、總分鐘、總工時、效率。
+    一般空窗不顯示成欄位，但仍會納入總分鐘扣除。
     """
     required_cols = {
         "第一筆修訂日期",
@@ -260,7 +261,6 @@ def _recalculate_rest_by_actual_overlap(
             skip_rules,
             "空窗",
         )
-
         excluded_minutes = rest_minutes + login_idle_minutes + idle_minutes
         raw_minutes = (last_ts - first_ts).total_seconds() / 60.0
         total_minutes = max(raw_minutes - excluded_minutes, 0.0)
@@ -273,7 +273,6 @@ def _recalculate_rest_by_actual_overlap(
 
         out.at[idx, "休息分鐘"] = int(round(rest_minutes))
         out.at[idx, "登入空窗"] = int(round(login_idle_minutes))
-        out.at[idx, "空窗"] = int(round(idle_minutes))
         out.at[idx, "總分鐘"] = round(total_minutes, 2)
         out.at[idx, "總工時"] = round(total_hours, 2)
 
@@ -310,7 +309,8 @@ def _apply_actual_overlap_rest_to_excel(
     skip_rules,
 ) -> bytes:
     """
-    同步修正匯出 Excel 內的休息分鐘、登入空窗、空窗、總分鐘、總工時、效率。
+    同步修正匯出 Excel 內的休息分鐘、登入空窗、總分鐘、總工時、效率。
+    一般空窗不顯示成欄位，但仍會納入總分鐘扣除。
     """
     if not xlsx_bytes:
         return xlsx_bytes
@@ -346,7 +346,7 @@ def _apply_actual_overlap_rest_to_excel(
             if required_headers.issubset(current):
                 header_row = row_idx
                 header_to_col = current
-                for new_header in ("空窗", "登入空窗"):
+                for new_header in ("登入空窗",):
                     if new_header not in header_to_col:
                         insert_at = header_to_col["休息分鐘"] + 1
                         worksheet.insert_cols(insert_at)
@@ -418,10 +418,6 @@ def _apply_actual_overlap_rest_to_excel(
                 row=row_idx,
                 column=header_to_col["登入空窗"],
             ).value = int(round(login_idle_minutes))
-            worksheet.cell(
-                row=row_idx,
-                column=header_to_col["空窗"],
-            ).value = int(round(idle_minutes))
             worksheet.cell(
                 row=row_idx,
                 column=header_to_col["總分鐘"],
@@ -944,7 +940,6 @@ def _render_shift_block(
             "總工時",
             "休息分鐘",
             "登入空窗",
-            "空窗",
         ]
         if col in sdf.columns
     ]
