@@ -294,7 +294,12 @@ def render_putaway_people_settings_panel():
 # sidebar_controls 排除區間解析
 # =========================================================
 def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
-    """解析 sidebar 手動輸入的空窗排除時段。
+    """解析「手動扣除工時區間（非作業時段）」。
+
+    重要：
+    - 這個函式只回傳使用者手動輸入的區間。
+    - 固定休息時間會另外加入空窗排除與工時扣除，避免無法區分「固定休息」與「手動排除」。
+    - 不接受跨日區間。
 
     支援格式：
     - 10:00-10:15
@@ -302,25 +307,21 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
     - 10:00～10:15
     - 10:00 至 10:15 / 10:00 到 10:15
     - 1000-1015 / 080500-081000
-
-    支援分隔：逗號、分號、頓號、換行。
-    若解析不到任何有效區間，回傳預設休息排除區間。
     """
     if val is None:
-        return EXCLUDE_IDLE_RANGES_DEFAULT
+        return []
 
     if isinstance(val, dict):
         for k in ("exclude_windows", "exclude_windows_times", "windows", "ranges", "exclude_ranges"):
             if k in val:
                 return _parse_exclude_windows(val.get(k))
-        return EXCLUDE_IDLE_RANGES_DEFAULT
+        return []
 
     if isinstance(val, str):
         raw = val.strip()
         if not raw:
-            return EXCLUDE_IDLE_RANGES_DEFAULT
+            return []
 
-        # 統一各種符號，降低手動輸入造成的錯亂
         raw = raw.replace("：", ":")
         raw = raw.replace("－", "-").replace("—", "-").replace("–", "-")
         raw = raw.replace("～", "~")
@@ -336,7 +337,6 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
             if not p:
                 continue
 
-            # 時間可為 10:00、10:00:00、1000、100000
             m = re.match(
                 r"^(\d{1,2}:?\d{2}(?::?\d{2})?)\s*[-~]\s*(\d{1,2}:?\d{2}(?::?\d{2})?)$",
                 p,
@@ -346,21 +346,18 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
 
             s = _parse_time_any(m.group(1))
             e = _parse_time_any(m.group(2))
-
             if not s or not e:
                 continue
 
             s_dt = dt.datetime.combine(dt.date.today(), s)
             e_dt = dt.datetime.combine(dt.date.today(), e)
-
-            # 不接受跨日排除區間，避免 23:30-00:30 造成空窗切段錯亂
             if s_dt < e_dt:
                 out.append((s, e))
 
-        return _merge_with_default_exclude_windows(out) if out else EXCLUDE_IDLE_RANGES_DEFAULT
+        return _dedupe_time_ranges(out)
 
     if not isinstance(val, (list, tuple)):
-        return EXCLUDE_IDLE_RANGES_DEFAULT
+        return []
 
     out: List[Tuple[dt.time, dt.time]] = []
     for item in val:
@@ -378,11 +375,10 @@ def _parse_exclude_windows(val: Any) -> List[Tuple[dt.time, dt.time]]:
 
         s_dt = dt.datetime.combine(dt.date.today(), s)
         e_dt = dt.datetime.combine(dt.date.today(), e)
-
         if s_dt < e_dt:
             out.append((s, e))
 
-    return _merge_with_default_exclude_windows(out) if out else EXCLUDE_IDLE_RANGES_DEFAULT
+    return _dedupe_time_ranges(out)
 
 def _extract_exclude_value_from_controls(controls: Dict[str, Any]) -> Any:
     if not isinstance(controls, dict) or not controls:
@@ -644,10 +640,74 @@ def fixed_rest_minutes_for_span(first_dt: pd.Timestamp, last_dt: pd.Timestamp) -
     return int(total), "；".join(hit_labels) if hit_labels else "未扣休息"
 
 
+
+def _merge_datetime_ranges(
+    ranges: List[Tuple[pd.Timestamp, pd.Timestamp]]
+) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+    """合併重疊或相接的 datetime 區間，避免重複扣工時。"""
+    clean = sorted(
+        [(pd.Timestamp(s), pd.Timestamp(e)) for s, e in ranges if pd.notna(s) and pd.notna(e) and e > s],
+        key=lambda x: x[0],
+    )
+    if not clean:
+        return []
+
+    merged: List[Tuple[pd.Timestamp, pd.Timestamp]] = [clean[0]]
+    for s, e in clean[1:]:
+        last_s, last_e = merged[-1]
+        if s <= last_e:
+            merged[-1] = (last_s, max(last_e, e))
+        else:
+            merged.append((s, e))
+    return merged
+
+
+def _ranges_minutes(ranges: List[Tuple[pd.Timestamp, pd.Timestamp]]) -> int:
+    """計算合併後區間總分鐘。"""
+    return int(round(sum((e - s).total_seconds() / 60.0 for s, e in _merge_datetime_ranges(ranges))))
+
+
+def _time_ranges_to_dt_within_span(
+    first_dt: pd.Timestamp,
+    last_dt: pd.Timestamp,
+    time_ranges: List[Tuple[dt.time, dt.time]],
+) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+    """把 HH:MM 區間展開成當日 datetime，並裁切在工作區間內。"""
+    if pd.isna(first_dt) or pd.isna(last_dt) or last_dt <= first_dt:
+        return []
+
+    out: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    current_day = first_dt.date()
+    end_day = last_dt.date()
+
+    while current_day <= end_day:
+        for s_t, e_t in (time_ranges or []):
+            s = pd.Timestamp.combine(current_day, s_t)
+            e = pd.Timestamp.combine(current_day, e_t)
+            if e <= s:
+                continue
+            ss = max(first_dt, s)
+            ee = min(last_dt, e)
+            if ee > ss:
+                out.append((ss, ee))
+        current_day += dt.timedelta(days=1)
+
+    return out
+
+
+def _fixed_rest_dt_ranges_within_span(
+    first_dt: pd.Timestamp,
+    last_dt: pd.Timestamp,
+) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+    """固定休息區間轉為 datetime，並裁切在工作區間內。"""
+    fixed_times = [(s_t, e_t) for s_t, e_t, _, _ in FIXED_REST_INTERVALS]
+    return _time_ranges_to_dt_within_span(first_dt, last_dt, fixed_times)
+
 def compute_all_day_for_group(
     g: pd.DataFrame,
     idle_threshold_min: int,
     exclude_idle_ranges: List[Tuple[dt.time, dt.time]],
+    manual_exclude_ranges: Optional[List[Tuple[dt.time, dt.time]]] = None,
     start_time: Optional[dt.time] = None,
 ) -> pd.Series:
     times = _coerce_dt_series(g["__dt__"])
@@ -657,6 +717,7 @@ def compute_all_day_for_group(
             "最後一筆時間": pd.NaT,
             "當日筆數": 0,
             "休息分鐘_整體": 0,
+            "手動排除分鐘": 0,
             "命中規則": "無時間資料",
             "當日工時_分鐘_扣休": 0,
             "效率_件每小時": 0.0,
@@ -676,22 +737,51 @@ def compute_all_day_for_group(
     if isinstance(start_time, dt.time):
         clamp_dt_whole = pd.Timestamp.combine(times.min().date(), start_time)
 
-    # 沿用原本「clamp 第一筆」概念：若第一筆早於設定起始時間，且起始時間仍在工作區間內，就從設定起始時間開始算。
     whole_first_adj = _clamp_first(whole_first, whole_last, clamp_dt_whole)
 
     if day_cnt > 0 and pd.notna(whole_first_adj) and pd.notna(whole_last):
-        rest_minutes, rest_tag = fixed_rest_minutes_for_span(whole_first_adj, whole_last)
         raw_whole_mins = (whole_last - whole_first_adj).total_seconds() / 60.0
-        whole_mins = max(int(round(raw_whole_mins - rest_minutes)), 0)
-    else:
-        rest_minutes, rest_tag, whole_mins = 0, "無時間資料", 0
 
-    idle_min, idle_ranges = _compute_idle(
-        times,
-        min_minutes=int(idle_threshold_min),
-        exclude_ranges=exclude_idle_ranges,
-        clamp_dt=whole_first_adj if (day_cnt > 0 and pd.notna(whole_first_adj)) else None,
-    )
+        # 固定休息：保留原本顯示規則。
+        rest_minutes, rest_tag = fixed_rest_minutes_for_span(whole_first_adj, whole_last)
+
+        # 手動排除：只扣與實際工作區間重疊的部分。
+        manual_dt_ranges = _time_ranges_to_dt_within_span(
+            whole_first_adj,
+            whole_last,
+            manual_exclude_ranges or [],
+        )
+
+        # 固定休息 + 手動排除先合併，避免兩者重疊時重複扣除。
+        fixed_dt_ranges = _fixed_rest_dt_ranges_within_span(whole_first_adj, whole_last)
+        fixed_only_minutes = _ranges_minutes(fixed_dt_ranges)
+        fixed_plus_manual_ranges = _merge_datetime_ranges(fixed_dt_ranges + manual_dt_ranges)
+        fixed_plus_manual_minutes = _ranges_minutes(fixed_plus_manual_ranges)
+
+        # 「手動排除分鐘」顯示的是手動排除真正額外扣掉的分鐘，
+        # 若與固定休息重疊，重疊部分不會再算一次。
+        manual_net_minutes = max(fixed_plus_manual_minutes - fixed_only_minutes, 0)
+
+        # 自動空窗：exclude_idle_ranges 已包含「固定休息 + 手動排除」，
+        # 因此空窗分鐘不會與前兩者重複。
+        idle_min, idle_ranges = _compute_idle(
+            times,
+            min_minutes=int(idle_threshold_min),
+            exclude_ranges=exclude_idle_ranges,
+            clamp_dt=whole_first_adj,
+        )
+
+        # ✅ 真正實際作業工時
+        # 原始跨度 -（固定休息與手動排除的聯集）- 自動空窗
+        whole_mins = max(
+            int(round(raw_whole_mins - fixed_plus_manual_minutes - idle_min)),
+            0,
+        )
+    else:
+        rest_minutes, rest_tag = 0, "無時間資料"
+        manual_net_minutes = 0
+        idle_min, idle_ranges = 0, ""
+        whole_mins = 0
 
     whole_eff = _eff(int(day_cnt), int(whole_mins))
     match_rate_whole = (match_whole / int(day_cnt)) if int(day_cnt) > 0 else 0.0
@@ -701,6 +791,7 @@ def compute_all_day_for_group(
         "最後一筆時間": whole_last,
         "當日筆數": int(day_cnt),
         "休息分鐘_整體": int(rest_minutes),
+        "手動排除分鐘": int(manual_net_minutes),
         "命中規則": rest_tag,
         "當日工時_分鐘_扣休": int(whole_mins),
         "效率_件每小時": whole_eff,
@@ -812,7 +903,7 @@ def _fmt_ts_time(x: Any) -> str:
 
 def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
     """總表用：每人、每日、低空/高空各一列。"""
-    columns = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "空窗分鐘", "空窗時段"]
+    columns = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "空窗分鐘", "空窗時段"]
     if daily is None or daily.empty:
         return pd.DataFrame(columns=columns)
 
@@ -842,6 +933,7 @@ def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
         "達標門檻": pd.to_numeric(d.get("達標門檻", 0), errors="coerce").fillna(0).astype(int),
         "是否達標": d.get("是否達標", "不適用"),
         "休息分鐘": pd.to_numeric(d.get("休息分鐘_整體", 0), errors="coerce").fillna(0).astype(int),
+        "手動排除分鐘": pd.to_numeric(d.get("手動排除分鐘", 0), errors="coerce").fillna(0).astype(int),
         "空窗分鐘": pd.to_numeric(d.get("空窗分鐘_扣休", 0), errors="coerce").fillna(0).astype(int),
         "空窗時段": d.get("空窗時段", "").astype(str).fillna(""),
     })
@@ -874,9 +966,9 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
     align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-    headers = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "空窗分鐘", "空窗時段"]
+    headers = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "空窗分鐘", "空窗時段"]
     ncol = len(headers)
-    col_widths = [12, 10, 10, 6, 22, 8, 10, 10, 10, 8, 8, 60]
+    col_widths = [12, 10, 10, 6, 22, 8, 10, 10, 10, 8, 12, 8, 60]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -971,7 +1063,7 @@ def build_excel_bytes(
         det_cols = [
             user_col, "對應姓名", "儲位類型", "日期",
             "第一筆時間", "最後一筆時間", "當日筆數",
-            "休息分鐘_整體", "命中規則", "當日工時_分鐘_扣休", "效率_件每小時",
+            "休息分鐘_整體", "手動排除分鐘", "命中規則", "當日工時_分鐘_扣休", "效率_件每小時",
             "達標門檻", "是否達標",
             "空窗分鐘_扣休", "空窗時段",
             "比對棚別筆數", "比對棚別率",
@@ -1030,7 +1122,12 @@ def main():
     top_n = int(controls.get("top_n", 30))
 
     exclude_raw = _extract_exclude_value_from_controls(controls)
-    exclude_idle_ranges = _parse_exclude_windows(exclude_raw)
+
+    # 使用者手動輸入：會真正從工時扣除。
+    manual_exclude_ranges = _parse_exclude_windows(exclude_raw)
+
+    # 空窗偵測時，固定休息與手動排除都不能被當成空窗。
+    exclude_idle_ranges = _merge_with_default_exclude_windows(manual_exclude_ranges)
 
     with st.sidebar:
         st.markdown("---")
@@ -1056,10 +1153,18 @@ def main():
         else:
             st.caption(f"✅ clamp 起始時間：{global_start_time.strftime('%H:%M:%S')}")
 
-        preview = "、".join([f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in exclude_idle_ranges]) if exclude_idle_ranges else "（無）"
+        manual_preview = "、".join(
+            [f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in manual_exclude_ranges]
+        ) if manual_exclude_ranges else "（無）"
+        idle_preview = "、".join(
+            [f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in exclude_idle_ranges]
+        ) if exclude_idle_ranges else "（無）"
+
         st.caption("✅ 固定休息時間：10:00~10:15、12:30~13:30、15:30~15:45、18:00~18:30、20:30~20:45、22:30~22:45")
-        st.caption(f"✅ 空窗計算排除時段：{preview}")
-        st.caption("手動空窗格式支援：10:00-10:15、10:00~10:15、10:00至10:15、1000-1015；可用換行/逗號/頓號分隔。")
+        st.caption(f"✅ 手動扣除工時區間：{manual_preview}")
+        st.caption(f"✅ 空窗偵測排除區間（固定休息＋手動排除）：{idle_preview}")
+        st.caption("手動排除格式支援：10:00-10:15、10:00~10:15、10:00至10:15、1000-1015；可用換行/逗號/頓號分隔。")
+        st.caption("計算方式：實際作業工時＝第一筆～最後一筆－固定休息－手動排除－自動空窗；重疊時只扣一次。")
         st.caption("⚠️ 若你改了條件/棚別主檔，需再按一次「🚀 產出 KPI」才會重新計算。")
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
@@ -1097,6 +1202,7 @@ def main():
         "low_target_eff": int(low_target_eff),
         "high_target_eff": int(high_target_eff),
         "idle_threshold": int(idle_threshold),
+        "manual_exclude_ranges": [(a.strftime("%H:%M:%S"), b.strftime("%H:%M:%S")) for a, b in manual_exclude_ranges],
         "exclude_idle_ranges": [(a.strftime("%H:%M:%S"), b.strftime("%H:%M:%S")) for a, b in exclude_idle_ranges],
         "top_n": int(top_n),
         "people_hash": people_hash,
@@ -1192,6 +1298,7 @@ def main():
                     g,
                     idle_threshold_min=int(idle_threshold),
                     exclude_idle_ranges=exclude_idle_ranges,
+                    manual_exclude_ranges=manual_exclude_ranges,
                     start_time=global_start_time,
                 ))
                 .reset_index()
