@@ -1596,6 +1596,7 @@ def main():
                 "params": current_params,
                 "user_col": user_col,
                 "summary": summary,
+                "daily": daily,
                 "low_target_eff": float(low_target_eff),
                 "high_target_eff": float(high_target_eff),
                 "top_n": int(top_n),
@@ -1615,7 +1616,7 @@ def main():
             }
 
     # ======================
-    # ✅ 顯示（主畫面：只顯示兩個樞紐表）
+    # ✅ 顯示（主畫面：KPI + 總表 + 兩個樞紐表 + 排行圖）
     # ======================
     last = st.session_state.putaway_last
     if not last:
@@ -1624,6 +1625,7 @@ def main():
 
     user_col = last["user_col"]
     summary = last["summary"]
+    daily = last.get("daily", pd.DataFrame())
     low_target_eff_show = float(last["low_target_eff"])
     high_target_eff_show = float(last["high_target_eff"])
     top_n_show = int(controls.get("top_n", last.get("top_n", 30)))
@@ -1656,7 +1658,41 @@ def main():
     ])
     card_close()
 
-    # ✅ 只顯示兩張表：儲位類型樞紐 + 棚別樞紐
+    # ✅ 平台直接顯示 Excel「總表」內容
+    # 每次重新按「🚀 產出 KPI」後，daily 會重新計算並覆蓋 session_state，
+    # 因此這裡會立即顯示最新結果，不必先下載 Excel 才確認。
+    card_open("📋 總表（重新產出後即時更新）")
+    if daily is None or daily.empty or "日期" not in daily.columns:
+        st.info("尚未產生總表資料。")
+    else:
+        total_dates = sorted([x for x in daily["日期"].dropna().unique()])
+        for d0 in total_dates:
+            st.markdown(f"#### {d0} 上架績效（整天版）")
+            day_df = daily[daily["日期"] == d0].copy()
+            total_tbl = _build_all_day_total_df(day_df, user_col=user_col)
+
+            if total_tbl.empty:
+                st.info("此日期無可顯示資料。")
+            else:
+                def _platform_total_row_style(row):
+                    if str(row.get("是否達標", "")).strip() == "達標":
+                        return ["background-color: #C6EFCE; color: #006100"] * len(row)
+                    if str(row.get("是否達標", "")).strip() == "未達標":
+                        return ["background-color: #FFC7CE; color: #9C0006"] * len(row)
+                    return [""] * len(row)
+
+                styled_total = total_tbl.style.apply(_platform_total_row_style, axis=1)
+                st.dataframe(
+                    styled_total,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(620, 38 * (len(total_tbl) + 2)),
+                )
+
+            st.markdown("---")
+    card_close()
+
+    # ✅ 顯示兩張樞紐表：儲位類型樞紐 + 棚別樞紐
     card_open("📦 樞紐表（每人一列、每儲位類型一欄）")
     if stype_person_pivot is None or stype_person_pivot.empty:
         st.info("尚未產生儲位類型樞紐表（可能無法擷取區碼3或資料為空）。")
