@@ -1057,7 +1057,7 @@ def _fmt_ts_time(x: Any) -> str:
 
 def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
     """總表用：每人、每日、低空/高空各一列。"""
-    columns = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "套用手動排除時段", "空窗分鐘", "空窗時段"]
+    columns = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "空窗分鐘", "空窗時段"]
     if daily is None or daily.empty:
         return pd.DataFrame(columns=columns)
 
@@ -1088,7 +1088,6 @@ def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
         "是否達標": d.get("是否達標", "不適用"),
         "休息分鐘": pd.to_numeric(d.get("休息分鐘_整體", 0), errors="coerce").fillna(0).astype(int),
         "手動排除分鐘": pd.to_numeric(d.get("手動排除分鐘", 0), errors="coerce").fillna(0).astype(int),
-        "套用手動排除時段": d.get("套用手動排除時段", "").astype(str).fillna(""),
         "空窗分鐘": pd.to_numeric(d.get("空窗分鐘_扣休", 0), errors="coerce").fillna(0).astype(int),
         "空窗時段": d.get("空窗時段", "").astype(str).fillna(""),
     })
@@ -1121,9 +1120,9 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
     align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-    headers = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "套用手動排除時段", "空窗分鐘", "空窗時段"]
+    headers = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "空窗分鐘", "空窗時段"]
     ncol = len(headers)
-    col_widths = [12, 10, 10, 6, 22, 8, 10, 10, 10, 8, 12, 24, 8, 60]
+    col_widths = [12, 10, 10, 6, 22, 8, 10, 10, 10, 8, 12, 8, 60]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -1187,7 +1186,7 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
                     cell = ws.cell(row=r, column=j, value=v)
                     cell.fill = row_fill
                     cell.font = row_font
-                    cell.alignment = (align_left if h in ("空窗時段", "套用手動排除時段") else align_center)
+                    cell.alignment = (align_left if h == "空窗時段" else align_center)
                     cell.border = border
                 r += 1
 
@@ -1218,7 +1217,7 @@ def build_excel_bytes(
         det_cols = [
             user_col, "對應姓名", "儲位類型", "日期",
             "第一筆時間", "最後一筆時間", "當日筆數",
-            "休息分鐘_整體", "手動排除分鐘", "套用手動排除時段", "命中規則", "當日工時_分鐘_扣休", "效率_件每小時",
+            "休息分鐘_整體", "手動排除分鐘", "命中規則", "當日工時_分鐘_扣休", "效率_件每小時",
             "達標門檻", "是否達標",
             "空窗分鐘_扣休", "空窗時段",
             "比對棚別筆數", "比對棚別率",
