@@ -762,8 +762,8 @@ def compute_all_day_for_group(
         # 若與固定休息重疊，重疊部分不會再算一次。
         manual_net_minutes = max(fixed_plus_manual_minutes - fixed_only_minutes, 0)
 
-        # 自動空窗：exclude_idle_ranges 已包含「固定休息 + 手動排除」，
-        # 因此空窗分鐘不會與前兩者重複。
+        # 自動空窗：保留「偵測 / 顯示」用途，但不扣工時。
+        # 只有左側手動輸入的排除區間才會額外從工時扣除。
         idle_min, idle_ranges = _compute_idle(
             times,
             min_minutes=int(idle_threshold_min),
@@ -772,9 +772,10 @@ def compute_all_day_for_group(
         )
 
         # ✅ 真正實際作業工時
-        # 原始跨度 -（固定休息與手動排除的聯集）- 自動空窗
+        # 原始跨度 -（固定休息 + 左側手動排除）
+        # 自動偵測到的其他空窗只顯示，不影響效率分母。
         whole_mins = max(
-            int(round(raw_whole_mins - fixed_plus_manual_minutes - idle_min)),
+            int(round(raw_whole_mins - fixed_plus_manual_minutes)),
             0,
         )
     else:
@@ -1164,7 +1165,7 @@ def main():
         st.caption(f"✅ 手動扣除工時區間：{manual_preview}")
         st.caption(f"✅ 空窗偵測排除區間（固定休息＋手動排除）：{idle_preview}")
         st.caption("手動排除格式支援：10:00-10:15、10:00~10:15、10:00至10:15、1000-1015；可用換行/逗號/頓號分隔。")
-        st.caption("計算方式：實際作業工時＝第一筆～最後一筆－固定休息－手動排除－自動空窗；重疊時只扣一次。")
+        st.caption("計算方式：實際作業工時＝第一筆～最後一筆－固定休息－左側手動排除；自動偵測空窗只顯示、不扣工時。重疊時只扣一次。")
         st.caption("⚠️ 若你改了條件/棚別主檔，需再按一次「🚀 產出 KPI」才會重新計算。")
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
