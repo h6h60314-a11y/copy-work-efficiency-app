@@ -255,7 +255,33 @@ def _get_putaway_people_settings() -> Dict[str, Dict[str, str]]:
     return st.session_state[PUTAWAY_PEOPLE_STATE_KEY]
 
 def _normalize_code(x: Any) -> str:
-    return str(x).strip()
+    """統一人員代碼格式，避免 Excel 數值型工號變成 20230119001.0 而比對失敗。"""
+    if x is None:
+        return ""
+    try:
+        if pd.isna(x):
+            return ""
+    except Exception:
+        pass
+
+    s = str(x).strip()
+    if not s:
+        return ""
+
+    # Excel / pandas 常把純數字工號讀成 xxx.0
+    if re.fullmatch(r"\d+\.0+", s):
+        s = s.split(".", 1)[0]
+
+    # 若是科學記號或 float 型態的整數，也盡量轉回整數字串
+    try:
+        if re.fullmatch(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", s):
+            f = float(s)
+            if f.is_integer():
+                return str(int(f))
+    except Exception:
+        pass
+
+    return s
 
 def render_putaway_people_settings_panel():
     settings = _get_putaway_people_settings()
@@ -427,7 +453,7 @@ def render_manual_exclusion_panel() -> List[Dict[str, Any]]:
         st.caption("只有指定的資料登錄人會扣除該時段。")
 
         person = st.text_input(
-            "資料登錄人（可留空）",
+            "資料登錄人（必填）",
             key="manual_exclude_person",
             placeholder="例如 20230119001",
         )
@@ -447,7 +473,7 @@ def render_manual_exclusion_panel() -> List[Dict[str, Any]]:
             )
 
         if st.button("＋ 新增排除區間", key="manual_exclude_add"):
-            p = str(person).strip()
+            p = _normalize_code(person)
             s = _parse_time_any(start_raw)
             e = _parse_time_any(end_raw)
 
@@ -480,7 +506,7 @@ def render_manual_exclusion_panel() -> List[Dict[str, Any]]:
         if rules:
             st.markdown("**已設定排除區間**")
             for i, rule in enumerate(list(rules)):
-                p = str(rule.get("person", "")).strip()
+                p = _normalize_code(rule.get("person", ""))
                 s = rule.get("start")
                 e = rule.get("end")
                 s_txt = s.strftime("%H:%M") if isinstance(s, dt.time) else str(s)
@@ -503,12 +529,12 @@ def _manual_ranges_for_person(
     rules: List[Dict[str, Any]],
     person_code: Any,
 ) -> List[Tuple[dt.time, dt.time]]:
-    """只取得該資料登錄人的手動排除區間。"""
-    code = str(person_code).strip()
+    """只取得該資料登錄人的手動排除區間；工號先正規化後比對。"""
+    code = _normalize_code(person_code)
     out: List[Tuple[dt.time, dt.time]] = []
 
     for rule in rules or []:
-        if str(rule.get("person", "")).strip() != code:
+        if _normalize_code(rule.get("person", "")) != code:
             continue
 
         s = rule.get("start")
@@ -837,6 +863,7 @@ def compute_all_day_for_group(
             "當日筆數": 0,
             "休息分鐘_整體": 0,
             "手動排除分鐘": 0,
+            "套用手動排除時段": "",
             "命中規則": "無時間資料",
             "當日工時_分鐘_扣休": 0,
             "效率_件每小時": 0.0,
@@ -871,6 +898,11 @@ def compute_all_day_for_group(
             manual_exclude_ranges or [],
         )
 
+        manual_ranges_txt = "；".join(
+            f"{s.strftime('%H:%M:%S')} ~ {e.strftime('%H:%M:%S')}"
+            for s, e in manual_dt_ranges
+        )
+
         # 固定休息 + 手動排除先合併，避免兩者重疊時重複扣除。
         fixed_dt_ranges = _fixed_rest_dt_ranges_within_span(whole_first_adj, whole_last)
         fixed_only_minutes = _ranges_minutes(fixed_dt_ranges)
@@ -900,6 +932,7 @@ def compute_all_day_for_group(
     else:
         rest_minutes, rest_tag = 0, "無時間資料"
         manual_net_minutes = 0
+        manual_ranges_txt = ""
         idle_min, idle_ranges = 0, ""
         whole_mins = 0
 
@@ -912,6 +945,7 @@ def compute_all_day_for_group(
         "當日筆數": int(day_cnt),
         "休息分鐘_整體": int(rest_minutes),
         "手動排除分鐘": int(manual_net_minutes),
+        "套用手動排除時段": manual_ranges_txt,
         "命中規則": rest_tag,
         "當日工時_分鐘_扣休": int(whole_mins),
         "效率_件每小時": whole_eff,
@@ -1023,7 +1057,7 @@ def _fmt_ts_time(x: Any) -> str:
 
 def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
     """總表用：每人、每日、低空/高空各一列。"""
-    columns = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "空窗分鐘", "空窗時段"]
+    columns = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "套用手動排除時段", "空窗分鐘", "空窗時段"]
     if daily is None or daily.empty:
         return pd.DataFrame(columns=columns)
 
@@ -1054,6 +1088,7 @@ def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
         "是否達標": d.get("是否達標", "不適用"),
         "休息分鐘": pd.to_numeric(d.get("休息分鐘_整體", 0), errors="coerce").fillna(0).astype(int),
         "手動排除分鐘": pd.to_numeric(d.get("手動排除分鐘", 0), errors="coerce").fillna(0).astype(int),
+        "套用手動排除時段": d.get("套用手動排除時段", "").astype(str).fillna(""),
         "空窗分鐘": pd.to_numeric(d.get("空窗分鐘_扣休", 0), errors="coerce").fillna(0).astype(int),
         "空窗時段": d.get("空窗時段", "").astype(str).fillna(""),
     })
@@ -1086,9 +1121,9 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
     align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-    headers = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "空窗分鐘", "空窗時段"]
+    headers = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "套用手動排除時段", "空窗分鐘", "空窗時段"]
     ncol = len(headers)
-    col_widths = [12, 10, 10, 6, 22, 8, 10, 10, 10, 8, 12, 8, 60]
+    col_widths = [12, 10, 10, 6, 22, 8, 10, 10, 10, 8, 12, 24, 8, 60]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -1152,7 +1187,7 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
                     cell = ws.cell(row=r, column=j, value=v)
                     cell.fill = row_fill
                     cell.font = row_font
-                    cell.alignment = (align_left if h == "空窗時段" else align_center)
+                    cell.alignment = (align_left if h in ("空窗時段", "套用手動排除時段") else align_center)
                     cell.border = border
                 r += 1
 
@@ -1183,7 +1218,7 @@ def build_excel_bytes(
         det_cols = [
             user_col, "對應姓名", "儲位類型", "日期",
             "第一筆時間", "最後一筆時間", "當日筆數",
-            "休息分鐘_整體", "手動排除分鐘", "命中規則", "當日工時_分鐘_扣休", "效率_件每小時",
+            "休息分鐘_整體", "手動排除分鐘", "套用手動排除時段", "命中規則", "當日工時_分鐘_扣休", "效率_件每小時",
             "達標門檻", "是否達標",
             "空窗分鐘_扣休", "空窗時段",
             "比對棚別筆數", "比對棚別率",
@@ -1311,7 +1346,7 @@ def main():
         "idle_threshold": int(idle_threshold),
         "manual_exclude_rules": [
             (
-                str(r.get("person", "")).strip(),
+                _normalize_code(r.get("person", "")),
                 r.get("start").strftime("%H:%M:%S") if isinstance(r.get("start"), dt.time) else "",
                 r.get("end").strftime("%H:%M:%S") if isinstance(r.get("end"), dt.time) else "",
             )
@@ -1356,13 +1391,14 @@ def main():
                 return
 
             data["__dt__"] = pd.to_datetime(data[revdt_col], errors="coerce")
-            data["__code__"] = data[user_col].astype(str).str.strip()
+            # ✅ 工號統一格式；避免 20230119001.0 與 20230119001 比對不到
+            data["__code__"] = data[user_col].apply(_normalize_code)
 
             # ✅ 上架人姓名
             people_settings = _get_putaway_people_settings()
             custom_name_map = {k: v.get("name", "") for k, v in people_settings.items() if v.get("name")}
             merged_name_map = {**NAME_MAP, **custom_name_map}
-            data["對應姓名"] = data["__code__"].map(merged_name_map).fillna("")
+            data["對應姓名"] = data["__code__"].map({_normalize_code(k): v for k, v in merged_name_map.items()}).fillna("")
 
             # ✅ 棚別比對（到→棚別）
             data["__to_loc__"] = data["到"].astype(str).str.strip()
@@ -1414,13 +1450,13 @@ def main():
                     exclude_idle_ranges=_merge_with_default_exclude_windows(
                         _manual_ranges_for_person(
                             manual_exclude_rules,
-                            g[user_col].iloc[0] if (user_col in g.columns and not g.empty) else "",
+                            g["__code__"].iloc[0] if ("__code__" in g.columns and not g.empty) else "",
                         )
                     ),
                     # 真正扣工時：只傳入該人員自己的手動排除
                     manual_exclude_ranges=_manual_ranges_for_person(
                         manual_exclude_rules,
-                        g[user_col].iloc[0] if (user_col in g.columns and not g.empty) else "",
+                        g["__code__"].iloc[0] if ("__code__" in g.columns and not g.empty) else "",
                     ),
                     start_time=global_start_time,
                 ))
