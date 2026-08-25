@@ -401,6 +401,125 @@ def _extract_exclude_value_from_controls(controls: Dict[str, Any]) -> Any:
     return None
 
 
+
+# =========================================================
+# 指定人員手動排除區間
+# =========================================================
+MANUAL_EXCLUDE_STATE_KEY = "putaway_manual_exclude_rules"
+
+
+def _get_manual_exclude_rules() -> List[Dict[str, Any]]:
+    if MANUAL_EXCLUDE_STATE_KEY not in st.session_state:
+        st.session_state[MANUAL_EXCLUDE_STATE_KEY] = []
+    return st.session_state[MANUAL_EXCLUDE_STATE_KEY]
+
+
+def render_manual_exclusion_panel() -> List[Dict[str, Any]]:
+    """
+    左側手動排除區間：
+    每一筆都綁定「資料登錄人」，不再套用到其他人。
+    """
+    rules = _get_manual_exclude_rules()
+
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### ⛔ 排除區間（非作業時段）")
+        st.caption("只有指定的資料登錄人會扣除該時段。")
+
+        person = st.text_input(
+            "資料登錄人（可留空）",
+            key="manual_exclude_person",
+            placeholder="例如 20230119001",
+        )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            start_raw = st.text_input(
+                "開始時間（HH:MM）",
+                key="manual_exclude_start",
+                placeholder="18:56",
+            )
+        with c2:
+            end_raw = st.text_input(
+                "結束時間（HH:MM）",
+                key="manual_exclude_end",
+                placeholder="19:23",
+            )
+
+        if st.button("＋ 新增排除區間", key="manual_exclude_add"):
+            p = str(person).strip()
+            s = _parse_time_any(start_raw)
+            e = _parse_time_any(end_raw)
+
+            if not p:
+                st.error("請輸入資料登錄人。")
+            elif s is None or e is None:
+                st.error("時間格式錯誤，請輸入 HH:MM。")
+            else:
+                s_dt = dt.datetime.combine(dt.date.today(), s)
+                e_dt = dt.datetime.combine(dt.date.today(), e)
+                if e_dt <= s_dt:
+                    st.error("結束時間必須晚於開始時間。")
+                else:
+                    rule = {
+                        "person": p,
+                        "start": s,
+                        "end": e,
+                    }
+
+                    exists = any(
+                        str(x.get("person", "")).strip() == p
+                        and x.get("start") == s
+                        and x.get("end") == e
+                        for x in rules
+                    )
+                    if not exists:
+                        rules.append(rule)
+                    st.success("已新增排除區間。")
+
+        if rules:
+            st.markdown("**已設定排除區間**")
+            for i, rule in enumerate(list(rules)):
+                p = str(rule.get("person", "")).strip()
+                s = rule.get("start")
+                e = rule.get("end")
+                s_txt = s.strftime("%H:%M") if isinstance(s, dt.time) else str(s)
+                e_txt = e.strftime("%H:%M") if isinstance(e, dt.time) else str(e)
+
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    st.caption(f"{s_txt} - {e_txt}｜登錄：{p}")
+                with c2:
+                    if st.button("刪除", key=f"manual_exclude_del_{i}"):
+                        rules.pop(i)
+                        st.rerun()
+        else:
+            st.info("尚未新增排除區間")
+
+    return rules
+
+
+def _manual_ranges_for_person(
+    rules: List[Dict[str, Any]],
+    person_code: Any,
+) -> List[Tuple[dt.time, dt.time]]:
+    """只取得該資料登錄人的手動排除區間。"""
+    code = str(person_code).strip()
+    out: List[Tuple[dt.time, dt.time]] = []
+
+    for rule in rules or []:
+        if str(rule.get("person", "")).strip() != code:
+            continue
+
+        s = rule.get("start")
+        e = rule.get("end")
+        if isinstance(s, dt.time) and isinstance(e, dt.time):
+            if dt.datetime.combine(dt.date.today(), e) > dt.datetime.combine(dt.date.today(), s):
+                out.append((s, e))
+
+    return _dedupe_time_ranges(out)
+
+
 # =========================================================
 # 讀檔（bytes）
 # =========================================================
@@ -1119,16 +1238,11 @@ def main():
     render_putaway_people_settings_panel()
 
     # Sidebar：統一條件
-    controls = sidebar_controls(default_top_n=30, enable_exclude_windows=True, state_key_prefix="putaway")
+    controls = sidebar_controls(default_top_n=30, enable_exclude_windows=False, state_key_prefix="putaway")
     top_n = int(controls.get("top_n", 30))
 
-    exclude_raw = _extract_exclude_value_from_controls(controls)
-
-    # 使用者手動輸入：會真正從工時扣除。
-    manual_exclude_ranges = _parse_exclude_windows(exclude_raw)
-
-    # 空窗偵測時，固定休息與手動排除都不能被當成空窗。
-    exclude_idle_ranges = _merge_with_default_exclude_windows(manual_exclude_ranges)
+    # ✅ 指定人員手動排除：每筆規則都綁定資料登錄人
+    manual_exclude_rules = render_manual_exclusion_panel()
 
     with st.sidebar:
         st.markdown("---")
@@ -1154,18 +1268,10 @@ def main():
         else:
             st.caption(f"✅ clamp 起始時間：{global_start_time.strftime('%H:%M:%S')}")
 
-        manual_preview = "、".join(
-            [f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in manual_exclude_ranges]
-        ) if manual_exclude_ranges else "（無）"
-        idle_preview = "、".join(
-            [f"{a.strftime('%H:%M')}~{b.strftime('%H:%M')}" for a, b in exclude_idle_ranges]
-        ) if exclude_idle_ranges else "（無）"
-
         st.caption("✅ 固定休息時間：10:00~10:15、12:30~13:30、15:30~15:45、18:00~18:30、20:30~20:45、22:30~22:45")
-        st.caption(f"✅ 手動扣除工時區間：{manual_preview}")
-        st.caption(f"✅ 空窗偵測排除區間（固定休息＋手動排除）：{idle_preview}")
-        st.caption("手動排除格式支援：10:00-10:15、10:00~10:15、10:00至10:15、1000-1015；可用換行/逗號/頓號分隔。")
-        st.caption("計算方式：實際作業工時＝第一筆～最後一筆－固定休息－左側手動排除；自動偵測空窗只顯示、不扣工時。重疊時只扣一次。")
+        st.caption("✅ 左側手動排除會綁定『資料登錄人』，只扣指定人員。")
+        st.caption("✅ 自動偵測空窗只顯示，不扣工時。")
+        st.caption("計算方式：實際作業工時＝第一筆～最後一筆－固定休息－該人員手動排除。重疊時只扣一次。")
         st.caption("⚠️ 若你改了條件/棚別主檔，需再按一次「🚀 產出 KPI」才會重新計算。")
         st.caption("提示：上傳 .xls 需 requirements 安裝 xlrd==2.0.1")
 
@@ -1203,8 +1309,14 @@ def main():
         "low_target_eff": int(low_target_eff),
         "high_target_eff": int(high_target_eff),
         "idle_threshold": int(idle_threshold),
-        "manual_exclude_ranges": [(a.strftime("%H:%M:%S"), b.strftime("%H:%M:%S")) for a, b in manual_exclude_ranges],
-        "exclude_idle_ranges": [(a.strftime("%H:%M:%S"), b.strftime("%H:%M:%S")) for a, b in exclude_idle_ranges],
+        "manual_exclude_rules": [
+            (
+                str(r.get("person", "")).strip(),
+                r.get("start").strftime("%H:%M:%S") if isinstance(r.get("start"), dt.time) else "",
+                r.get("end").strftime("%H:%M:%S") if isinstance(r.get("end"), dt.time) else "",
+            )
+            for r in manual_exclude_rules
+        ],
         "top_n": int(top_n),
         "people_hash": people_hash,
         "global_start_time": global_start_time.strftime("%H:%M:%S") if global_start_time else "",
@@ -1298,8 +1410,18 @@ def main():
                 .apply(lambda g: compute_all_day_for_group(
                     g,
                     idle_threshold_min=int(idle_threshold),
-                    exclude_idle_ranges=exclude_idle_ranges,
-                    manual_exclude_ranges=manual_exclude_ranges,
+                    # 空窗偵測排除：固定休息 + 該人員自己的手動排除
+                    exclude_idle_ranges=_merge_with_default_exclude_windows(
+                        _manual_ranges_for_person(
+                            manual_exclude_rules,
+                            g[user_col].iloc[0] if (user_col in g.columns and not g.empty) else "",
+                        )
+                    ),
+                    # 真正扣工時：只傳入該人員自己的手動排除
+                    manual_exclude_ranges=_manual_ranges_for_person(
+                        manual_exclude_rules,
+                        g[user_col].iloc[0] if (user_col in g.columns and not g.empty) else "",
+                    ),
                     start_time=global_start_time,
                 ))
                 .reset_index()
