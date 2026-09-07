@@ -1057,7 +1057,12 @@ def _fmt_ts_time(x: Any) -> str:
 
 def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
     """總表用：每人、每日、低空/高空各一列。"""
-    columns = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "空窗分鐘", "空窗時段"]
+    columns = [
+        "代碼", "姓名", "儲位類型", "筆數",
+        "開始時間", "結束時間",
+        "總分鐘", "效率(件/時)", "達標門檻", "是否達標",
+        "休息分鐘", "手動排除分鐘", "空窗分鐘", "空窗時段"
+    ]
     if daily is None or daily.empty:
         return pd.DataFrame(columns=columns)
 
@@ -1071,17 +1076,17 @@ def _build_all_day_total_df(daily: pd.DataFrame, user_col: str) -> pd.DataFrame:
     code_series = d[user_col].astype(str).fillna("").str.strip()
     d["_姓名顯示"] = name_series.where(name_series.ne(""), code_series)
 
-    d["工作區間"] = d.apply(
-        lambda r: f"{_fmt_ts_time(r.get('第一筆時間'))} ~ {_fmt_ts_time(r.get('最後一筆時間'))}".strip(),
-        axis=1,
-    )
+    # ✅ 工作區間拆分為開始時間 / 結束時間
+    d["開始時間"] = d["第一筆時間"].apply(_fmt_ts_time)
+    d["結束時間"] = d["最後一筆時間"].apply(_fmt_ts_time)
 
     out = pd.DataFrame({
         "代碼": code_series,
         "姓名": d["_姓名顯示"],
         "儲位類型": d.get("儲位類型", "未分類"),
         "筆數": d["當日筆數"].astype(int),
-        "工作區間": d["工作區間"],
+        "開始時間": d["開始時間"],
+        "結束時間": d["結束時間"],
         "總分鐘": pd.to_numeric(d.get("當日工時_分鐘_扣休", 0), errors="coerce").fillna(0).astype(int),
         "效率(件/時)": pd.to_numeric(d.get("效率_件每小時", 0), errors="coerce").fillna(0.0).round(2),
         "達標門檻": pd.to_numeric(d.get("達標門檻", 0), errors="coerce").fillna(0).astype(int),
@@ -1120,9 +1125,14 @@ def _write_total_sheet(ws, daily: pd.DataFrame, user_col: str):
     align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-    headers = ["代碼", "姓名", "儲位類型", "筆數", "工作區間", "總分鐘", "效率(件/時)", "達標門檻", "是否達標", "休息分鐘", "手動排除分鐘", "空窗分鐘", "空窗時段"]
+    headers = [
+        "代碼", "姓名", "儲位類型", "筆數",
+        "開始時間", "結束時間",
+        "總分鐘", "效率(件/時)", "達標門檻", "是否達標",
+        "休息分鐘", "手動排除分鐘", "空窗分鐘", "空窗時段"
+    ]
     ncol = len(headers)
-    col_widths = [12, 10, 10, 6, 22, 8, 10, 10, 10, 8, 12, 8, 60]
+    col_widths = [12, 10, 10, 6, 12, 12, 8, 10, 10, 10, 8, 12, 8, 60]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
