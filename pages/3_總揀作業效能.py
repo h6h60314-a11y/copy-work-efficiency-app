@@ -330,7 +330,7 @@ def calculate_statistics_all_day(
     mapping: Dict[str, Dict[str, str]],
     manual_excludes: List[Dict[str, str]],
 ) -> pd.DataFrame:
-    columns_order = ["區域", "揀貨人", "姓名", "筆數", "工作區間", "總分鐘", "效率", "空窗分鐘", "儲位區域", "空窗時間段"]
+    columns_order = ["區域", "揀貨人", "姓名", "筆數", "工作開始", "工作結束", "總分鐘", "效率", "空窗分鐘", "儲位區域", "空窗時間段"]
     if full_df is None or full_df.empty:
         return pd.DataFrame(columns=columns_order)
 
@@ -382,7 +382,8 @@ def calculate_statistics_all_day(
         num_records = len(picker_df)
         efficiency = round((num_records / total_minutes * 60) if total_minutes else 0, 2)
 
-        time_period_str = f"{effective_start.strftime('%H:%M:%S')} ~ {effective_end.strftime('%H:%M:%S')}"
+        work_start_str = effective_start.strftime("%H:%M:%S")
+        work_end_str = effective_end.strftime("%H:%M:%S")
         idle_segments_str = "; ".join(f"{s.strftime('%H:%M:%S')} ~ {e.strftime('%H:%M:%S')}" for s, e in idle_segments)
 
         working_records = picker_df[(picker_df["揀貨完成時間"] >= effective_start) & (picker_df["揀貨完成時間"] <= effective_end)]
@@ -395,7 +396,8 @@ def calculate_statistics_all_day(
                 "揀貨人": picker,
                 "姓名": _get_name(picker, mapping),
                 "筆數": num_records,
-                "工作區間": time_period_str,
+                "工作開始": work_start_str,
+                "工作結束": work_end_str,
                 "總分鐘": total_minutes,
                 "效率": efficiency,
                 "空窗分鐘": idle_minutes,
