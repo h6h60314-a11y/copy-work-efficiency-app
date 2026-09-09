@@ -137,30 +137,37 @@ def _load_dataframe(uploaded_file, key_prefix: str = "") -> tuple[pd.DataFrame, 
 
 def _compute(df: pd.DataFrame) -> dict:
     """
-    ✅最終邏輯（依你要求）：
-    - 計量單位=2 → 成箱：加總欄位「數量」
-    - 計量單位=3、6 → 零散：加總欄位「計量單位數量」
+    ✅ 最終邏輯：
+    - 計量單位=3、6 → 零散：加總「計量單位數量」
+    - 計量單位=2 → 成箱 PCS：套用與「實作量」相同邏輯
+        1. 出貨單位數量 = 數量 / 出貨入數
+        2. 出貨單位數量 = 1 → 計「數量」
+        3. 出貨單位數量 != 1 且為整數 → 計「出貨單位數量」
+        4. 出貨單位數量 != 1 且為小數 → 計「數量」
     - 品項數：不重複的「商品 」(含尾端空白的欄位名)，若不存在才退回商品
-    - 出貨入數：排除（存在就刪）
     """
     unit_col = _resolve_col(df, "計量單位")
     qty_col = _resolve_col(df, "數量")
     unitqty_col = _resolve_col(df, "計量單位數量")
-    if not unit_col or not qty_col or not unitqty_col:
-        missing = [n for n, c in [("計量單位", unit_col), ("數量", qty_col), ("計量單位數量", unitqty_col)] if c is None]
+    ship_in_col = _resolve_col(df, "出貨入數")
+
+    required = [
+        ("計量單位", unit_col),
+        ("數量", qty_col),
+        ("計量單位數量", unitqty_col),
+        ("出貨入數", ship_in_col),
+    ]
+    missing = [n for n, c in required if c is None]
+    if missing:
         raise KeyError(f"缺少必要欄位：{missing}")
 
     out = df.copy()
-
-    # 排除「出貨入數」（容錯空白）
-    ship_in_col = _resolve_col(out, "出貨入數")
-    if ship_in_col in out.columns:
-        out = out.drop(columns=[ship_in_col])
 
     # 型別處理
     out[unit_col] = pd.to_numeric(out[unit_col], errors="coerce")
     out[qty_col] = pd.to_numeric(out[qty_col], errors="coerce").fillna(0)
     out[unitqty_col] = pd.to_numeric(out[unitqty_col], errors="coerce").fillna(0)
+    out[ship_in_col] = pd.to_numeric(out[ship_in_col], errors="coerce")
 
     # 分類欄位（方便檢核）
     def _type(u):
@@ -178,20 +185,69 @@ def _compute(df: pd.DataFrame) -> dict:
 
     out["應出類型"] = out[unit_col].apply(_type)
 
-    成箱 = out.loc[out[unit_col] == 2, qty_col].sum()
+    # 新增「出貨單位數量」= 數量 / 出貨入數
+    # 入數為 0 或空值時，結果設為 NA，避免除以 0
+    out["出貨單位數量"] = pd.NA
+    valid_in = out[ship_in_col].notna() & (out[ship_in_col] != 0)
+    out.loc[valid_in, "出貨單位數量"] = (
+        out.loc[valid_in, qty_col] / out.loc[valid_in, ship_in_col]
+    )
+    out["出貨單位數量"] = pd.to_numeric(out["出貨單位數量"], errors="coerce")
+
+    # 零散：維持原邏輯
     零散 = out.loc[out[unit_col].isin([3, 6]), unitqty_col].sum()
+
+    # 成箱 PCS：套用「實作量」相同邏輯
+    mask_box = out[unit_col] == 2
+    units = out["出貨單位數量"]
+
+    # 1) 出貨單位數量 = 1 → 計數量
+    mask_eq1 = mask_box & units.notna() & (units == 1)
+    box_eq1 = out.loc[mask_eq1, qty_col].sum()
+
+    # 2) 出貨單位數量 != 1 且為整數 → 計出貨單位數量
+    mask_integer = (
+        mask_box
+        & units.notna()
+        & (units != 1)
+        & (units % 1 == 0)
+    )
+    box_integer = out.loc[mask_integer, "出貨單位數量"].sum()
+
+    # 3) 出貨單位數量 != 1 且為小數 → 計數量
+    mask_decimal = (
+        mask_box
+        & units.notna()
+        & (units != 1)
+        & (units % 1 != 0)
+    )
+    box_decimal = out.loc[mask_decimal, qty_col].sum()
+
+    成箱 = box_eq1 + box_integer + box_decimal
+
+    # 額外新增每筆「成箱PCS計入值」，方便直接檢核
+    out["成箱PCS計入值"] = 0.0
+    out.loc[mask_eq1, "成箱PCS計入值"] = out.loc[mask_eq1, qty_col]
+    out.loc[mask_integer, "成箱PCS計入值"] = out.loc[mask_integer, "出貨單位數量"]
+    out.loc[mask_decimal, "成箱PCS計入值"] = out.loc[mask_decimal, qty_col]
 
     slot_col = _resolve_col(out, "儲位")
     儲位數 = out[slot_col].nunique() if slot_col else None
 
-    # ✅ 品項數 = 不重複「商品 」(優先)
+    # 品項數 = 不重複「商品 」(優先)
     prod_col = _resolve_col(out, "商品 ")
     if not prod_col:
         prod_col = _resolve_col(out, "商品")
 
     if prod_col:
         prod = out[prod_col].astype(str).str.strip()
-        prod = prod.replace({"": pd.NA, "nan": pd.NA, "None": pd.NA, "NULL": pd.NA, "NaN": pd.NA})
+        prod = prod.replace({
+            "": pd.NA,
+            "nan": pd.NA,
+            "None": pd.NA,
+            "NULL": pd.NA,
+            "NaN": pd.NA,
+        })
         品項數 = prod.dropna().nunique()
     else:
         品項數 = None
@@ -203,7 +259,6 @@ def _compute(df: pd.DataFrame) -> dict:
         "儲位數": 儲位數,
         "品項數": 品項數,
     }
-
 
 def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file_dfs: list[tuple[str, pd.DataFrame]]) -> bytes:
     bio = io.BytesIO()
@@ -230,7 +285,7 @@ def _download_xlsx(summary_df: pd.DataFrame, combined_df: pd.DataFrame, per_file
 set_page(
     "庫存訂單應出量分析",
     icon="📦",
-    subtitle="支援多檔上傳｜成箱(計量單位=2)加總『數量』｜零散(計量單位=3,6)加總『計量單位數量』｜品項數=不重複『商品 』｜可🧹清除",
+    subtitle="支援多檔上傳｜成箱PCS套用數量÷出貨入數判斷｜零散(計量單位=3,6)加總『計量單位數量』｜品項數=不重複『商品 』｜可🧹清除",
 )
 
 # uploader 清除機制
@@ -289,7 +344,7 @@ if errors:
             st.error(f"{fn}：{msg}")
 
 if not items:
-    st.error("沒有任何檔案可成功計算，請確認欄位是否包含：計量單位、數量、計量單位數量。")
+    st.error("沒有任何檔案可成功計算，請確認欄位是否包含：計量單位、數量、計量單位數量、出貨入數。")
     st.stop()
 
 combined_df = pd.concat([it["res"]["df"] for it in items], ignore_index=True)
@@ -317,7 +372,7 @@ left, right = st.columns([1, 1], gap="large")
 with left:
     st.markdown("### 庫存出貨訂單量（彙總）")
     st.metric("出貨訂單庫存零散應出（計量單位數量加總）", _fmt_qty(total_loose))
-    st.metric("出貨訂單庫存成箱應出（數量加總）", _fmt_qty(total_box))
+    st.metric("出貨訂單庫存成箱 PCS", _fmt_qty(total_box))
 
 with right:
     st.markdown("### 總揀（彙總）")
@@ -361,6 +416,9 @@ preferred = [
     "應出類型",
     "數量",
     "計量單位數量",
+    "出貨入數",
+    "出貨單位數量",
+    "成箱PCS計入值",
     "儲位",
     "商品 ",
     "商品",
