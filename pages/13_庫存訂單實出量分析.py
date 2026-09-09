@@ -198,13 +198,36 @@ def _compute(df: pd.DataFrame) -> dict:
     mask0 = mask_base & (df["BOXTYPE"] == 0)
     total_packqty_box0 = df.loc[mask0, "packqty"].sum()
 
-    mask1_eq = mask_base & (df["BOXTYPE"] == 1) & (df["出貨單位數量"] == 1)
+    # BOXTYPE = 1 的成箱計算
+    # 1) 出貨單位數量 = 1：計 packqty
+    mask1_eq = (
+        mask_base
+        & (df["BOXTYPE"] == 1)
+        & (df["出貨單位數量"] == 1)
+    )
     total_packqty_box1_eq = df.loc[mask1_eq, "packqty"].sum()
 
-    mask1_neq = mask_base & (df["BOXTYPE"] == 1) & (df["出貨單位數量"] != 1)
-    total_units_box1_neq = df.loc[mask1_neq, "出貨單位數量"].sum()
+    # 2) 出貨單位數量 != 1：
+    #    - 若為整數（例如 2、3、4），計 出貨單位數量 = packqty / 入數
+    #    - 若為小數（例如 1.6、0.5、2.5），改計 packqty
+    mask1_neq = (
+        mask_base
+        & (df["BOXTYPE"] == 1)
+        & (df["出貨單位數量"] != 1)
+    )
 
-    total_combined = total_packqty_box1_eq + total_units_box1_neq
+    units = df["出貨單位數量"]
+    mask1_integer = mask1_neq & units.notna() & (units % 1 == 0)
+    mask1_decimal = mask1_neq & units.notna() & (units % 1 != 0)
+
+    total_units_box1_integer = df.loc[mask1_integer, "出貨單位數量"].sum()
+    total_packqty_box1_decimal = df.loc[mask1_decimal, "packqty"].sum()
+
+    total_combined = (
+        total_packqty_box1_eq
+        + total_units_box1_integer
+        + total_packqty_box1_decimal
+    )
 
     filtered = df[mask_base].copy()
     pivot = (
