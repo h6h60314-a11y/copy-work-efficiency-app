@@ -8,6 +8,7 @@ APP_TITLE = "大豐物流作業平台"
 APP_ICON = "assets/gf_logo.png"
 
 HIDDEN_HOME_URLS = {
+    "work-report-home",
     "planning-home",
     "outbound-home",
     "inbound-home",
@@ -36,6 +37,18 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
         "",
         (
             PageSpec("pages/0_首頁.py", "首頁", "home", "🏠", True),
+        ),
+    ),
+    SectionSpec(
+        "報工稼動",
+        (
+            PageSpec("pages/36_報工稼動首頁.py", "報工稼動首頁", "work-report-home", "⏱️"),
+            PageSpec(
+                "pages/35_報工稼動 | 揀貨成箱.py",
+                "揀貨成箱",
+                "work-report-picking-box-35",
+                "📦",
+            ),
         ),
     ),
     SectionSpec(
