@@ -509,6 +509,9 @@ def _render_order_line_results(items: list[dict]) -> None:
         f'合併重複資料：{metrics["合併重複資料"]:,}'
     )
 
+    # 三套总览指标连续显示在页面上方，明细表随后呈现。
+    _render_loose_pcs_results(items)
+
     summary = pd.DataFrame([{"檔名": name, **metrics} for name, _, _, metrics in results])
     display = summary.copy()
     display["完成率"] = display["完成率"].map(lambda value: f"{value:.2%}")
@@ -727,7 +730,6 @@ st.caption(
 )
 
 _render_order_line_results(items)
-_render_loose_pcs_results(items)
 
 # --------------------------------------------------
 # 各檔彙總
