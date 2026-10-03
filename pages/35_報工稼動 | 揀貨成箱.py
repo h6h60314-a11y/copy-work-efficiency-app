@@ -525,6 +525,103 @@ def _render_order_line_results(items: list[dict]) -> None:
                 st.error(f"{file_name}：{message}")
 
 
+
+# --------------------------------------------------
+# 零散揀貨 PCS（成箱箱號空白）
+# --------------------------------------------------
+def _prepare_loose_pcs_rows(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
+    """直接從原始資料計算零散揀貨 PCS，不承接其他計算的篩選結果。"""
+    data = df.copy()
+    data.columns = [str(column).strip() for column in data.columns]
+
+    box_col = _resolve_col(data, "成箱箱號")
+    expected_col = _resolve_col(data, "原始配庫存量")
+    actual_col = _resolve_col(data, "數量")
+    ship_in_col = _resolve_col(data, "出貨入數")
+    missing = [
+        name
+        for name, column in (
+            ("成箱箱號", box_col),
+            ("原始配庫存量", expected_col),
+            ("數量", actual_col),
+            ("出貨入數", ship_in_col),
+        )
+        if column is None
+    ]
+    if missing:
+        raise KeyError(f"缺少必要欄位：{missing}")
+
+    box_text = _clean_text_series(data[box_col])
+    data = data.loc[box_text.eq("")].copy()
+    data["來源檔名"] = source_name
+    data["應作業PCS計入值"] = _box_pcs_value(data[expected_col], data[ship_in_col])
+    data["實際作業PCS計入值"] = _box_pcs_value(data[actual_col], data[ship_in_col])
+    return data
+
+
+def _loose_pcs_metrics(rows: pd.DataFrame) -> dict:
+    expected = float(rows["應作業PCS計入值"].sum()) if not rows.empty else 0.0
+    actual = float(rows["實際作業PCS計入值"].sum()) if not rows.empty else 0.0
+    return {
+        "零散揀貨筆數": int(len(rows)),
+        "應作業PCS": expected,
+        "實際作業PCS": actual,
+        "PCS差異": expected - actual,
+        "PCS完成率": actual / expected if expected else 0.0,
+    }
+
+
+def _render_loose_pcs_results(items: list[dict]) -> None:
+    results = []
+    errors = []
+    for item in items:
+        try:
+            rows = _prepare_loose_pcs_rows(item["raw_df"], item["name"])
+            results.append((item["name"], rows, _loose_pcs_metrics(rows)))
+        except Exception as exc:
+            errors.append((item["name"], str(exc)))
+
+    st.markdown("### 🧺 零散揀貨 PCS 結果（成箱箱號空白）")
+    if not results:
+        st.warning("沒有可計算的零散揀貨 PCS，請展開下方原因確認來源欄位名稱。")
+        if errors:
+            with st.expander("檢視無法計算原因"):
+                for file_name, message in errors:
+                    st.error(f"{file_name}：{message}")
+        return
+
+    combined_rows = pd.concat([result[1] for result in results], ignore_index=True)
+    metrics = _loose_pcs_metrics(combined_rows)
+    columns = st.columns(4)
+    columns[0].metric("零散揀貨筆數", _fmt_int(metrics["零散揀貨筆數"]))
+    columns[1].metric("應作業 PCS", _fmt_qty(metrics["應作業PCS"]))
+    columns[2].metric("實際作業 PCS", _fmt_qty(metrics["實際作業PCS"]))
+    columns[3].metric("PCS 完成率", f'{metrics["PCS完成率"]:.2%}')
+    st.caption(f'PCS 差異：{_fmt_qty(metrics["PCS差異"])}')
+
+    summary = pd.DataFrame([{"檔名": name, **file_metrics} for name, _, file_metrics in results])
+    display = summary.copy()
+    display["PCS完成率"] = display["PCS完成率"].map(lambda value: f"{value:.2%}")
+    card_open("📋 零散揀貨 PCS 各檔彙總")
+    st.dataframe(display, use_container_width=True, height=min(430, 90 + len(display) * 38))
+    card_close()
+
+    with st.expander("📄 零散揀貨原始明細", expanded=False):
+        preferred = [
+            "來源檔名", "成箱箱號", "貨主訂單", "商品", "原始配庫存量", "數量",
+            "出貨入數", "應作業PCS計入值", "實際作業PCS計入值",
+        ]
+        columns_to_show = [column for column in preferred if column in combined_rows.columns]
+        st.dataframe(combined_rows[columns_to_show].head(2000), use_container_width=True, height=430)
+        if len(combined_rows) > 2000:
+            st.caption("畫面僅預覽前 2,000 筆。")
+
+    if errors:
+        with st.expander("⚠️ 部分檔案無法計算零散揀貨 PCS", expanded=False):
+            for file_name, message in errors:
+                st.error(f"{file_name}：{message}")
+
+
 # --------------------------------------------------
 # UI
 # --------------------------------------------------
@@ -533,7 +630,7 @@ set_page(
     icon="📦",
     subtitle=(
         "支援多檔上傳｜成箱箱號有值才計入｜Line=儲位+商品｜"
-        "原始配庫存量≠數量則該 Line 未完成｜計算應作業 PCS / 實際作業 PCS"
+        "原始配庫存量≠數量則該 Line 未完成｜同時計算成箱與零散揀貨 PCS"
     ),
 )
 
@@ -630,6 +727,7 @@ st.caption(
 )
 
 _render_order_line_results(items)
+_render_loose_pcs_results(items)
 
 # --------------------------------------------------
 # 各檔彙總
