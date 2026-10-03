@@ -380,8 +380,9 @@ def _download_xlsx(
 # 訂單 Line（成箱箱號空白）
 # --------------------------------------------------
 ORDER_CANDIDATES = (
-    "單號", "訂單號", "訂單編號", "訂單號碼", "單據號碼", "單據編號",
-    "ORDERNO", "ORDER_NO", "OrderNo", "orderno",
+    "貨主訂單", "單號", "訂單號", "訂單編號", "訂單號碼", "單據號碼", "單據編號",
+    "ORDERNO", "ORDER_NO", "OrderNo", "orderno", "訂單#", "訂單編號#",
+    "揀貨單號", "出貨單號", "客戶訂單號碼",
 )
 PRODUCT_CANDIDATES = ("商品", "商品代號", "品號", "商品編號", "品項")
 STORE_CANDIDATES = ("門市代號", "門市", "店號", "StoreID", "storeid", "門市編號")
@@ -411,16 +412,23 @@ def _find_order_col(df: pd.DataFrame, candidates, label: str) -> str:
 def _prepare_order_rows(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
     data = df.copy()
     data.columns = [str(column).strip() for column in data.columns]
-    box_col = _find_order_col(data, ("成箱箱號",), "成箱箱號")
     qty_col = _find_order_col(data, ("數量",), "數量")
-    unit_qty_col = _find_order_col(data, ("計量單位數量",), "計量單位數量")
+    unit_qty_col = _find_order_col(
+        data,
+        ("計量單位數量", "原始配庫存量"),
+        "計量單位數量或原始配庫存量",
+    )
     order_col = _find_order_col(data, ORDER_CANDIDATES, "單號")
     product_col = _find_order_col(data, PRODUCT_CANDIDATES, "商品")
-    store_col = _find_order_col(data, STORE_CANDIDATES, "門市")
+    try:
+        store_col = _find_order_col(data, STORE_CANDIDATES, "門市")
+    except KeyError:
+        store_col = "__ORDER_STORE__"
+        data[store_col] = pd.NA
 
-    box_text = data[box_col].fillna("").astype(str).str.strip()
+    # 訂單 Line 直接使用原始資料，不承接成箱 Line 的篩選結果。
     qty_numeric = pd.to_numeric(data[qty_col], errors="coerce")
-    data = data.loc[box_text.eq("") & (qty_numeric.isna() | qty_numeric.ne(0))].copy()
+    data = data.loc[qty_numeric.isna() | qty_numeric.ne(0)].copy()
 
     work = data[[order_col, product_col, store_col, qty_col, unit_qty_col]].copy()
     work.columns = ["ORDER_NO", "PRODUCT", "STORE", "QTY", "UNIT_QTY"]
@@ -428,7 +436,7 @@ def _prepare_order_rows(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
         work[column] = work[column].astype("string").str.strip().replace("", pd.NA)
     work["QTY"] = pd.to_numeric(work["QTY"], errors="coerce")
     work["UNIT_QTY"] = pd.to_numeric(work["UNIT_QTY"], errors="coerce")
-    work = work.dropna(subset=["ORDER_NO", "PRODUCT", "STORE"])
+    work = work.dropna(subset=["ORDER_NO", "PRODUCT"])
     work.insert(0, "來源檔名", source_name)
     return work
 
@@ -451,7 +459,8 @@ def _order_metrics(work: pd.DataFrame, line: pd.DataFrame) -> dict:
     total = int(len(line))
     difference = int(line["DIFF_QTY"].gt(0).sum()) if total else 0
     complete = total - difference
-    product_store = work.groupby("PRODUCT")["STORE"].nunique() if not work.empty else pd.Series(dtype=int)
+    valid_store = work.dropna(subset=["STORE"]) if not work.empty else work
+    product_store = valid_store.groupby("PRODUCT")["STORE"].nunique() if not valid_store.empty else pd.Series(dtype=int)
     return {
         "訂單Line": total,
         "完成Line": complete,
@@ -477,7 +486,7 @@ def _render_order_line_results(items: list[dict]) -> None:
 
     st.markdown("### 🧾 訂單 Line 結果（成箱箱號空白）")
     if not results:
-        st.warning("沒有可計算的訂單 Line，請確認單號、商品、門市、數量與計量單位數量欄位。")
+        st.warning("沒有可計算的訂單 Line，請展開下方原因確認來源欄位名稱。")
         if errors:
             with st.expander("檢視無法計算原因"):
                 for file_name, message in errors:
