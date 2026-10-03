@@ -375,6 +375,147 @@ def _download_xlsx(
     return bio.getvalue()
 
 
+
+# --------------------------------------------------
+# 訂單 Line（成箱箱號空白）
+# --------------------------------------------------
+ORDER_CANDIDATES = (
+    "單號", "訂單號", "訂單編號", "訂單號碼", "單據號碼", "單據編號",
+    "ORDERNO", "ORDER_NO", "OrderNo", "orderno",
+)
+PRODUCT_CANDIDATES = ("商品", "商品代號", "品號", "商品編號", "品項")
+STORE_CANDIDATES = ("門市代號", "門市", "店號", "StoreID", "storeid", "門市編號")
+
+
+def _normalize_order_col(value) -> str:
+    return (
+        str(value)
+        .replace(" ", "")
+        .replace("　", "")
+        .replace("\\n", "")
+        .replace("\\r", "")
+        .replace("\\t", "")
+        .strip()
+    )
+
+
+def _find_order_col(df: pd.DataFrame, candidates, label: str) -> str:
+    columns = {_normalize_order_col(column): column for column in df.columns}
+    for candidate in candidates:
+        match = columns.get(_normalize_order_col(candidate))
+        if match is not None:
+            return match
+    raise KeyError(f"找不到{label}欄位")
+
+
+def _prepare_order_rows(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
+    data = df.copy()
+    data.columns = [str(column).strip() for column in data.columns]
+    box_col = _find_order_col(data, ("成箱箱號",), "成箱箱號")
+    qty_col = _find_order_col(data, ("數量",), "數量")
+    unit_qty_col = _find_order_col(data, ("計量單位數量",), "計量單位數量")
+    order_col = _find_order_col(data, ORDER_CANDIDATES, "單號")
+    product_col = _find_order_col(data, PRODUCT_CANDIDATES, "商品")
+    store_col = _find_order_col(data, STORE_CANDIDATES, "門市")
+
+    box_text = data[box_col].fillna("").astype(str).str.strip()
+    qty_numeric = pd.to_numeric(data[qty_col], errors="coerce")
+    data = data.loc[box_text.eq("") & (qty_numeric.isna() | qty_numeric.ne(0))].copy()
+
+    work = data[[order_col, product_col, store_col, qty_col, unit_qty_col]].copy()
+    work.columns = ["ORDER_NO", "PRODUCT", "STORE", "QTY", "UNIT_QTY"]
+    for column in ("ORDER_NO", "PRODUCT", "STORE"):
+        work[column] = work[column].astype("string").str.strip().replace("", pd.NA)
+    work["QTY"] = pd.to_numeric(work["QTY"], errors="coerce")
+    work["UNIT_QTY"] = pd.to_numeric(work["UNIT_QTY"], errors="coerce")
+    work = work.dropna(subset=["ORDER_NO", "PRODUCT", "STORE"])
+    work.insert(0, "來源檔名", source_name)
+    return work
+
+
+def _order_line_summary(work: pd.DataFrame) -> pd.DataFrame:
+    if work.empty:
+        return pd.DataFrame(
+            columns=["ORDER_NO", "PRODUCT", "QTY", "UNIT_QTY", "DIFF_QTY", "完成狀態"]
+        )
+    line = (
+        work.groupby(["ORDER_NO", "PRODUCT"], as_index=False, dropna=False)
+        .agg(QTY=("QTY", "sum"), UNIT_QTY=("UNIT_QTY", "sum"))
+    )
+    line["DIFF_QTY"] = line["UNIT_QTY"] - line["QTY"]
+    line["完成狀態"] = line["DIFF_QTY"].gt(0).map({True: "差異", False: "完成"})
+    return line
+
+
+def _order_metrics(work: pd.DataFrame, line: pd.DataFrame) -> dict:
+    total = int(len(line))
+    difference = int(line["DIFF_QTY"].gt(0).sum()) if total else 0
+    complete = total - difference
+    product_store = work.groupby("PRODUCT")["STORE"].nunique() if not work.empty else pd.Series(dtype=int)
+    return {
+        "訂單Line": total,
+        "完成Line": complete,
+        "差異Line": difference,
+        "完成率": complete / total if total else 0.0,
+        "不重複商品數": int(work["PRODUCT"].nunique()) if not work.empty else 0,
+        "品項門市家數合計": int(product_store.sum()),
+        "有效明細": int(len(work)),
+        "合併重複資料": int(len(work) - total),
+    }
+
+
+def _render_order_line_results(items: list[dict]) -> None:
+    results = []
+    errors = []
+    for item in items:
+        try:
+            work = _prepare_order_rows(item["raw_df"], item["name"])
+            line = _order_line_summary(work)
+            results.append((item["name"], work, line, _order_metrics(work, line)))
+        except Exception as exc:
+            errors.append((item["name"], str(exc)))
+
+    st.markdown("### 🧾 訂單 Line 結果（成箱箱號空白）")
+    if not results:
+        st.warning("沒有可計算的訂單 Line，請確認單號、商品、門市、數量與計量單位數量欄位。")
+        if errors:
+            with st.expander("檢視無法計算原因"):
+                for file_name, message in errors:
+                    st.error(f"{file_name}：{message}")
+        return
+
+    combined_work = pd.concat([result[1] for result in results], ignore_index=True)
+    combined_line = _order_line_summary(combined_work)
+    metrics = _order_metrics(combined_work, combined_line)
+
+    columns = st.columns(4)
+    columns[0].metric("訂單 Line", _fmt_int(metrics["訂單Line"]))
+    columns[1].metric("完成 Line", _fmt_int(metrics["完成Line"]))
+    columns[2].metric("差異 Line", _fmt_int(metrics["差異Line"]))
+    columns[3].metric("訂單 Line 完成率", f'{metrics["完成率"]:.2%}')
+    st.caption(
+        f'不重複商品數：{metrics["不重複商品數"]:,}｜'
+        f'各品項門市家數合計：{metrics["品項門市家數合計"]:,}｜'
+        f'有效原始明細：{metrics["有效明細"]:,}｜'
+        f'合併重複資料：{metrics["合併重複資料"]:,}'
+    )
+
+    summary = pd.DataFrame([{"檔名": name, **metrics} for name, _, _, metrics in results])
+    display = summary.copy()
+    display["完成率"] = display["完成率"].map(lambda value: f"{value:.2%}")
+    card_open("📋 訂單 Line 各檔彙總")
+    st.dataframe(display, use_container_width=True, height=min(430, 90 + len(display) * 38))
+    card_close()
+
+    with st.expander("🧾 訂單 Line 明細", expanded=False):
+        st.dataframe(combined_line, use_container_width=True, height=430)
+
+    if errors:
+        with st.expander("⚠️ 部分檔案無法計算訂單 Line", expanded=False):
+            for file_name, message in errors:
+                st.error(f"{file_name}：{message}")
+
+
 # --------------------------------------------------
 # UI
 # --------------------------------------------------
@@ -427,6 +568,7 @@ for i, uf in enumerate(uploaded_files, start=1):
                 "name": uf.name,
                 "read_note": read_note,
                 "raw_rows": len(raw_df),
+                "raw_df": raw_df,
                 "box_df": box_df,
                 "line_df": line_df,
                 "metrics": metrics,
@@ -477,6 +619,8 @@ st.caption(
     f"成箱資料筆數：{combined_metrics['成箱資料筆數']:,}｜"
     f"不重複成箱箱號：{combined_metrics['成箱箱數']:,}"
 )
+
+_render_order_line_results(items)
 
 # --------------------------------------------------
 # 各檔彙總
