@@ -952,32 +952,7 @@ def show_type_totals_as_text(df_type_total: pd.DataFrame):
 # --------------------------------------------------
 # 合并页面 UI：两套流程只共用外壳，资料与计算完全独立
 # --------------------------------------------------
-def _render_box_reporting_workflow():
-    if "uploader_key_35_box" not in st.session_state:
-        st.session_state["uploader_key_35_box"] = 0
-
-    card_open("📌 上傳揀貨成箱明細（可一次多檔）")
-    u1, u2 = st.columns([1, 0.08], gap="small")
-    with u1:
-        uploaded_files = st.file_uploader(
-            "請選擇一個或多個檔案",
-            type=["xlsx", "xls", "xlsb", "xlsm", "csv", "html", "htm"],
-            accept_multiple_files=True,
-            key=f"uploader_35_box_{st.session_state['uploader_key_35_box']}",
-        )
-    with u2:
-        st.markdown(" ")
-        if st.button("🧹", help="清除已上傳檔案", use_container_width=True):
-            st.session_state["uploader_key_35_box"] += 1
-            st.rerun()
-    card_close()
-
-    if not uploaded_files:
-        st.info(
-            "請上傳檔案。必要欄位：成箱箱號、儲位、商品、原始配庫存量、數量、出貨入數。"
-        )
-        return
-
+def _render_box_reporting_workflow(uploaded_files):
     items = []
     errors = []
 
@@ -1175,32 +1150,8 @@ def _render_box_reporting_workflow():
     )
 
 
-def _render_loose_total_workflow():
+def _render_loose_total_workflow(batch_files, map_file):
     card_open("🎯 零散總揀｜Line 完成統計")
-
-    batch_files = st.file_uploader(
-        "上傳【批次明細】（可多檔；至少含欄位：儲位；需有可辨識的應揀/實揀欄位）",
-        type=["xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb", "csv", "txt"],
-        accept_multiple_files=True,
-    )
-
-    map_file = st.file_uploader(
-        "上傳【儲位棚別明細】（需含欄位：儲位、儲位類型）",
-        type=["xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb", "csv", "txt"],
-        accept_multiple_files=False,
-    )
-
-    st.markdown("---")
-
-    if (not batch_files) or (map_file is None):
-        st.info("請先上傳『批次明細（可多檔）』與『儲位棚別明細』。")
-        card_close()
-        return
-
-    run = st.button("開始產出", type="primary")
-    if not run:
-        card_close()
-        return
 
     # 讀取 map
     try:
@@ -1486,13 +1437,43 @@ def _render_loose_total_workflow():
 set_page(
     "報工稼動｜揀貨作業",
     icon="⏱️",
-    subtitle="揀貨成箱、訂單 Line、零散 PCS 與零散總揀的獨立計算入口。",
+    subtitle="同一批原始資料一次完成成箱、訂單 Line、零散 PCS 與零散總揀計算。",
 )
 
-st.markdown("## 📦 揀貨成箱／報工")
-_render_box_reporting_workflow()
+if "uploader_key_reporting_all" not in st.session_state:
+    st.session_state["uploader_key_reporting_all"] = 0
 
-st.divider()
+card_open("📌 統一上傳資料")
+upload_col, clear_col = st.columns([1, 0.08], gap="small")
+with upload_col:
+    uploaded_files = st.file_uploader(
+        "上傳【批次明細】（可一次多檔，所有計算共用同一批原始資料）",
+        type=["xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb", "csv", "txt", "html", "htm"],
+        accept_multiple_files=True,
+        key=f"reporting_batch_{st.session_state['uploader_key_reporting_all']}",
+    )
+    map_file = st.file_uploader(
+        "上傳【儲位棚別明細】（零散總揀使用，需含：儲位、儲位類型）",
+        type=["xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb", "csv", "txt"],
+        accept_multiple_files=False,
+        key=f"reporting_map_{st.session_state['uploader_key_reporting_all']}",
+    )
+with clear_col:
+    st.markdown(" ")
+    if st.button("🧹", help="清除全部上傳檔案", use_container_width=True):
+        st.session_state["uploader_key_reporting_all"] += 1
+        st.rerun()
+card_close()
 
-st.markdown("## 🎯 零散總揀")
-_render_loose_total_workflow()
+if not uploaded_files:
+    st.info("請上傳批次明細；同一批檔案將直接套用全部計算邏輯。")
+else:
+    st.markdown("## 📊 全部計算結果")
+    _render_box_reporting_workflow(uploaded_files)
+
+    st.divider()
+
+    if map_file is None:
+        st.info("補上『儲位棚別明細』後，將自動完成零散總揀計算。")
+    else:
+        _render_loose_total_workflow(uploaded_files, map_file)
