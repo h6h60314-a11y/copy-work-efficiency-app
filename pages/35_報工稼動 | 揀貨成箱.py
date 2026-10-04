@@ -1489,8 +1489,10 @@ set_page(
     subtitle="揀貨成箱、訂單 Line、零散 PCS 與零散總揀的獨立計算入口。",
 )
 
-box_tab, loose_total_tab = st.tabs(["📦 揀貨成箱／報工", "🎯 零散總揀"])
-with box_tab:
-    _render_box_reporting_workflow()
-with loose_total_tab:
-    _render_loose_total_workflow()
+st.markdown("## 📦 揀貨成箱／報工")
+_render_box_reporting_workflow()
+
+st.divider()
+
+st.markdown("## 🎯 零散總揀")
+_render_loose_total_workflow()
