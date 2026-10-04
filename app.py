@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import ast
+import importlib
 from dataclasses import replace
 from pathlib import Path
 
 import streamlit as st
 from PIL import Image
 
-from nav_config import APP_ICON, APP_TITLE, PAGE_SECTIONS, PageSpec
+import nav_config as nav_config_module
+
+nav_config_module = importlib.reload(nav_config_module)
+APP_ICON = nav_config_module.APP_ICON
+APP_TITLE = nav_config_module.APP_TITLE
+PAGE_SECTIONS = nav_config_module.PAGE_SECTIONS
+PageSpec = nav_config_module.PageSpec
 from sidebar_ui import render_sidebar
 
 
