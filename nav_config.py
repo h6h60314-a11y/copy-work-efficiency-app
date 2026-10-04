@@ -49,6 +49,12 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
                 "work-report-picking-box-35",
                 "📦",
             ),
+            PageSpec(
+                "pages/37_報工稼動 | 零散總揀.py",
+                "零散總揀",
+                "work-report-loose-picking-37",
+                "🎯",
+            ),
         ),
     ),
     SectionSpec(
@@ -111,4 +117,3 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
         ),
     ),
 )
-
