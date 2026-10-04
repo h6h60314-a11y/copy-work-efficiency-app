@@ -18,15 +18,9 @@ inject_logistics_theme()
 ITEMS = (
     HomeNavItem(
         "📦",
-        "揀貨成箱",
-        "彙整揀貨成箱 Line、完成狀態與應作業／實際作業 PCS。",
+        "揀貨作業",
+        "整合揀貨成箱、訂單 Line、零散 PCS 與零散總揀，四套邏輯獨立計算。",
         "pages/35_報工稼動 | 揀貨成箱.py",
-    ),
-    HomeNavItem(
-        "🎯",
-        "零散總揀",
-        "彙整零散總揀應作業 Line、實際完成 Line 與完成率。",
-        "pages/37_報工稼動 | 零散總揀.py",
     ),
 )
 

@@ -45,15 +45,9 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
             PageSpec("pages/36_報工稼動首頁.py", "報工稼動首頁", "work-report-home", "⏱️"),
             PageSpec(
                 "pages/35_報工稼動 | 揀貨成箱.py",
-                "揀貨成箱",
+                "揀貨作業",
                 "work-report-picking-box-35",
                 "📦",
-            ),
-            PageSpec(
-                "pages/37_報工稼動 | 零散總揀.py",
-                "零散總揀",
-                "work-report-loose-picking-37",
-                "🎯",
             ),
         ),
     ),
