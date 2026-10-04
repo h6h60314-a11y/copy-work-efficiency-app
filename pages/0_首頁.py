@@ -16,9 +16,9 @@ inject_logistics_theme()
 ITEMS = (
     HomeNavItem(
         "⏱️",
-        "報工稼動",
+        "Handover",
         "一次完成揀貨成箱、訂單 Line、零散 PCS 與零散總揀計算。",
-        "pages/36_報工稼動首頁.py",
+        "pages/36_Handover首頁.py",
     ),
     HomeNavItem(
         "🧭",

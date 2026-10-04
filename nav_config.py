@@ -40,11 +40,11 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
         ),
     ),
     SectionSpec(
-        "報工稼動",
+        "Handover",
         (
-            PageSpec("pages/36_報工稼動首頁.py", "報工稼動首頁", "work-report-home", "⏱️"),
+            PageSpec("pages/36_Handover首頁.py", "Handover首頁", "work-report-home", "⏱️"),
             PageSpec(
-                "pages/35_報工稼動 | 揀貨成箱.py",
+                "pages/35_Handover_揀貨作業.py",
                 "揀貨作業",
                 "work-report-picking-box-35",
                 "📦",

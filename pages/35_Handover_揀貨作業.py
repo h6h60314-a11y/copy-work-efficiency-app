@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-35_報工稼動 | 揀貨成箱
+35_Handover_揀貨作業
 
 計算規則
 1. 僅「成箱箱號」有值的資料視為成箱作業。
@@ -48,7 +48,7 @@ except Exception:
 # Page config
 # --------------------------------------------------
 st.set_page_config(
-    page_title="報工稼動 | 揀貨作業",
+    page_title="Handover | 揀貨作業",
     page_icon="📦",
     layout="wide",
 )
@@ -1435,7 +1435,7 @@ def _render_loose_total_workflow(batch_files, map_file):
 
 
 set_page(
-    "報工稼動｜揀貨作業",
+    "Handover｜揀貨作業",
     icon="⏱️",
     subtitle="同一批原始資料一次完成成箱、訂單 Line、零散 PCS 與零散總揀計算。",
 )
