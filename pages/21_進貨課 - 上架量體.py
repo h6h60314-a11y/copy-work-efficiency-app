@@ -25,6 +25,12 @@ ITEM_CANDIDATES = [
     "itemcode", "ItemCode", "ITEMCODE",
 ]
 
+# 完成數量優先取主檔的「完成數量」；舊版移動明細通常使用「數量」。
+QTY_CANDIDATES = [
+    "完成數量", "數量", "實際數量", "移動數量", "計量單位數量",
+    "QTY", "Qty", "qty", "QUANTITY", "Quantity", "quantity",
+]
+
 LOC_KEY_CANDIDATES = ["儲位", "儲位代碼", "到", "儲位編號", "Location", "LOC", "loc"]
 LOC_TYPE_COL = "儲位類型"
 
@@ -112,6 +118,19 @@ def detect_col(df: pd.DataFrame, candidates) -> Optional[str]:
     return None
 
 
+def sum_completed_quantity(df: pd.DataFrame) -> Tuple[float, Optional[str]]:
+    """加總過濾後的完成數量，並回傳實際使用的欄位名稱。"""
+    qty_col = detect_col(df, QTY_CANDIDATES)
+    if qty_col is None:
+        return 0.0, None
+
+    qty = pd.to_numeric(
+        df[qty_col].astype(str).str.replace(",", "", regex=False).str.strip(),
+        errors="coerce",
+    ).fillna(0)
+    return float(qty.sum()), qty_col
+
+
 def classify_high_low(storage_type: str) -> str:
     if pd.isna(storage_type):
         return "無法對應"
@@ -156,10 +175,11 @@ def _safe_sheet_name(name: str) -> str:
     return (n[:31] if len(n) > 31 else n) or "Sheet"
 
 
-def _kpi_text(title: str, value: int):
+def _kpi_text(title: str, value: float):
+    display_value = f"{value:,.0f}" if float(value).is_integer() else f"{value:,.2f}"
     st.markdown(f"**{title}**")
     st.markdown(
-        f"<div style='font-size:24px; font-weight:900; line-height:1.1; margin-top:2px; margin-bottom:12px;'>{value:,}</div>",
+        f"<div style='font-size:24px; font-weight:900; line-height:1.1; margin-top:2px; margin-bottom:12px;'>{display_value}</div>",
         unsafe_allow_html=True,
     )
 
@@ -243,7 +263,8 @@ if LOC_TYPE_COL not in sto_df.columns:
 # 處理
 processed_by_sheet: Dict[str, pd.DataFrame] = {}
 summary_rows: List[dict] = []
-totals = {"ITEM": 0, "高空": 0, "低空": 0, "未知": 0, "無法對應": 0}
+totals = {"ITEM": 0, "完成數量": 0.0, "高空": 0, "低空": 0, "未知": 0, "無法對應": 0}
+missing_qty_sheets: List[str] = []
 
 all_concat: List[pd.DataFrame] = []
 
@@ -257,6 +278,9 @@ for sn, df in main_sheets.items():
 
     # 計數（ITEM=筆數）
     cnt = int(kept2.shape[0])
+    completed_qty, qty_col = sum_completed_quantity(kept2)
+    if qty_col is None:
+        missing_qty_sheets.append(str(sn))
     c_high = int((kept2["高低空"] == "高空").sum()) if "高低空" in kept2.columns else 0
     c_low = int((kept2["高低空"] == "低空").sum()) if "高低空" in kept2.columns else 0
     c_unknown = int((kept2["高低空"] == "未知").sum()) if "高低空" in kept2.columns else 0
@@ -268,17 +292,40 @@ for sn, df in main_sheets.items():
     totals["高空"] += c_high
     totals["低空"] += c_low
     totals["ITEM"] += cnt
+    totals["完成數量"] += completed_qty
     totals["未知"] += c_unknown
     totals["無法對應"] += c_nomap
 
     summary_rows.append(
-        {"Sheet": str(sn), "ITEM": cnt, "高空": c_high, "低空": c_low, "未知": c_unknown, "無法對應": c_nomap}
+        {
+            "Sheet": str(sn),
+            "ITEM": cnt,
+            "完成數量": completed_qty,
+            "高空": c_high,
+            "低空": c_low,
+            "未知": c_unknown,
+            "無法對應": c_nomap,
+        }
     )
 
 summary_rows.append(
-    {"Sheet": "ALL", "ITEM": totals["ITEM"], "高空": totals["高空"], "低空": totals["低空"], "未知": totals["未知"], "無法對應": totals["無法對應"]}
+    {
+        "Sheet": "ALL",
+        "ITEM": totals["ITEM"],
+        "完成數量": totals["完成數量"],
+        "高空": totals["高空"],
+        "低空": totals["低空"],
+        "未知": totals["未知"],
+        "無法對應": totals["無法對應"],
+    }
 )
 summary_df = pd.DataFrame(summary_rows)
+
+if missing_qty_sheets:
+    st.warning(
+        "以下工作表找不到完成數量欄位，已以 0 計算："
+        + "、".join(missing_qty_sheets)
+    )
 
 # 儲位類型分佈（整體）
 type_dist_df = None
@@ -297,6 +344,7 @@ st.markdown("### 上架量體")
 _kpi_text("低空", totals["低空"])
 _kpi_text("高空", totals["高空"])
 _kpi_text("ITEM（由=QC 且 到通過排除）", totals["ITEM"])
+_kpi_text("完成數量", totals["完成數量"])
 _kpi_text("未知", totals["未知"])
 _kpi_text("無法對應", totals["無法對應"])
 
