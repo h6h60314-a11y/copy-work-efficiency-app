@@ -14,6 +14,10 @@ from common_ui import inject_logistics_theme, set_page, card_open, card_close
 pd.options.display.max_columns = 200
 
 PRODUCT_COL_CANDIDATES = ["商品", "商品代號", "商品編號", "品號", "品名", "品號品名"]
+QTY_COL_CANDIDATES = [
+    "完成數量", "數量", "實際數量", "驗收數量", "計量單位數量",
+    "QTY", "Qty", "qty", "QUANTITY", "Quantity", "quantity",
+]
 
 
 def _safe_sheet_name(name: str) -> str:
@@ -30,6 +34,27 @@ def find_product_col(columns) -> Optional[str]:
         if ("商品" in c) or ("品號" in c):
             return c
     return None
+
+
+def find_quantity_col(columns) -> Optional[str]:
+    cols = [str(c).strip() for c in columns]
+    for cand in QTY_COL_CANDIDATES:
+        if cand in cols:
+            return cand
+    return None
+
+
+def sum_completed_quantity(df: pd.DataFrame) -> Tuple[float, Optional[str]]:
+    """加總「到=QC」過濾後的完成數量。"""
+    qty_col = find_quantity_col(df.columns)
+    if qty_col is None:
+        return 0.0, None
+
+    qty = pd.to_numeric(
+        df[qty_col].astype(str).str.replace(",", "", regex=False).str.strip(),
+        errors="coerce",
+    ).fillna(0)
+    return float(qty.sum()), qty_col
 
 
 def _read_excel_sheets_from_bytes(file_bytes: bytes, ext: str) -> Dict[str, pd.DataFrame]:
@@ -72,9 +97,11 @@ def process_tables(
 
     total_before = 0
     total_after = 0
+    total_completed_quantity = 0.0
 
     per_sheet_unique: List[dict] = []
     all_products: List[pd.Series] = []
+    missing_qty_sheets: List[str] = []
 
     for name, df in tables.items():
         df = df.copy()
@@ -88,6 +115,7 @@ def process_tables(
                     "使用商品欄位": "",
                     "原始筆數": int(len(df)),
                     "保留筆數(到=QC)": 0,
+                    "完成數量": 0,
                     "唯一商品數": 0,
                 }
             )
@@ -100,6 +128,11 @@ def process_tables(
 
         total_after += len(out_df)
         filtered[name] = out_df
+
+        completed_quantity, qty_col = sum_completed_quantity(out_df)
+        total_completed_quantity += completed_quantity
+        if qty_col is None:
+            missing_qty_sheets.append(_safe_sheet_name(name))
 
         prod_col = find_product_col(out_df.columns)
         if prod_col and not out_df.empty:
@@ -115,6 +148,7 @@ def process_tables(
                 "使用商品欄位": prod_col or "",
                 "原始筆數": int(len(df)),
                 "保留筆數(到=QC)": int(len(out_df)),
+                "完成數量": completed_quantity,
                 "唯一商品數": int(uniq_cnt),
             }
         )
@@ -126,10 +160,11 @@ def process_tables(
 
     summary_df = pd.DataFrame(
         {
-            "項目": ["原始筆數", "保留筆數(到=QC)", "刪除筆數", "全檔唯一商品總數"],
+            "項目": ["原始筆數", "保留筆數(到=QC)", "完成數量", "刪除筆數", "全檔唯一商品總數"],
             "數量": [
                 int(total_before),
                 int(total_after),
+                total_completed_quantity,
                 int(total_before - total_after),
                 int(overall_unique_products),
             ],
@@ -137,13 +172,15 @@ def process_tables(
     )
 
     per_sheet_df = pd.DataFrame(per_sheet_unique)[
-        ["工作表", "使用商品欄位", "原始筆數", "保留筆數(到=QC)", "唯一商品數"]
+        ["工作表", "使用商品欄位", "原始筆數", "保留筆數(到=QC)", "完成數量", "唯一商品數"]
     ]
 
     stats = {
         "total_before": int(total_before),
         "total_after": int(total_after),  # ITEM
+        "completed_quantity": total_completed_quantity,
         "overall_unique_products": int(overall_unique_products),  # SKU
+        "missing_qty_sheets": missing_qty_sheets,
     }
     return filtered, summary_df, per_sheet_df, stats
 
@@ -171,10 +208,11 @@ def build_output_excel_bytes(
     return out.read()
 
 
-def _kpi_text(title: str, value: int):
+def _kpi_text(title: str, value: float):
     # ✅ 純文字、無卡片、直向
+    display_value = f"{value:,.0f}" if float(value).is_integer() else f"{value:,.2f}"
     st.markdown(f"**{title}**")
-    st.markdown(f"<div style='font-size:24px; font-weight:900; line-height:1.1; margin-top:2px; margin-bottom:12px;'>{value:,}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:24px; font-weight:900; line-height:1.1; margin-top:2px; margin-bottom:12px;'>{display_value}</div>", unsafe_allow_html=True)
 
 
 # =========================
@@ -233,7 +271,14 @@ except Exception as e:
 st.markdown("### 驗收量體")
 _kpi_text("SKU（全檔唯一商品）", stats["overall_unique_products"])
 _kpi_text("ITEM（到=QC 筆數）", stats["total_after"])
+_kpi_text("完成數量", stats["completed_quantity"])
 _kpi_text("原始總筆數", stats["total_before"])
+
+if stats["missing_qty_sheets"]:
+    st.warning(
+        "以下工作表找不到完成數量欄位，已以 0 計算："
+        + "、".join(stats["missing_qty_sheets"])
+    )
 
 st.markdown("### 過濾統計")
 st.dataframe(summary_df, use_container_width=True, hide_index=True)
