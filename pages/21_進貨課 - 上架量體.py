@@ -131,6 +131,17 @@ def sum_completed_quantity(df: pd.DataFrame) -> Tuple[float, Optional[str]]:
     return float(qty.sum()), qty_col
 
 
+def get_unique_items(df: pd.DataFrame) -> Tuple[pd.Series, Optional[str]]:
+    """取得過濾後的有效品項，供單表與全檔跨表去重計數。"""
+    item_col = detect_col(df, ITEM_CANDIDATES)
+    if item_col is None:
+        return pd.Series(dtype="string"), None
+
+    items = df[item_col].dropna().astype(str).str.strip()
+    items = items[items.ne("") & items.str.lower().ne("nan")]
+    return items, item_col
+
+
 def classify_high_low(storage_type: str) -> str:
     if pd.isna(storage_type):
         return "無法對應"
@@ -263,10 +274,20 @@ if LOC_TYPE_COL not in sto_df.columns:
 # 處理
 processed_by_sheet: Dict[str, pd.DataFrame] = {}
 summary_rows: List[dict] = []
-totals = {"ITEM": 0, "完成數量": 0.0, "高空": 0, "低空": 0, "未知": 0, "無法對應": 0}
+totals = {
+    "ITEM": 0,
+    "不重複品項數": 0,
+    "完成數量": 0.0,
+    "高空": 0,
+    "低空": 0,
+    "未知": 0,
+    "無法對應": 0,
+}
 missing_qty_sheets: List[str] = []
+missing_item_sheets: List[str] = []
 
 all_concat: List[pd.DataFrame] = []
+all_item_values: List[pd.Series] = []
 
 for sn, df in main_sheets.items():
     df = df.copy()
@@ -278,6 +299,13 @@ for sn, df in main_sheets.items():
 
     # 計數（ITEM=筆數）
     cnt = int(kept2.shape[0])
+    item_values, item_col = get_unique_items(kept2)
+    unique_item_count = int(item_values.nunique())
+    if item_col is None:
+        missing_item_sheets.append(str(sn))
+    elif not item_values.empty:
+        all_item_values.append(item_values)
+
     completed_qty, qty_col = sum_completed_quantity(kept2)
     if qty_col is None:
         missing_qty_sheets.append(str(sn))
@@ -300,6 +328,7 @@ for sn, df in main_sheets.items():
         {
             "Sheet": str(sn),
             "ITEM": cnt,
+            "不重複品項數": unique_item_count,
             "完成數量": completed_qty,
             "高空": c_high,
             "低空": c_low,
@@ -308,10 +337,17 @@ for sn, df in main_sheets.items():
         }
     )
 
+totals["不重複品項數"] = (
+    int(pd.concat(all_item_values, ignore_index=True).nunique())
+    if all_item_values
+    else 0
+)
+
 summary_rows.append(
     {
         "Sheet": "ALL",
         "ITEM": totals["ITEM"],
+        "不重複品項數": totals["不重複品項數"],
         "完成數量": totals["完成數量"],
         "高空": totals["高空"],
         "低空": totals["低空"],
@@ -325,6 +361,12 @@ if missing_qty_sheets:
     st.warning(
         "以下工作表找不到完成數量欄位，已以 0 計算："
         + "、".join(missing_qty_sheets)
+    )
+
+if missing_item_sheets:
+    st.warning(
+        "以下工作表找不到品項欄位，無法計算不重複品項數："
+        + "、".join(missing_item_sheets)
     )
 
 # 儲位類型分佈（整體）
@@ -344,6 +386,7 @@ st.markdown("### 上架量體")
 _kpi_text("低空", totals["低空"])
 _kpi_text("高空", totals["高空"])
 _kpi_text("ITEM（由=QC 且 到通過排除）", totals["ITEM"])
+_kpi_text("不重複品項數", totals["不重複品項數"])
 _kpi_text("完成數量", totals["完成數量"])
 _kpi_text("未知", totals["未知"])
 _kpi_text("無法對應", totals["無法對應"])
