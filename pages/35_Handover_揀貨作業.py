@@ -802,6 +802,7 @@ def build_pivot2(
     pivot2 = (
         pivot1.groupby(group_keys, dropna=False)
         .agg(
+            總揀筆數=("應作業Line", "sum"),
             應作業Line=("應作業Line", "sum"),
             實際完成Line=("實際完成Line", "sum"),
             未完成Line=("未完成Line", "sum"),
@@ -813,7 +814,7 @@ def build_pivot2(
         .reset_index(drop=True)
     )
 
-    for c in ["應作業Line", "實際完成Line", "未完成Line"]:
+    for c in ["總揀筆數", "應作業Line", "實際完成Line", "未完成Line"]:
         pivot2[c] = pivot2[c].fillna(0).astype(int)
 
     pivot2["Line完成率"] = np.where(
@@ -924,13 +925,42 @@ def _label_type_as_pick(type_name: str) -> str:
     return t
 
 
+def _label_type_as_total_pick(type_name: str) -> str:
+    """沿用原零散總揀頁的總揀筆數名稱。"""
+    t = str(type_name).strip()
+    if t == "低空":
+        return "低空總揀筆數"
+    if t == "高空":
+        return "高空總揀筆數"
+    if t.upper() == "GM":
+        return "GM總揀筆數"
+    return f"{t}總揀筆數"
+
+
 def show_type_totals_as_text(df_type_total: pd.DataFrame):
-    """依儲位類型顯示應作業 / 完成 Line。"""
-    st.markdown("### 總揀 / Line 完成概況")
+    """
+    顯示順序：
+    1) 完整保留原本的高空 / 低空 / GM 總揀筆數顯示
+    2) 再顯示新增的 Line 完成概況
+    """
+    st.markdown("### 總揀筆數")
     if df_type_total is None or df_type_total.empty:
         st.caption("（無資料）")
         return
 
+    # 原本顯示：類型標題 + 大字總揀筆數
+    for _, r in df_type_total.iterrows():
+        type_name = r.get("儲位類型", "")
+        total_pick = int(r.get("總揀筆數", r.get("應作業Line", 0)))
+        st.markdown(f"**{_label_type_as_total_pick(type_name)}**")
+        st.markdown(
+            f"<div style='font-size:28px; font-weight:900; line-height:1.1; "
+            f"margin-top:2px; margin-bottom:14px;'>{total_pick:,}</div>",
+            unsafe_allow_html=True,
+        )
+
+    # 新增 Line 完成概況，放在總揀筆數下方
+    st.markdown("### Line 完成概況")
     for _, r in df_type_total.iterrows():
         t = _label_type_as_pick(r.get("儲位類型", ""))
         should_line = int(r.get("應作業Line", 0))
@@ -945,7 +975,6 @@ def show_type_totals_as_text(df_type_total: pd.DataFrame):
             f"未完成 Line：**{undone_line:,}**　｜　"
             f"完成率：**{rate:.1%}**"
         )
-
 
 
 
@@ -1337,6 +1366,7 @@ def _render_loose_total_workflow(batch_files, map_file):
             base_cols
             + (["揀貨批次號"] if "揀貨批次號" in df_detail_all.columns else [])
             + [
+                "總揀筆數",
                 "應作業Line",
                 "實際完成Line",
                 "未完成Line",
@@ -1355,6 +1385,7 @@ def _render_loose_total_workflow(batch_files, map_file):
                 "來源檔名",
                 "子集",
                 "儲位類型",
+                "總揀筆數",
                 "應作業Line",
                 "實際完成Line",
                 "未完成Line",
@@ -1375,6 +1406,7 @@ def _render_loose_total_workflow(batch_files, map_file):
         df_type_total = (
             df_detail_all.groupby("儲位類型", dropna=False)
             .agg(
+                總揀筆數=("總揀筆數", "sum"),
                 應作業Line=("應作業Line", "sum"),
                 實際完成Line=("實際完成Line", "sum"),
                 未完成Line=("未完成Line", "sum"),
@@ -1389,12 +1421,13 @@ def _render_loose_total_workflow(batch_files, map_file):
             0.0,
         )
         df_type_total = df_type_total.sort_values(
-            "應作業Line", ascending=False, kind="mergesort"
+            "總揀筆數", ascending=False, kind="mergesort"
         ).reset_index(drop=True)
     else:
         df_type_total = pd.DataFrame(
             columns=[
                 "儲位類型",
+                "總揀筆數",
                 "應作業Line",
                 "實際完成Line",
                 "未完成Line",
