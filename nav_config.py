@@ -49,6 +49,12 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
                 "work-report-picking-box-35",
                 "📦",
             ),
+            PageSpec(
+                "pages/37_Handover_越庫作業.py",
+                "越庫作業",
+                "handover-crossdock-37",
+                "🔄",
+            ),
         ),
     ),
     SectionSpec(

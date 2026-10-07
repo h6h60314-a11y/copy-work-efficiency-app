@@ -22,6 +22,12 @@ ITEMS = (
         "整合揀貨成箱、訂單 Line、零散 PCS 與零散總揀，四套邏輯獨立計算。",
         "pages/35_Handover_揀貨作業.py",
     ),
+    HomeNavItem(
+        "🔄",
+        "越庫作業",
+        "彙整越庫應作業／實際作業 PCS、Line 完成數與完成率。",
+        "pages/37_Handover_越庫作業.py",
+    ),
 )
 
 

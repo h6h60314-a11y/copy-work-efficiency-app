@@ -24,11 +24,17 @@ Line 唯一鍵：
 再判斷該 Line 是否完全完成。
 """
 
-import os
-import sys
+import io
+from pathlib import Path
+
 import pandas as pd
-import tkinter as tk
-from tkinter import filedialog, messagebox
+import streamlit as st
+
+from common_ui import card_close, card_open, inject_logistics_theme, set_page
+
+
+st.set_page_config(page_title="Handover | 越庫作業", page_icon="🔄", layout="wide")
+inject_logistics_theme()
 
 
 REQUIRED_COLUMNS = [
@@ -59,12 +65,19 @@ def validate_columns(df: pd.DataFrame, filename: str) -> None:
         )
 
 
-def read_excel_first_sheet(filepath: str) -> pd.DataFrame:
-    """讀取 Excel 第一個工作表。"""
-    df = pd.read_excel(filepath, sheet_name=0)
+def read_excel_first_sheet(uploaded) -> pd.DataFrame:
+    """讀取上傳 Excel 的第一個工作表。"""
+    extension = Path(uploaded.name).suffix.lower()
+    data = io.BytesIO(uploaded.getvalue())
+    if extension in {".xlsx", ".xlsm"}:
+        df = pd.read_excel(data, sheet_name=0, engine="openpyxl")
+    elif extension == ".xls":
+        df = pd.read_excel(data, sheet_name=0, engine="xlrd")
+    else:
+        raise ValueError(f"{uploaded.name}：僅支援 xlsx、xlsm、xls")
     df = normalize_columns(df)
-    validate_columns(df, os.path.basename(filepath))
-    df["_來源檔案"] = os.path.basename(filepath)
+    validate_columns(df, uploaded.name)
+    df["_來源檔案"] = uploaded.name
     return df
 
 
@@ -197,61 +210,64 @@ def build_result_text(result):
     )
 
 
-def select_files():
-    """開啟多檔選擇視窗。"""
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-
-    files = filedialog.askopenfilenames(
-        title="選擇 Handover 越庫 Excel 檔案",
-        filetypes=[
-            ("Excel 檔案", "*.xlsx *.xls *.xlsm"),
-            ("所有檔案", "*.*"),
-        ],
-    )
-
-    root.destroy()
-    return list(files)
+def build_result_excel(result: dict, line_detail: pd.DataFrame) -> bytes:
+    output = io.BytesIO()
+    summary = pd.DataFrame([result])
+    export_detail = line_detail.copy()
+    export_detail["完成狀態"] = export_detail["是否完成"].map({True: "完成", False: "未完成"})
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        summary.to_excel(writer, index=False, sheet_name="越庫彙總")
+        export_detail.to_excel(writer, index=False, sheet_name="Line明細")
+    return output.getvalue()
 
 
-def show_message(title, text, error=False):
-    """顯示結果或錯誤視窗。"""
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
+set_page(
+    "Handover | 越庫作業",
+    icon="🔄",
+    subtitle="多檔第一張工作表合併｜單據類型＝越庫｜計算應作業／實際作業 PCS 與 Line 完成率。",
+)
 
-    if error:
-        messagebox.showerror(title, text, parent=root)
-    else:
-        messagebox.showinfo(title, text, parent=root)
+card_open("📌 上傳越庫作業明細（可一次多檔）")
+uploaded_files = st.file_uploader(
+    "請選擇一個或多個 Excel 檔案",
+    type=["xlsx", "xlsm", "xls"],
+    accept_multiple_files=True,
+    key="handover_crossdock_37",
+)
+card_close()
 
-    root.destroy()
+if not uploaded_files:
+    st.info("必要欄位：單號、單據類型、門市代號、商品碼、應作量、實作量。")
+    st.stop()
 
+try:
+    result, line_detail = calculate_handover(uploaded_files)
+except Exception as exc:
+    st.error(f"計算失敗：{exc}")
+    st.stop()
 
-def main():
-    try:
-        files = select_files()
+st.markdown("### 📊 越庫作業結果")
+row1 = st.columns(4)
+row1[0].metric("越庫原始資料", f"{result['越庫原始資料筆數']:,}")
+row1[1].metric("訂單數", f"{result['訂單數']:,}")
+row1[2].metric("應作業 PCS", fmt_number(result["應作業PCS"]))
+row1[3].metric("實際作業 PCS", fmt_number(result["實際作業PCS"]))
 
-        if not files:
-            print("未選擇檔案，程式結束。")
-            return
+row2 = st.columns(4)
+row2[0].metric("應作業 Line", f"{result['應作業Line']:,}")
+row2[1].metric("實際完成 Line", f"{result['實際完成Line']:,}")
+row2[2].metric("未完成 Line", f"{result['未完成Line']:,}")
+row2[3].metric("Line 完成率", f"{result['Line完成率']:.2%}")
 
-        result, line_detail = calculate_handover(files)
-        text = build_result_text(result)
+display_detail = line_detail.copy()
+display_detail["完成狀態"] = display_detail["是否完成"].map({True: "完成", False: "未完成"})
+with st.expander("🧾 越庫 Line 明細", expanded=False):
+    st.dataframe(display_detail, use_container_width=True, height=430)
 
-        print("=" * 50)
-        print(text)
-        print("=" * 50)
-
-        show_message("37_Handover_越庫作業", text)
-
-    except Exception as e:
-        error_text = f"執行失敗：\n{e}"
-        print(error_text)
-        show_message("37_Handover_越庫作業｜錯誤", error_text, error=True)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
+st.download_button(
+    "⬇️ 下載越庫作業結果",
+    data=build_result_excel(result, line_detail),
+    file_name="Handover_越庫作業結果.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    use_container_width=True,
+)
