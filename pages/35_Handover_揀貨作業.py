@@ -381,7 +381,7 @@ def _download_xlsx(
 
 
 # --------------------------------------------------
-# 訂單 Line（成箱箱號空白）
+# 訂單 Line（全部資料：不排除成箱箱號）
 # --------------------------------------------------
 ORDER_CANDIDATES = (
     "貨主訂單", "單號", "訂單號", "訂單編號", "訂單號碼", "單據號碼", "單據編號",
@@ -414,48 +414,100 @@ def _find_order_col(df: pd.DataFrame, candidates, label: str) -> str:
 
 
 def _prepare_order_rows(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
+    """
+    訂單 Line 原始資料整理。
+
+    重要規則：
+    1. 不看「成箱箱號」；有值、空白全部納入。
+    2. 1 Line = 1 個貨主訂單 + 1 家門市 + 1 個商品。
+    3. 數量 = 0 的資料沿用原邏輯排除。
+    """
     data = df.copy()
     data.columns = [str(column).strip() for column in data.columns]
+
     qty_col = _find_order_col(data, ("數量",), "數量")
     unit_qty_col = _find_order_col(
         data,
         ("計量單位數量", "原始配庫存量"),
         "計量單位數量或原始配庫存量",
     )
-    order_col = _find_order_col(data, ORDER_CANDIDATES, "單號")
+    order_col = _find_order_col(data, ORDER_CANDIDATES, "貨主訂單/單號")
+    store_col = _find_order_col(data, STORE_CANDIDATES, "門市")
     product_col = _find_order_col(data, PRODUCT_CANDIDATES, "商品")
-    try:
-        store_col = _find_order_col(data, STORE_CANDIDATES, "門市")
-    except KeyError:
-        store_col = "__ORDER_STORE__"
-        data[store_col] = pd.NA
 
-    # 訂單 Line 直接使用原始資料，不承接成箱 Line 的篩選結果。
+    # 訂單 Line 直接使用完整原始資料。
+    # 注意：這裡完全不依「成箱箱號」篩選，
+    # 成箱箱號空白、有值都一起納入訂單 Line。
     qty_numeric = pd.to_numeric(data[qty_col], errors="coerce")
     data = data.loc[qty_numeric.isna() | qty_numeric.ne(0)].copy()
 
-    work = data[[order_col, product_col, store_col, qty_col, unit_qty_col]].copy()
-    work.columns = ["ORDER_NO", "PRODUCT", "STORE", "QTY", "UNIT_QTY"]
-    for column in ("ORDER_NO", "PRODUCT", "STORE"):
-        work[column] = work[column].astype("string").str.strip().replace("", pd.NA)
+    work = data[[order_col, store_col, product_col, qty_col, unit_qty_col]].copy()
+    work.columns = ["ORDER_NO", "STORE", "PRODUCT", "QTY", "UNIT_QTY"]
+
+    for column in ("ORDER_NO", "STORE", "PRODUCT"):
+        work[column] = (
+            work[column]
+            .astype("string")
+            .str.strip()
+            .replace("", pd.NA)
+        )
+
     work["QTY"] = pd.to_numeric(work["QTY"], errors="coerce")
     work["UNIT_QTY"] = pd.to_numeric(work["UNIT_QTY"], errors="coerce")
-    work = work.dropna(subset=["ORDER_NO", "PRODUCT"])
+
+    # Line 三個必要鍵缺一不可
+    work = work.dropna(subset=["ORDER_NO", "STORE", "PRODUCT"])
+
     work.insert(0, "來源檔名", source_name)
     return work
 
 
 def _order_line_summary(work: pd.DataFrame) -> pd.DataFrame:
+    """
+    訂單 Line 定義：
+        貨主訂單 + 門市 + 商品 = 1 Line
+
+    例如：
+    - 同一訂單、5 家門市、每家各 1 個商品 = 5 Line
+    - 同一訂單、5 家門市，各門市有多個商品
+      → 依每家門市的不重複商品數逐一累加 Line
+
+    同一個「訂單 + 門市 + 商品」若在原始資料出現多筆，
+    會合併成 1 Line。
+    """
     if work.empty:
         return pd.DataFrame(
-            columns=["ORDER_NO", "PRODUCT", "QTY", "UNIT_QTY", "DIFF_QTY", "完成狀態"]
+            columns=[
+                "ORDER_NO",
+                "STORE",
+                "PRODUCT",
+                "QTY",
+                "UNIT_QTY",
+                "DIFF_QTY",
+                "完成狀態",
+            ]
         )
+
     line = (
-        work.groupby(["ORDER_NO", "PRODUCT"], as_index=False, dropna=False)
-        .agg(QTY=("QTY", "sum"), UNIT_QTY=("UNIT_QTY", "sum"))
+        work.groupby(
+            ["ORDER_NO", "STORE", "PRODUCT"],
+            as_index=False,
+            dropna=False,
+        )
+        .agg(
+            QTY=("QTY", "sum"),
+            UNIT_QTY=("UNIT_QTY", "sum"),
+        )
     )
+
     line["DIFF_QTY"] = line["UNIT_QTY"] - line["QTY"]
-    line["完成狀態"] = line["DIFF_QTY"].gt(0).map({True: "差異", False: "完成"})
+
+    # 沿用目前差異判斷：
+    # UNIT_QTY - QTY > 0 視為差異，其餘視為完成。
+    line["完成狀態"] = line["DIFF_QTY"].gt(0).map(
+        {True: "差異", False: "完成"}
+    )
+
     return line
 
 
@@ -463,14 +515,26 @@ def _order_metrics(work: pd.DataFrame, line: pd.DataFrame) -> dict:
     total = int(len(line))
     difference = int(line["DIFF_QTY"].gt(0).sum()) if total else 0
     complete = total - difference
+
     valid_store = work.dropna(subset=["STORE"]) if not work.empty else work
-    product_store = valid_store.groupby("PRODUCT")["STORE"].nunique() if not valid_store.empty else pd.Series(dtype=int)
+    product_store = (
+        valid_store.groupby("PRODUCT")["STORE"].nunique()
+        if not valid_store.empty
+        else pd.Series(dtype=int)
+    )
+
+    order_count = int(work["ORDER_NO"].nunique()) if not work.empty else 0
+    store_count = int(work["STORE"].nunique()) if not work.empty else 0
+    product_count = int(work["PRODUCT"].nunique()) if not work.empty else 0
+
     return {
         "訂單Line": total,
         "完成Line": complete,
         "差異Line": difference,
         "完成率": complete / total if total else 0.0,
-        "不重複商品數": int(work["PRODUCT"].nunique()) if not work.empty else 0,
+        "不重複訂單數": order_count,
+        "不重複門市數": store_count,
+        "不重複商品數": product_count,
         "品項門市家數合計": int(product_store.sum()),
         "有效明細": int(len(work)),
         "合併重複資料": int(len(work) - total),
@@ -488,7 +552,11 @@ def _render_order_line_results(items: list[dict]) -> None:
         except Exception as exc:
             errors.append((item["name"], str(exc)))
 
-    st.markdown("### 🧾 訂單 Line 結果（成箱箱號空白）")
+    st.markdown("### 🧾 訂單 Line 結果（成箱 + 零散全部資料）")
+    st.caption(
+        "計算方式：不看成箱箱號；成箱與零散全部納入。"
+        "同一貨主訂單 × 同一門市 × 同一商品 = 1 Line。"
+    )
     if not results:
         st.warning("沒有可計算的訂單 Line，請展開下方原因確認來源欄位名稱。")
         if errors:
@@ -507,10 +575,13 @@ def _render_order_line_results(items: list[dict]) -> None:
     columns[2].metric("差異 Line", _fmt_int(metrics["差異Line"]))
     columns[3].metric("訂單 Line 完成率", f'{metrics["完成率"]:.2%}')
     st.caption(
+        f'Line 定義：貨主訂單 + 門市 + 商品｜'
+        f'不重複訂單數：{metrics["不重複訂單數"]:,}｜'
+        f'不重複門市數：{metrics["不重複門市數"]:,}｜'
         f'不重複商品數：{metrics["不重複商品數"]:,}｜'
         f'各品項門市家數合計：{metrics["品項門市家數合計"]:,}｜'
         f'有效原始明細：{metrics["有效明細"]:,}｜'
-        f'合併重複資料：{metrics["合併重複資料"]:,}'
+        f'同訂單同門市同商品合併筆數：{metrics["合併重複資料"]:,}'
     )
 
     # 三套总览指标连续显示在页面上方，明细表随后呈现。
