@@ -1,148 +1,110 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-38_Handover_實際完成line.py
+"""Handover 實際完成 Line：多檔第一張工作表直接合併並統計有效資料列。"""
 
-功能：
-1. 一次選擇多個 Excel 檔案（.xlsx / .xls）
-2. 每個檔案讀取第一個工作表
-3. 將所有 Excel 直接上下合併
-4. 不去重、不排除任何有效資料列
-5. 計算合併後總行數（不含 Excel 欄位標題列）
-6. 顯示各檔案行數與合併總行數
-7. 可將合併結果另存成 Excel
+import io
+from pathlib import Path
 
-目前 14919.xlsx + 14920.xlsx：
-14919 = 6,641 行
-14920 = 4,081 行
-合計 = 10,722 行
-"""
-
-import os
-import sys
 import pandas as pd
-import tkinter as tk
-from tkinter import filedialog, messagebox
+import streamlit as st
+
+from common_ui import card_close, card_open, inject_logistics_theme, set_page
 
 
-def read_excel_first_sheet(file_path):
+st.set_page_config(page_title="Handover | 實際完成 Line", page_icon="✅", layout="wide")
+inject_logistics_theme()
+
+
+def read_excel_first_sheet(uploaded):
     """讀取 Excel 第一個工作表，並移除真正的整列空白資料。"""
-    ext = os.path.splitext(file_path)[1].lower()
+    extension = Path(uploaded.name).suffix.lower()
+    data = io.BytesIO(uploaded.getvalue())
 
-    if ext not in (".xlsx", ".xls"):
-        raise ValueError(f"不支援的檔案格式：{ext}")
+    if extension == ".xlsx":
+        df = pd.read_excel(data, sheet_name=0, engine="openpyxl")
+    elif extension == ".xls":
+        df = pd.read_excel(data, sheet_name=0, engine="xlrd")
+    else:
+        raise ValueError(f"{uploaded.name}：不支援的檔案格式 {extension}")
 
-    # sheet_name=0：只讀第一個工作表
-    df = pd.read_excel(file_path, sheet_name=0)
-
-    # 欄名去除前後空白，避免不同檔案欄名只差空格
-    df.columns = [str(col).strip() for col in df.columns]
-
-    # 僅排除整列完全空白的資料；其他有值的列全部保留
-    df = df.dropna(how="all").reset_index(drop=True)
-
-    return df
+    df.columns = [str(column).strip() for column in df.columns]
+    return df.dropna(how="all").reset_index(drop=True)
 
 
-def main():
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-
-    file_paths = filedialog.askopenfilenames(
-        title="請選擇要合併的 Excel 檔案",
-        filetypes=[
-            ("Excel 檔案", "*.xlsx *.xls"),
-            ("Excel 2007+", "*.xlsx"),
-            ("Excel 97-2003", "*.xls"),
-            ("所有檔案", "*.*"),
-        ],
-    )
-
-    if not file_paths:
-        messagebox.showinfo("未選擇檔案", "沒有選擇任何 Excel 檔案，程式結束。")
-        return
-
+def merge_uploaded_files(uploaded_files):
+    """依第一份檔案的欄位合併；不去重、不排除任何有值資料列。"""
     dataframes = []
-    detail_lines = []
+    file_details = []
     base_columns = None
 
-    try:
-        for file_path in file_paths:
-            df = read_excel_first_sheet(file_path)
+    for uploaded in uploaded_files:
+        df = read_excel_first_sheet(uploaded)
 
-            # 第一份檔案作為欄位基準
-            if base_columns is None:
-                base_columns = list(df.columns)
-            else:
-                # 欄位集合不同時直接提醒，避免錯誤合併
-                if set(df.columns) != set(base_columns):
-                    missing = [c for c in base_columns if c not in df.columns]
-                    extra = [c for c in df.columns if c not in base_columns]
-                    raise ValueError(
-                        f"檔案欄位不一致：{os.path.basename(file_path)}\n"
-                        f"缺少欄位：{missing or '無'}\n"
-                        f"多出欄位：{extra or '無'}"
-                    )
-
-                # 若欄位順序不同，依第一份檔案欄位順序重新排列
-                df = df[base_columns]
-
-            row_count = len(df)
-            detail_lines.append(f"{os.path.basename(file_path)}：{row_count:,} 行")
-            dataframes.append(df)
-
-        # 直接上下合併，不做去重
-        merged_df = pd.concat(dataframes, ignore_index=True)
-        total_rows = len(merged_df)
-
-        result_text = (
-            "各檔案行數：\n"
-            + "\n".join(detail_lines)
-            + f"\n\n合併後總行數：{total_rows:,} 行"
-            + "\n\n計算方式：不去重、不排除有值資料列，僅不計 Excel 標題列與整列完全空白資料。"
-        )
-
-        print("=" * 60)
-        print(result_text)
-        print("=" * 60)
-
-        # 詢問是否儲存合併後 Excel
-        save_choice = messagebox.askyesno(
-            "合併完成",
-            result_text + "\n\n是否要儲存合併後的 Excel？",
-        )
-
-        if save_choice:
-            default_dir = os.path.dirname(file_paths[0])
-            save_path = filedialog.asksaveasfilename(
-                title="儲存合併後 Excel",
-                initialdir=default_dir,
-                initialfile="Handover_實際完成line_合併.xlsx",
-                defaultextension=".xlsx",
-                filetypes=[("Excel 檔案", "*.xlsx")],
-            )
-
-            if save_path:
-                merged_df.to_excel(save_path, index=False)
-                messagebox.showinfo(
-                    "完成",
-                    f"合併檔已儲存：\n{save_path}\n\n總行數：{total_rows:,} 行",
+        if base_columns is None:
+            base_columns = list(df.columns)
+        else:
+            if set(df.columns) != set(base_columns):
+                missing = [column for column in base_columns if column not in df.columns]
+                extra = [column for column in df.columns if column not in base_columns]
+                raise ValueError(
+                    f"檔案欄位不一致：{uploaded.name}；"
+                    f"缺少欄位：{missing or '無'}；多出欄位：{extra or '無'}"
                 )
-            else:
-                messagebox.showinfo("完成", f"未另存檔案。\n合併總行數：{total_rows:,} 行")
+            df = df[base_columns]
 
-    except Exception as e:
-        messagebox.showerror("執行失敗", f"處理檔案時發生錯誤：\n\n{e}")
-        raise
-    finally:
-        root.destroy()
+        file_details.append({"檔名": uploaded.name, "有效資料行數": len(df)})
+        dataframes.append(df)
+
+    return pd.concat(dataframes, ignore_index=True), pd.DataFrame(file_details)
 
 
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as exc:
-        print(f"執行失敗：{exc}", file=sys.stderr)
-        sys.exit(1)
+def build_excel(merged_df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        merged_df.to_excel(writer, index=False, sheet_name="實際完成Line")
+    return output.getvalue()
+
+
+set_page(
+    "Handover | 實際完成 Line",
+    icon="✅",
+    subtitle="多個 Excel 第一張工作表直接合併｜不去重｜僅排除整列完全空白資料。",
+)
+
+card_open("📌 上傳實際完成 Line 明細（可一次多檔）")
+uploaded_files = st.file_uploader(
+    "請選擇一個或多個 Excel 檔案",
+    type=["xlsx", "xls"],
+    accept_multiple_files=True,
+    key="handover_actual_line_38",
+)
+card_close()
+
+if not uploaded_files:
+    st.info("請上傳 Excel 檔案；每個檔案會讀取第一個工作表。")
+    st.stop()
+
+try:
+    merged_df, file_details = merge_uploaded_files(uploaded_files)
+except Exception as exc:
+    st.error(f"處理檔案時發生錯誤：{exc}")
+    st.stop()
+
+st.markdown("### 📊 實際完成 Line 結果")
+st.metric("合併後總行數", f"{len(merged_df):,}")
+st.caption("不去重、不排除有值資料列；僅不計 Excel 標題列與整列完全空白資料。")
+
+with st.expander("📄 各檔案行數", expanded=True):
+    st.dataframe(file_details, use_container_width=True, hide_index=True)
+
+with st.expander("🧾 合併資料明細", expanded=False):
+    st.dataframe(merged_df, use_container_width=True, height=430)
+
+st.download_button(
+    "⬇️ 下載合併後 Excel",
+    data=build_excel(merged_df),
+    file_name="Handover_實際完成line_合併.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    use_container_width=True,
+)

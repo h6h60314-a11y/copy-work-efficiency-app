@@ -28,6 +28,12 @@ ITEMS = (
         "彙整越庫應作業／實際作業 PCS、Line 完成數與完成率。",
         "pages/37_Handover_越庫作業.py",
     ),
+    HomeNavItem(
+        "✅",
+        "實際完成 Line",
+        "合併多個 Excel 的有效資料列，統計各檔案與整體實際完成 Line。",
+        "pages/38_Handover_實際完成line.py",
+    ),
 )
 
 

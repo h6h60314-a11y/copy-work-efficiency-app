@@ -55,6 +55,12 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
                 "handover-crossdock-37",
                 "🔄",
             ),
+            PageSpec(
+                "pages/38_Handover_實際完成line.py",
+                "實際完成 Line",
+                "handover-actual-line-38",
+                "✅",
+            ),
         ),
     ),
     SectionSpec(
