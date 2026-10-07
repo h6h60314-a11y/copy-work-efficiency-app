@@ -713,9 +713,15 @@ EXCLUDE_PATTERN = re.compile("|".join(map(re.escape, EXCLUDE_SUBSTRINGS)), re.IG
 PIVOT1_BASE_ROWS = ["儲位類型", "儲位", "商品"]
 PIVOT1_OPTIONAL = ["揀貨批次號"]
 
-# 總揀筆數定義（與「總揀作業效能」相同）
-# 同一個「儲位 + 商品 + 揀貨人 + 揀貨完成時間」完全相同，只算 1 筆。
-# 注意：總揀筆數與應作業 Line 為兩套獨立指標，不再互相等同。
+# 總揀 / 實際揀貨筆數定義
+# 1) 總揀筆數：
+#    同一個「儲位 + 商品 + 揀貨人 + 揀貨完成時間」完全相同，只算 1 筆。
+#    揀貨人或揀貨完成時間即使空白，仍保留並計入總揀筆數。
+# 2) 實際揀貨筆數：
+#    只有「揀貨人有值 + 揀貨完成時間有值」才視為真的發生揀貨動作，
+#    再依相同四欄去重。
+# 3) 未實際揀貨筆數 = 總揀筆數 - 實際揀貨筆數。
+# 注意：以上與應作業 Line 為不同指標。
 TOTAL_PICK_KEYS = ["儲位", "商品", "揀貨人", "揀貨完成時間"]
 
 # 應揀 / 實揀欄位配對，依序優先判斷
@@ -825,11 +831,14 @@ def build_pivot2(
       揀貨批次號（若有） + 儲位類型 + 儲位 + 商品
 
     總揀筆數：
-      與「總揀作業效能」相同，以
-      儲位 + 商品 + 揀貨人 + 揀貨完成時間
-      完全相同視為同一次揀貨，只算 1 筆。
+      以 儲位 + 商品 + 揀貨人 + 揀貨完成時間 去重。
+      揀貨人或揀貨完成時間空白仍計入總揀筆數。
 
-      總揀筆數與應作業 Line 完全獨立，不再用應作業 Line 代替。
+    實際揀貨筆數：
+      僅揀貨人與揀貨完成時間皆有值者才算實際揀貨動作，
+      再依相同四欄去重。
+
+      總揀 / 實際揀貨筆數與應作業 Line 完全獨立。
 
     應作業Line：每個不重複 Line 算 1。
 
@@ -862,43 +871,76 @@ def build_pivot2(
         raise ValueError("樞紐所需欄位不足，至少要有：儲位、儲位類型。")
 
     # --------------------------------------------------
-    # ① 總揀筆數：獨立依揀貨事件去重
+    # ① 總揀筆數 / 實際揀貨筆數：獨立依揀貨事件去重
     # --------------------------------------------------
     missing_pick_cols = [c for c in TOTAL_PICK_KEYS if c not in df_tmp.columns]
     if missing_pick_cols:
         raise ValueError(
             "總揀筆數計算缺少必要欄位：" + "、".join(missing_pick_cols)
-            + "。總揀筆數需依『儲位 + 商品 + 揀貨人 + 揀貨完成時間』計算。"
+            + "。需依『儲位 + 商品 + 揀貨人 + 揀貨完成時間』計算。"
         )
 
     pick_events = df_tmp.copy()
+
+    # 文字欄先清理。揀貨人空白保留為 NA，不直接刪除。
     for c in ["儲位", "商品", "揀貨人"]:
         pick_events[c] = pick_events[c].astype("string").str.strip()
         pick_events[c] = pick_events[c].replace("", pd.NA)
 
-    # 與原總揀作業效能一致：完成時間先轉 datetime，無法解析者不納入總揀筆數。
+    # 完成時間無法解析時轉為 NaT。
+    # 重要：NaT 仍會保留在「總揀筆數」，只是不會計入「實際揀貨筆數」。
     pick_events["揀貨完成時間"] = pd.to_datetime(
         pick_events["揀貨完成時間"], errors="coerce"
     )
-    pick_events = pick_events.dropna(subset=TOTAL_PICK_KEYS)
+
+    # 儲位、商品是辨識作業事件的基本欄位；兩者有值才納入事件統計。
+    # 揀貨人 / 完成時間可以空白。
+    pick_events = pick_events.dropna(subset=["儲位", "商品"])
 
     # 同一「儲位 + 商品 + 揀貨人 + 揀貨完成時間」只保留一次。
-    # 若完全相同事件剛好跨不同揀貨批次重複出現，依原始順序保留第一筆，
-    # 避免後續依批次彙總時再次重複計數。
     pick_events = pick_events.drop_duplicates(subset=TOTAL_PICK_KEYS, keep="first")
 
     group_keys = ["儲位類型"] + (
         ["揀貨批次號"] if "揀貨批次號" in df_tmp.columns else []
     )
 
+    # 總揀筆數：包含揀貨人或完成時間空白的作業事件。
     if pick_events.empty:
-        pick_counts = pd.DataFrame(columns=group_keys + ["總揀筆數"])
+        pick_counts = pd.DataFrame(
+            columns=group_keys + ["總揀筆數", "實際揀貨筆數", "未實際揀貨筆數"]
+        )
     else:
-        pick_counts = (
+        total_counts = (
             pick_events.groupby(group_keys, dropna=False)
             .size()
             .rename("總揀筆數")
             .reset_index()
+        )
+
+        # 實際揀貨動作：揀貨人及完成時間都必須有值。
+        actual_events = pick_events[
+            pick_events["揀貨人"].notna()
+            & pick_events["揀貨完成時間"].notna()
+        ].copy()
+
+        if actual_events.empty:
+            actual_counts = pd.DataFrame(columns=group_keys + ["實際揀貨筆數"])
+        else:
+            actual_counts = (
+                actual_events.groupby(group_keys, dropna=False)
+                .size()
+                .rename("實際揀貨筆數")
+                .reset_index()
+            )
+
+        pick_counts = total_counts.merge(actual_counts, on=group_keys, how="left")
+        pick_counts["實際揀貨筆數"] = (
+            pd.to_numeric(pick_counts["實際揀貨筆數"], errors="coerce")
+            .fillna(0)
+            .astype(int)
+        )
+        pick_counts["未實際揀貨筆數"] = (
+            pick_counts["總揀筆數"] - pick_counts["實際揀貨筆數"]
         )
 
     # --------------------------------------------------
@@ -933,10 +975,19 @@ def build_pivot2(
         .reset_index()
     )
 
-    # 把獨立計算出的總揀筆數併回顯示表；沒有揀貨事件則為 0。
+    # 把獨立計算出的總揀 / 實際揀貨筆數併回顯示表。
     pivot2 = pivot2.merge(pick_counts, on=group_keys, how="outer")
 
-    for c in ["總揀筆數", "應作業Line", "實際完成Line", "未完成Line"]:
+    for c in [
+        "總揀筆數",
+        "實際揀貨筆數",
+        "未實際揀貨筆數",
+        "應作業Line",
+        "實際完成Line",
+        "未完成Line",
+    ]:
+        if c not in pivot2.columns:
+            pivot2[c] = 0
         pivot2[c] = pivot2[c].fillna(0).astype(int)
     for c in ["應揀PCS", "實際揀PCS"]:
         pivot2[c] = pd.to_numeric(pivot2[c], errors="coerce").fillna(0.0)
@@ -1074,15 +1125,23 @@ def show_type_totals_as_text(df_type_total: pd.DataFrame):
         st.caption("（無資料）")
         return
 
-    # 原本顯示：類型標題 + 大字總揀筆數
+    # 總揀筆數包含揀貨人/完成時間空白的作業事件；
+    # 實際揀貨筆數只計真的有揀貨人與完成時間的事件。
     for _, r in df_type_total.iterrows():
         type_name = r.get("儲位類型", "")
-        total_pick = int(r.get("總揀筆數", r.get("應作業Line", 0)))
+        total_pick = int(r.get("總揀筆數", 0))
+        actual_pick = int(r.get("實際揀貨筆數", 0))
+        no_action_pick = int(r.get("未實際揀貨筆數", max(total_pick - actual_pick, 0)))
+
         st.markdown(f"**{_label_type_as_total_pick(type_name)}**")
         st.markdown(
             f"<div style='font-size:28px; font-weight:900; line-height:1.1; "
-            f"margin-top:2px; margin-bottom:14px;'>{total_pick:,}</div>",
+            f"margin-top:2px; margin-bottom:6px;'>{total_pick:,}</div>",
             unsafe_allow_html=True,
+        )
+        st.caption(
+            f"實際揀貨筆數：{actual_pick:,} ｜ "
+            f"未實際揀貨筆數：{no_action_pick:,}"
         )
 
     # 新增 Line 完成概況，放在總揀筆數下方
@@ -1442,6 +1501,8 @@ def _render_loose_total_workflow(batch_files, map_file):
             should_line = int(pivot2["應作業Line"].sum())
             done_line = int(pivot2["實際完成Line"].sum())
             undone_line = int(pivot2["未完成Line"].sum())
+            actual_pick_count = int(pivot2["實際揀貨筆數"].sum())
+            no_action_pick_count = int(pivot2["未實際揀貨筆數"].sum())
             line_rate = done_line / should_line if should_line else 0.0
 
             summary_rows.append(
@@ -1450,6 +1511,8 @@ def _render_loose_total_workflow(batch_files, map_file):
                     "子集": tag,
                     "分組鍵": grp_desc,
                     "總揀筆數": total_count,
+                    "實際揀貨筆數": actual_pick_count,
+                    "未實際揀貨筆數": no_action_pick_count,
                     "應作業Line": should_line,
                     "實際完成Line": done_line,
                     "未完成Line": undone_line,
@@ -1471,6 +1534,8 @@ def _render_loose_total_workflow(batch_files, map_file):
         "子集",
         "分組鍵",
         "總揀筆數",
+        "實際揀貨筆數",
+        "未實際揀貨筆數",
         "應作業Line",
         "實際完成Line",
         "未完成Line",
@@ -1497,6 +1562,8 @@ def _render_loose_total_workflow(batch_files, map_file):
             + (["揀貨批次號"] if "揀貨批次號" in df_detail_all.columns else [])
             + [
                 "總揀筆數",
+                "實際揀貨筆數",
+                "未實際揀貨筆數",
                 "應作業Line",
                 "實際完成Line",
                 "未完成Line",
@@ -1516,6 +1583,8 @@ def _render_loose_total_workflow(batch_files, map_file):
                 "子集",
                 "儲位類型",
                 "總揀筆數",
+                "實際揀貨筆數",
+                "未實際揀貨筆數",
                 "應作業Line",
                 "實際完成Line",
                 "未完成Line",
@@ -1537,6 +1606,8 @@ def _render_loose_total_workflow(batch_files, map_file):
             df_detail_all.groupby("儲位類型", dropna=False)
             .agg(
                 總揀筆數=("總揀筆數", "sum"),
+                實際揀貨筆數=("實際揀貨筆數", "sum"),
+                未實際揀貨筆數=("未實際揀貨筆數", "sum"),
                 應作業Line=("應作業Line", "sum"),
                 實際完成Line=("實際完成Line", "sum"),
                 未完成Line=("未完成Line", "sum"),
@@ -1558,6 +1629,8 @@ def _render_loose_total_workflow(batch_files, map_file):
             columns=[
                 "儲位類型",
                 "總揀筆數",
+                "實際揀貨筆數",
+                "未實際揀貨筆數",
                 "應作業Line",
                 "實際完成Line",
                 "未完成Line",
