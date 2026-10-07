@@ -61,6 +61,12 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
                 "handover-actual-line-38",
                 "✅",
             ),
+            PageSpec(
+                "pages/39_Handover_揀貨差異line.py",
+                "揀貨差異 Line",
+                "handover-picking-difference-line-39",
+                "📍",
+            ),
         ),
     ),
     SectionSpec(

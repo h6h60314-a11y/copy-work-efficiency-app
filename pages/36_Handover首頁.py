@@ -34,6 +34,12 @@ ITEMS = (
         "合併多個 Excel 的有效資料列，統計各檔案與整體實際完成 Line。",
         "pages/38_Handover_實際完成line.py",
     ),
+    HomeNavItem(
+        "📍",
+        "揀貨差異 Line",
+        "合併多批次揀貨差異明細，分析完成、未完成與待確認 Line。",
+        "pages/39_Handover_揀貨差異line.py",
+    ),
 )
 
 
