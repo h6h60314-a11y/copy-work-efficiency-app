@@ -18,6 +18,7 @@ import streamlit as st
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.page import PageMargins
+from openpyxl.worksheet.pagebreak import Break
 
 try:
     from common_ui import inject_logistics_theme, set_page, card_open, card_close
@@ -232,9 +233,9 @@ def export_workbook(rows, info):
         cell.fill = PatternFill("solid", fgColor="E8EDF2")
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
-    ws.row_dimensions[1].height = 31
+    ws.row_dimensions[1].height = 25
     for row in ws.iter_rows(min_row=2, max_col=9):
-        ws.row_dimensions[row[0].row].height = 34
+        ws.row_dimensions[row[0].row].height = 23
         for col_index, cell in enumerate(row, 1):
             cell.font = Font(name="Microsoft JhengHei", size=9)
             cell.alignment = Alignment(horizontal="center" if col_index <= 4 else "left",
@@ -255,15 +256,21 @@ def export_workbook(rows, info):
     ws.print_title_rows = "1:1"
     ws.print_area = f"A1:I{max(ws.max_row, 1)}"
     # 頁首預留兩行高度；頁首會在列印預覽及紙張上顯示，普通檢視不會出現。
-    ws.page_margins = PageMargins(left=0.20, right=0.20, top=0.72, bottom=0.40,
-                                   header=0.20, footer=0.18)
+    ws.page_margins = PageMargins(left=0.20, right=0.20, top=0.70, bottom=0.48,
+                                   header=0.25, footer=0.23)
     ws.oddHeader.left.text = "盤點日期：\n盤點棚別：" + str(info["指定棚別"])
-    ws.oddHeader.center.text = "開始時間："
-    ws.oddHeader.right.text = "結束時間："
+    ws.oddHeader.center.text = "開始時間：____________"
+    ws.oddHeader.right.text = "結束時間：____________"
     ws.oddHeader.left.size = 10
     ws.oddHeader.center.size = 10
     ws.oddHeader.right.size = 10
     ws.oddFooter.center.text = "第 &P 頁，共 &N 頁"
+    ws.oddFooter.center.size = 10
+
+    # 第 1 列為表頭；每頁固定 20 筆，後續頁面重印表頭。
+    # 在第 21、41、61... 筆資料之後插入手動分頁線。
+    for record_count in range(20, len(rows), 20):
+        ws.row_breaks.append(Break(id=record_count + 1))
 
     if info["棚別衝突"] or info["找不到的棚別"]:
         audit = wb.create_sheet("待確認")
