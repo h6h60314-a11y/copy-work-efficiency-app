@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""40_客訂盤點：選擇客訂(可多檔)、庫存、儲位，自動產生盤點明細。
-安裝：pip install pandas openpyxl xlrd
-啟動：python 40_客訂盤點.py
-命令列：python 40_客訂盤點.py --orders a.xlsx b.xls --stock 庫存.xls --locations 儲位.xls --output 盤點.xlsx
-"""
+"""選擇客訂（可多檔）、庫存與儲位 Excel，自動產生客訂盤點明細。"""
 from __future__ import annotations
-import argparse
 import io
-from pathlib import Path
 from datetime import datetime, date
 
 import pandas as pd
+import streamlit as st
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
+
+from common_ui import card_close, card_open, inject_logistics_theme, set_page
 
 HEADERS = ['商品號','實際數量','實際效期','儲位','國際條碼','條碼2','全名','數量','已試算','已揀取','Canuseqty','商品效期','棚別']
 
@@ -26,13 +23,16 @@ def norm(v):
     return s[:-2] if s.endswith('.0') and s[:-2].isdigit() else s
 
 
-def load_excel(path):
-    path = Path(path)
-    if path.suffix.lower() not in ('.xls', '.xlsx'):
-        raise ValueError(f'不支援的格式：{path.name}，請使用 .xls/.xlsx')
-    engine = 'xlrd' if path.suffix.lower() == '.xls' else 'openpyxl'
+def load_excel(source):
+    name = getattr(source, 'name', str(source))
+    suffix = name.lower().rsplit('.', 1)[-1] if '.' in name else ''
+    if suffix not in ('xls', 'xlsx'):
+        raise ValueError(f'不支援的格式：{name}，請使用 .xls/.xlsx')
+    engine = 'xlrd' if suffix == 'xls' else 'openpyxl'
+    if hasattr(source, 'seek'):
+        source.seek(0)
     try:
-        frame = pd.read_excel(path, dtype=str, engine=engine, keep_default_na=False)
+        frame = pd.read_excel(source, dtype=str, engine=engine, keep_default_na=False)
     except ImportError as ex:
         raise RuntimeError('缺少 Excel 讀取套件，請執行：pip install pandas openpyxl xlrd') from ex
     frame.columns = [str(c).strip() for c in frame.columns]
@@ -131,8 +131,6 @@ def save_report(rows, info, output):
             w.append(['無棚別儲位', item, '儲位明細無法對應棚別'])
         for k, size in [('A', 20), ('B', 25), ('C', 45)]:
             w.column_dimensions[k].width = size
-    output = Path(output)
-    output.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output)
     return output
 
@@ -150,47 +148,68 @@ def execute(order_paths, stock_path, location_path, output_path):
     return info
 
 
-def gui():
-    import tkinter as tk
-    from tkinter import filedialog, messagebox
-    root = tk.Tk()
-    root.withdraw()
-    types = [('Excel 檔案', '*.xlsx *.xls'), ('所有檔案', '*.*')]
-    try:
-        order_paths = filedialog.askopenfilenames(title='① 選取客訂未出明細（可選多檔）', filetypes=types)
-        if not order_paths:
-            return
-        stock = filedialog.askopenfilename(title='② 選取庫存明細', filetypes=types)
-        if not stock:
-            return
-        location = filedialog.askopenfilename(title='③ 選取儲位明細', filetypes=types)
-        if not location:
-            return
-        name = f'客訂盤點_{datetime.now():%Y%m%d_%H%M}.xlsx'
-        output = filedialog.asksaveasfilename(title='④ 儲存盤點明細', defaultextension='.xlsx',
-                    initialfile=name, filetypes=[('Excel 活頁簿', '*.xlsx')])
-        if not output:
-            return
-        info = execute(order_paths, stock, location, output)
-        messagebox.showinfo('盤點明細完成', f"輸出完成：{output}\n商品：{info['商品數']} 個\n盤點：{info['盤點筆數']} 筆\n無庫存商品：{len(info['無庫存商品'])} 個\n缺棚別儲位：{len(info['無棚別儲位'])} 個")
-    except Exception as ex:
-        messagebox.showerror('產生失敗', str(ex))
-        raise
-    finally:
-        root.destroy()
+def build_report(order_files, stock_file, location_file):
+    orders = [load_excel(file) for file in order_files]
+    stock = load_excel(stock_file)
+    locations = load_excel(location_file)
+    rows, info = make_records(orders, stock, locations)
+    if not rows:
+        raise ValueError('找不到客訂商品對應的庫存紀錄，請確認來源檔案')
+
+    output = io.BytesIO()
+    save_report(rows, info, output)
+    output.seek(0)
+    return output.getvalue(), info
+
+
+def main():
+    inject_logistics_theme()
+    set_page('客訂盤點', icon='🔎', subtitle='上傳客訂、庫存與儲位明細，自動產生盤點 Excel。')
+
+    card_open('🔎 客訂盤點明細產生')
+    st.caption('支援 .xlsx 與 .xls；客訂未出明細可一次上傳多份。')
+
+    order_files = st.file_uploader(
+        '① 客訂未出明細（可多選）',
+        type=['xlsx', 'xls'],
+        accept_multiple_files=True,
+    )
+    stock_file = st.file_uploader('② 庫存明細', type=['xlsx', 'xls'])
+    location_file = st.file_uploader('③ 儲位明細', type=['xlsx', 'xls'])
+
+    ready = bool(order_files and stock_file and location_file)
+    if st.button('開始產生盤點明細', type='primary', use_container_width=True, disabled=not ready):
+        try:
+            report, info = build_report(order_files, stock_file, location_file)
+            st.session_state['custom_order_inventory_report'] = report
+            st.session_state['custom_order_inventory_info'] = info
+        except Exception as ex:
+            st.session_state.pop('custom_order_inventory_report', None)
+            st.session_state.pop('custom_order_inventory_info', None)
+            st.error(f'處理失敗：{ex}')
+
+    report = st.session_state.get('custom_order_inventory_report')
+    info = st.session_state.get('custom_order_inventory_info')
+    if report and info:
+        st.success('客訂盤點明細已完成。')
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric('客訂商品', info['商品數'])
+        col2.metric('盤點筆數', info['盤點筆數'])
+        col3.metric('無庫存商品', len(info['無庫存商品']))
+        col4.metric('缺棚別儲位', len(info['無棚別儲位']))
+
+        st.download_button(
+            '下載客訂盤點 Excel',
+            data=report,
+            file_name=f'客訂盤點_{datetime.now():%Y%m%d_%H%M}.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            use_container_width=True,
+        )
+    elif not ready:
+        st.info('請依序上傳客訂未出明細、庫存明細與儲位明細。')
+
+    card_close()
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='客訂盤點明細產生工具')
-    parser.add_argument('--orders', nargs='+', help='一份以上的客訂 Excel')
-    parser.add_argument('--stock', help='庫存 Excel')
-    parser.add_argument('--locations', help='儲位 Excel')
-    parser.add_argument('--output', help='輸出路徑')
-    args = parser.parse_args()
-    if any([args.orders, args.stock, args.locations, args.output]):
-        if not all([args.orders, args.stock, args.locations, args.output]):
-            parser.error('命令列模式必須同時提供 --orders --stock --locations --output')
-        info = execute(args.orders, args.stock, args.locations, args.output)
-        print('完成：', args.output, info)
-    else:
-        gui()
+    main()
