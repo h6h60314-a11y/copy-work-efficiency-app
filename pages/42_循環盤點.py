@@ -214,39 +214,26 @@ def build_records(stock, locations, zones, include_empty=False):
 
 
 def export_workbook(rows, info):
-    """按照現場紙本盤點單：9欄、空白實際欄、A4橫向、每頁重印表頭。"""
+    """9 欄盤點表；盤點日期、起訖時間、棚別僅在列印頁首，不佔工作表儲存格。"""
     wb = Workbook()
     ws = wb.active
     ws.title = "循環盤點單"
     ws.sheet_view.showGridLines = False
-    ws.merge_cells("B1:C1")
-    ws.merge_cells("E1:F1")
-    ws["A1"] = "盤點日期："
-    ws["D1"] = "開始時間："
-    ws["G1"] = "結束時間："
-    ws["A2"] = "盤點棚別："
-    ws["B2"] = info["指定棚別"]
-    header_row = 3
+
+    # 第一列就是表格標題；不得插入任何日期／時間／棚別儲存格。
     ws.append(OUTPUT_COLUMNS)
-    # merged row 1/2 已存在，append 將從第 4 列開始
     for number, rec in enumerate(rows, 1):
         ws.append([number if col == "序號" else "" if col in ("實際商品", "實際效期")
                    else rec.get(col, "") for col in OUTPUT_COLUMNS])
-    ws.freeze_panes = "C4"
+    ws.freeze_panes = "C2"
     border_side = Side(style="thin", color="666666")
-    for row in ws.iter_rows(min_row=1, max_row=2, max_col=9):
-        for cell in row:
-            cell.font = Font(name="Microsoft JhengHei", size=10, color="333333")
-            cell.alignment = Alignment(vertical="center")
-    for cell in ws[header_row]:
+    for cell in ws[1]:
         cell.font = Font(name="Microsoft JhengHei", size=10, bold=True)
         cell.fill = PatternFill("solid", fgColor="E8EDF2")
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
-    ws.row_dimensions[1].height = 25
-    ws.row_dimensions[2].height = 24
-    ws.row_dimensions[3].height = 31
-    for row in ws.iter_rows(min_row=4, max_col=9):
+    ws.row_dimensions[1].height = 31
+    for row in ws.iter_rows(min_row=2, max_col=9):
         ws.row_dimensions[row[0].row].height = 34
         for col_index, cell in enumerate(row, 1):
             cell.font = Font(name="Microsoft JhengHei", size=9)
@@ -258,18 +245,25 @@ def export_workbook(rows, info):
     for col, width in {"A": 7, "B": 13, "C": 12, "D": 13, "E": 16,
                        "F": 15, "G": 20, "H": 20, "I": 48}.items():
         ws.column_dimensions[col].width = width
+
     ws.print_options.horizontalCentered = True
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
-    ws.print_title_rows = "1:3"
-    ws.print_area = f"A1:I{max(ws.max_row, 3)}"
-    ws.page_margins = PageMargins(left=0.20, right=0.20, top=0.35, bottom=0.35,
-                                   header=0.15, footer=0.18)
+    ws.print_title_rows = "1:1"
+    ws.print_area = f"A1:I{max(ws.max_row, 1)}"
+    # 頁首預留兩行高度；頁首會在列印預覽及紙張上顯示，普通檢視不會出現。
+    ws.page_margins = PageMargins(left=0.20, right=0.20, top=0.72, bottom=0.40,
+                                   header=0.20, footer=0.18)
+    ws.oddHeader.left.text = "盤點日期：\n盤點棚別：" + str(info["指定棚別"])
+    ws.oddHeader.center.text = "開始時間："
+    ws.oddHeader.right.text = "結束時間："
+    ws.oddHeader.left.size = 10
+    ws.oddHeader.center.size = 10
+    ws.oddHeader.right.size = 10
     ws.oddFooter.center.text = "第 &P 頁，共 &N 頁"
-    ws.oddFooter.right.text = "棚別：" + info["指定棚別"]
 
     if info["棚別衝突"] or info["找不到的棚別"]:
         audit = wb.create_sheet("待確認")
