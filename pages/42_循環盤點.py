@@ -229,15 +229,15 @@ def export_workbook(rows, info):
     ws.freeze_panes = "C2"
     border_side = Side(style="thin", color="666666")
     for cell in ws[1]:
-        cell.font = Font(name="Microsoft JhengHei", size=10, bold=True)
+        cell.font = Font(name="微軟正黑體", size=12, bold=True)
         cell.fill = PatternFill("solid", fgColor="E8EDF2")
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
-    ws.row_dimensions[1].height = 25
+    ws.row_dimensions[1].height = 34
     for row in ws.iter_rows(min_row=2, max_col=9):
-        ws.row_dimensions[row[0].row].height = 23
+        ws.row_dimensions[row[0].row].height = 32
         for col_index, cell in enumerate(row, 1):
-            cell.font = Font(name="Microsoft JhengHei", size=9)
+            cell.font = Font(name="微軟正黑體", size=12)
             cell.alignment = Alignment(horizontal="center" if col_index <= 4 else "left",
                                        vertical="center", wrap_text=(col_index == 9))
             cell.border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
@@ -261,11 +261,13 @@ def export_workbook(rows, info):
     ws.oddHeader.left.text = "盤點日期：\n盤點棚別：" + str(info["指定棚別"])
     ws.oddHeader.center.text = "開始時間：____________"
     ws.oddHeader.right.text = "結束時間：____________"
-    ws.oddHeader.left.size = 10
-    ws.oddHeader.center.size = 10
-    ws.oddHeader.right.size = 10
+    ws.oddHeader.left.size = 12
+    ws.oddHeader.center.size = 12
+    ws.oddHeader.right.size = 12
     ws.oddFooter.center.text = "第 &P 頁，共 &N 頁"
-    ws.oddFooter.center.size = 10
+    ws.oddFooter.center.size = 12
+    for section in (ws.oddHeader.left, ws.oddHeader.center, ws.oddHeader.right, ws.oddFooter.center):
+        section.font = "微軟正黑體"
 
     # 第 1 列為表頭；每頁固定 20 筆，後續頁面重印表頭。
     # 在第 21、41、61... 筆資料之後插入手動分頁線。
