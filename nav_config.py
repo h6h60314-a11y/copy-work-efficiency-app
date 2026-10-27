@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -74,10 +72,11 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
         (
             PageSpec("pages/31_企劃課首頁.py", "企劃課首頁", "planning-home", "🧭"),
             PageSpec("pages/32_拉單明細.py", "拉單明細", "planning-pull-detail-32", "📋"),
-            PageSpec("pages/34_月出貨量與產力.py","月出貨量與產力","planning-monthly-shipping-productivity-34","📊"),
+            PageSpec("pages/34_月出貨量與產力.py", "月出貨量與產力", "planning-monthly-shipping-productivity-34", "📊"),
             PageSpec("pages/40_客訂盤點.py", "客訂盤點", "planning-custom-order-inventory-40", "🔎"),
             PageSpec("pages/41_空儲位盤點.py", "空儲位盤點", "planning-empty-slot-inventory-41", "📍"),
             PageSpec("pages/42_循環盤點.py", "循環盤點", "planning-cycle-count-42", "📋"),
+            PageSpec("pages/43_出貨明細.py", "出貨明細", "planning-shipping-detail-43", "🚚"),
         ),
     ),
     SectionSpec(
@@ -85,7 +84,7 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
         (
             PageSpec("pages/7_出貨課首頁.py", "出貨課首頁", "outbound-home", "🚚"),
             PageSpec("pages/6_撥貨差異.py", "撥貨差異", "outbound-transfer-diff", "🚚"),
-            PageSpec("pages/33_播貨短少差異明細.py","播貨短少差異明細","shortage-pick-diff","📍",),
+            PageSpec("pages/33_播貨短少差異明細.py", "播貨短少差異明細", "shortage-pick-diff", "📍"),
             PageSpec("pages/23_採品門市差異量.py", "採品門市差異量", "outbound-vendor-store-diff-23", "📦"),
             PageSpec("pages/24_出貨作業線產能.py", "出貨作業線產能", "outbound-line-productivity-24", "🚚"),
             PageSpec("pages/29_各時段作業效率.py", "各時段作業效率", "outbound-hourly-efficiency-29", "⏱️"),
