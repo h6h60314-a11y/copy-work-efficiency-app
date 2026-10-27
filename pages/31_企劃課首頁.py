@@ -1,5 +1,6 @@
 import streamlit as st
 
+
 from common_ui import (
     HomeNavItem,
     card_close,
@@ -45,6 +46,12 @@ ITEMS = (
         "循環盤點",
         "依指定棚別比對庫存與儲位明細，產生 A4 可列印盤點單。",
         "pages/42_循環盤點.py",
+    ),
+    HomeNavItem(
+        "🚚",
+        "出貨明細",
+        "上傳每日出貨 TXT，自動篩選並依站所產生出貨明細 Excel。",
+        "pages/43_出貨明細.py",
     ),
 )
 
