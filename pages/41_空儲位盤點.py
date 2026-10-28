@@ -17,7 +17,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from common_ui import card_close, card_open, inject_logistics_theme, set_page
 
 
-EXCLUDED_RANGES = ((1, 20), (31, 38), (61, 81), (401, 403))
+EXCLUDED_RANGES = ((1, 20), (31, 38), (61, 81), (401, 404))
 
 
 def clean(value):
@@ -224,6 +224,7 @@ def filter_slots(empty_filename, empty_data, detail_filename, detail_data):
             excluded += 1
         else:
             kept.append((location, str(bay_number).zfill(3)))
+    kept.sort(key=lambda item: (int(item[1]), item[0]))
     info = {
         '原始資料列': len(source_rows) - 1,
         '成功比對': matched,
@@ -333,7 +334,7 @@ def main():
         subtitle='上傳空儲位清單與儲位明細，帶入棚別後產出盤點 Excel。',
     )
     card_open('空儲位盤點')
-    st.info('自動排除：001–020 棚、031–038 棚、061–081 棚、401–403 棚')
+    st.info('自動排除：001–020 棚、031–038 棚、061–081 棚、401–404 棚')
     first_column, second_column, third_column = st.columns(3)
     with first_column:
         empty_file = st.file_uploader(
