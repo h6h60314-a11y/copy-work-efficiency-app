@@ -215,7 +215,7 @@ def filter_slots(empty_filename, empty_data, detail_filename, detail_data):
         if any(low <= bay_number <= high for low, high in EXCLUDED_RANGES):
             excluded += 1
         else:
-            kept.append(location)
+            kept.append((location, str(bay_number).zfill(3)))
     info = {
         '原始資料列': len(source_rows) - 1,
         '成功比對': matched,
@@ -262,17 +262,31 @@ def export_excel(slots, review):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = '空儲位盤點'
-    sheet.append(['儲位', '是否', '儲位', '是否'])
+    sheet.append(['儲位', '棚別', '是否', '儲位', '棚別', '是否'])
     midpoint = (len(slots) + 1) // 2
     for index in range(midpoint):
+        left_location, left_bay = slots[index]
+        if midpoint + index < len(slots):
+            right_location, right_bay = slots[midpoint + index]
+        else:
+            right_location, right_bay = '', ''
         sheet.append([
-            slots[index],
+            left_location,
+            left_bay,
             '',
-            slots[midpoint + index] if midpoint + index < len(slots) else '',
+            right_location,
+            right_bay,
             '',
         ])
     sheet.freeze_panes = 'A2'
-    for column, width in {'A': 22, 'B': 12, 'C': 22, 'D': 12}.items():
+    for column, width in {
+        'A': 20,
+        'B': 12,
+        'C': 10,
+        'D': 20,
+        'E': 12,
+        'F': 10,
+    }.items():
         sheet.column_dimensions[column].width = width
     edge = Side(style='thin', color='BEC6CE')
     for row in sheet:
@@ -308,7 +322,7 @@ def main():
     set_page(
         '空儲位盤點',
         icon='📍',
-        subtitle='上傳空儲位清單與儲位明細，比對棚別後產出盤點 Excel。',
+        subtitle='上傳空儲位清單與儲位明細，帶入棚別後產出盤點 Excel。',
     )
     card_open('空儲位盤點')
     st.info('自動排除：001–020 棚、031–038 棚、061–081 棚、401–403 棚')
@@ -341,7 +355,11 @@ def main():
                 detail_file.getvalue(),
             )
             locked_slots = read_locked_slots(locked_file.getvalue())
-            kept_slots = [slot for slot in slots if slot.upper() not in locked_slots]
+            kept_slots = [
+                (location, bay)
+                for location, bay in slots
+                if location.upper() not in locked_slots
+            ]
             info['排除鎖庫儲位'] = len(slots) - len(kept_slots)
             info['保留儲位'] = len(kept_slots)
             if not kept_slots:
