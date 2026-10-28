@@ -27,6 +27,14 @@ def clean(value):
     return text[:-2] if text.endswith('.0') and text[:-2].isdigit() else text
 
 
+def normalize_bay(value):
+    """統一 053、53、053棚等棚別格式；非數字代碼維持文字。"""
+    text = clean(value).replace('棚', '').strip()
+    if text.isdigit():
+        return str(int(text)).zfill(3)
+    return text.upper()
+
+
 def biff_record(stream):
     first = stream.read(1)
     if not first:
@@ -166,7 +174,7 @@ def filter_slots(empty_filename, empty_data, detail_filename, detail_data):
     location_to_bay = {}
     for detail_row_number, row in enumerate(detail_rows[1:], start=2):
         location = clean(row.get(detail_location_column))
-        bay = clean(row.get(detail_bay_column))
+        bay = normalize_bay(row.get(detail_bay_column))
         if not location and not bay:
             continue
         if not location:
@@ -201,12 +209,12 @@ def filter_slots(empty_filename, empty_data, detail_filename, detail_data):
             )
             continue
         matched += 1
-        if source_bay and clean(source_bay).zfill(3) != clean(detail_bay).zfill(3):
+        if source_bay and normalize_bay(source_bay) != normalize_bay(detail_bay):
             review.append(
                 ('空儲位清單', source_row_number, location, source_bay, detail_bay, '棚別不一致；採用儲位明細')
             )
         try:
-            bay_number = int(detail_bay)
+            bay_number = int(normalize_bay(detail_bay))
         except (ValueError, TypeError):
             review.append(
                 ('空儲位清單', source_row_number, location, source_bay, detail_bay, '棚別無法辨識')
