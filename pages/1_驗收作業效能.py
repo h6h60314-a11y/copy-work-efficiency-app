@@ -949,7 +949,7 @@ def _render_shift_block(
         x_col=x_col,
         y_col="效率",
         hover_cols=hover_cols,
-        top_n=int(top_n),
+        top_n=max(len(sdf), 1),  # 顯示本班別所有人，不截斷 Top N
         target=float(target),
         title=(
             f"低於 {target:.0f} 筆／小時自動標紅；"
@@ -1056,7 +1056,7 @@ def main():
                 result = run_qc_efficiency(
                     uploaded.getvalue(),
                     uploaded.name,
-                    skip_rules,
+                    [],  # 保留所有人的原始紀錄；固定休息另於下方計算
                 )
 
             if not result:
@@ -1154,6 +1154,14 @@ def main():
         return
 
     am_df, pm_df = _split_am_pm(df)
+
+    # ======================
+    # 全人員明細：不限制排行 Top N，包含未對應姓名的工號
+    # ======================
+    card_open("全人員 AM／PM 作業明細")
+    st.caption("保留所有有驗收資料的人員；姓名未建立對照的工號也會列出。")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    card_close()
 
     # ======================
     # 匯出 Excel
