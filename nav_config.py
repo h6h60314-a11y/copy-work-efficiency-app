@@ -77,6 +77,8 @@ PAGE_SECTIONS: tuple[SectionSpec, ...] = (
             PageSpec("pages/41_空儲位盤點.py", "空儲位盤點", "planning-empty-slot-inventory-41", "📍"),
             PageSpec("pages/42_循環盤點.py", "循環盤點", "planning-cycle-count-42", "📋"),
             PageSpec("pages/43_出貨明細.py", "出貨明細", "planning-shipping-detail-43", "🚚"),
+            PageSpec("pages/44_庫存併儲.py","庫存併儲","planning-inventory-merge-44","📦",
+),
         ),
     ),
     SectionSpec(
